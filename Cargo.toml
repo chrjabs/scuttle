@@ -1,9 +1,16 @@
 [package]
 name = "pminimal"
+author = "Christoph Jabs <christoph.jabs@helsinki.fi"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rustsat = { path = "../rustsat", features = ["multiopt"] }
+rustsat = { path = "../rustsat", default-feature = false, features = ["multiopt"] }
+clap = { optional = true, version = "4.0", features = ["derive"] }
+
+[features]
+default = ["cadical", "build-binary"]
+cadical = ["rustsat/cadical"]
+build-binary = ["dep:clap"]

@@ -8,17 +8,14 @@ pub struct Options {
     pub max_sols_per_pp: Option<usize>,
     /// Whether to perform model tightening
     pub model_tightening: bool,
-    /// Whether to log every cost tuple visited during search
-    pub log_search_trace: bool,
 }
 
-impl Options {
+impl Default for Options {
     /// Get the default options
-    pub fn default() -> Self {
+    fn default() -> Self {
         Options {
             max_sols_per_pp: Some(1),
             model_tightening: false,
-            log_search_trace: false,
         }
     }
 }

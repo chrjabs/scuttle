@@ -56,7 +56,7 @@ where
     /// Limits for the current solving run
     lims: Limits,
     /// Loggers to log with
-    loggers: Vec<Box<dyn WriteSolverLog>>,
+    loggers: Vec<Option<Box<dyn WriteSolverLog>>>,
 }
 
 impl<PBE, CE, VM, BCG, O> Solve<VM, BCG> for PMinimal<PBE, CE, VM, BCG, O>
@@ -102,11 +102,29 @@ where
         self.stats.clone()
     }
 
-    fn add_logger<Logger>(&mut self, logger: Logger)
-    where
-        Logger: WriteSolverLog + 'static,
-    {
-        self.loggers.push(Box::new(logger))
+    type LoggerId = usize;
+
+    fn attach_logger(&mut self, boxed_logger: Box<dyn WriteSolverLog>) -> Self::LoggerId {
+        if let Some((idx, opt_logger)) = self
+            .loggers
+            .iter_mut()
+            .enumerate()
+            .skip_while(|(_, opt_logger)| opt_logger.is_some())
+            .next()
+        {
+            *opt_logger = Some(boxed_logger);
+            return idx;
+        }
+        self.loggers.push(Some(boxed_logger));
+        self.loggers.len() - 1
+    }
+
+    fn detach_logger(&mut self, id: Self::LoggerId) -> Option<Box<dyn WriteSolverLog>> {
+        if id >= self.loggers.len() {
+            None
+        } else {
+            self.loggers[id].take()
+        }
     }
 }
 
@@ -500,31 +518,43 @@ where
                 return Err(Termination::CandidatesLimit);
             }
         }
-        self.loggers.iter_mut().for_each(|l| l.log_candidate(costs));
+        self.loggers.iter_mut().for_each(|opt_logger| {
+            if let Some(logger) = opt_logger {
+                logger.log_candidate(costs)
+            }
+        });
         Ok(())
     }
 
     /// Logs an oracle call. Can return a termination if the oracle call limit is reached.
     fn log_oracle_call(&mut self) -> Result<(), Termination> {
-        if let Some(oracle_calls) = &mut self.lims.solutions {
+        if let Some(oracle_calls) = &mut self.lims.oracle_calls {
             *oracle_calls -= 1;
             if *oracle_calls <= 0 {
                 return Err(Termination::OracleCallsLimit);
             }
         }
-        self.loggers.iter_mut().for_each(|l| l.log_oracle_call());
+        self.loggers.iter_mut().for_each(|opt_logger| {
+            if let Some(logger) = opt_logger {
+                logger.log_oracle_call()
+            }
+        });
         Ok(())
     }
 
     /// Logs a solution. Can return a termination if the solution limit is reached.
     fn log_solution(&mut self) -> Result<(), Termination> {
-        if let Some(solutions) = &mut self.lims.solutions {
+        if let Some(solutions) = &mut self.lims.sols {
             *solutions -= 1;
             if *solutions <= 0 {
                 return Err(Termination::SolsLimit);
             }
         }
-        self.loggers.iter_mut().for_each(|l| l.log_solution());
+        self.loggers.iter_mut().for_each(|opt_logger| {
+            if let Some(logger) = opt_logger {
+                logger.log_solution()
+            }
+        });
         Ok(())
     }
 
@@ -536,9 +566,11 @@ where
                 return Err(Termination::PPLimit);
             }
         }
-        self.loggers
-            .iter_mut()
-            .for_each(|l| l.log_pareto_point(pareto_point));
+        self.loggers.iter_mut().for_each(|opt_logger| {
+            if let Some(logger) = opt_logger {
+                logger.log_pareto_point(pareto_point)
+            }
+        });
         Ok(())
     }
 

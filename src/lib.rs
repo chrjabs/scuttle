@@ -33,7 +33,7 @@ mod pminimal;
 pub use pminimal::PMinimal;
 
 /// Main interface for using this multi-objective optimization solver
-trait Solve<VM, BCG>
+pub trait Solve<VM, BCG>
 where
     VM: ManageVars,
     BCG: FnMut(Solution) -> Clause,
@@ -55,10 +55,12 @@ where
     fn pareto_front(&self) -> ParetoFront;
     /// Gets tracked statistics from the solver
     fn stats(&self) -> Stats;
-    /// Adds a logger to the solver
-    fn add_logger<Logger>(&mut self, logger: Logger)
-    where
-        Logger: WriteSolverLog + 'static;
+    /// A type to identify a logger
+    type LoggerId;
+    /// Attaches a logger to the solver
+    fn attach_logger(&mut self, boxed_logger: Box<dyn WriteSolverLog>) -> Self::LoggerId;
+    /// Detaches a logger from the solver
+    fn detach_logger(&mut self, id: Self::LoggerId) -> Option<Box<dyn WriteSolverLog>>;
 }
 
 /// Trait for getting statistics from the solver
@@ -151,7 +153,7 @@ pub struct Limits {
     /// The maximum number of candidates to consider
     pub candidates: Option<usize>,
     /// The maximum number of SAT oracle calls to make
-    pub solutions: Option<usize>,
+    pub oracle_calls: Option<usize>,
 }
 
 impl Limits {
@@ -161,7 +163,7 @@ impl Limits {
             pps: None,
             sols: None,
             candidates: None,
-            solutions: None,
+            oracle_calls: None,
         }
     }
 }
