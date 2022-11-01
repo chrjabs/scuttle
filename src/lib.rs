@@ -16,44 +16,49 @@
 //!   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
 //!   2009.
 
-use rustsat::instances::{ManageVars, MultiOptInstance};
+use std::ops::Not;
+
+use rustsat::{
+    instances::{ManageVars, MultiOptInstance},
+    types::{Clause, Lit, Solution},
+};
 
 mod options;
 pub use options::Options;
 
 pub mod types;
-use types::ParetoFront;
+use types::{ParetoFront, ParetoPoint};
 
 mod pminimal;
 pub use pminimal::PMinimal;
 
 /// Main interface for using this multi-objective optimization solver
-trait Solve<VM>
+trait Solve<VM, BCG>
 where
     VM: ManageVars,
+    BCG: FnMut(Solution) -> Clause,
 {
     /// Initializes a new solver from a multi-objective optimization instance
-    fn init(inst: MultiOptInstance<VM>) -> Self
+    fn init(inst: MultiOptInstance<VM>, block_clause_gen: BCG) -> Self
     where
         Self: Sized,
     {
-        Self::init_with_options(inst, Options::default())
+        Self::init_with_options(inst, Options::default(), block_clause_gen)
     }
     /// Initializes a new solver with given options from a multi-objective
     /// optimization instance
-    fn init_with_options(inst: MultiOptInstance<VM>, opts: Options) -> Self;
-    /// Solves the instance under given limits. Returns why the call was terminated.
-    fn solve(
-        &mut self,
-        max_pps: Option<usize>,
-        max_sols: Option<usize>,
-        max_candidates: Option<usize>,
-        max_oracle_calls: Option<usize>,
-    ) -> Termination;
+    fn init_with_options(inst: MultiOptInstance<VM>, opts: Options, block_clause_gen: BCG) -> Self;
+    /// Solves the instance under given limits. If not fully solved, errors an
+    /// early termination reason.
+    fn solve(&mut self, limits: Limits) -> Result<(), Termination>;
     /// Gets the Pareto front discovered so far
     fn pareto_front(&self) -> ParetoFront;
     /// Gets tracked statistics from the solver
     fn stats(&self) -> Stats;
+    /// Adds a logger to the solver
+    fn add_logger<Logger>(&mut self, logger: Logger)
+    where
+        Logger: WriteSolverLog + 'static;
 }
 
 /// Trait for getting statistics from the solver
@@ -64,18 +69,16 @@ trait ExtendedSolveStats {
     fn encoding_stats(&self) -> Vec<EncodingStats>;
 }
 
-/// Termination reasons for [`Solve::solve`]
+/// Early termination reasons for [`Solve::solve`]
 pub enum Termination {
     /// Terminated because of maximum number of Pareto points reached
-    PPBound,
+    PPLimit,
     /// Terminated because of maximum number of solutions reached
-    SolsBound,
+    SolsLimit,
     /// Terminated because of maximum number of candidates reached
-    CandidatesBound,
+    CandidatesLimit,
     /// Terminated because of maximum number of oracle calls reached
-    OracleCallsBound,
-    /// Terminated because instance fully solved
-    Solved,
+    OracleCallsLimit,
 }
 
 /// Statistics of the solver
@@ -137,4 +140,45 @@ pub struct EncodingStats {
     pub offset: isize,
     /// The unit weight, if the objective is unweighted
     pub unit_weight: Option<usize>,
+}
+
+/// Limits for a call to [`Solver::solve`]
+pub struct Limits {
+    /// The maximum number of Pareto points to enumerate
+    pub pps: Option<usize>,
+    /// The maximum number of solutions to enumerate
+    pub sols: Option<usize>,
+    /// The maximum number of candidates to consider
+    pub candidates: Option<usize>,
+    /// The maximum number of SAT oracle calls to make
+    pub solutions: Option<usize>,
+}
+
+impl Limits {
+    /// No limits
+    pub fn none() -> Limits {
+        Limits {
+            pps: None,
+            sols: None,
+            candidates: None,
+            solutions: None,
+        }
+    }
+}
+
+/// A logger to attach to a solver
+pub trait WriteSolverLog {
+    /// Adds a candidate cost point to the log
+    fn log_candidate(&mut self, costs: &Vec<usize>);
+    /// Adds an oracle call to the log
+    fn log_oracle_call(&mut self);
+    /// Adds a solution to the log
+    fn log_solution(&mut self);
+    /// Adds a Pareto point to the log
+    fn log_pareto_point(&mut self, pareto_point: &ParetoPoint);
+}
+
+/// The default blocking clause generator
+fn default_blocking_clause(sol: Solution) -> Clause {
+    Clause::from(sol.into_iter().map(Lit::not))
 }

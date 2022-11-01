@@ -22,7 +22,8 @@ where
         ParetoFront { pps: vec![] }
     }
 
-    /// Adds a Pareto point to the Pareto front
+    /// Adds a Pareto point to the Pareto front. Returns a mutable reference to
+    /// the Pareto point in the Pareto front.
     pub(crate) fn add_pp(&mut self, pp: ParetoPoint<S>) {
         self.pps.push(pp)
     }
@@ -103,6 +104,11 @@ where
         self.sols.push(sol)
     }
 
+    /// Gets the number of solutions in the Pareto point
+    pub fn n_sols(&self) -> usize {
+        self.sols.len()
+    }
+
     /// Converts all solutions to another type
     pub fn convert_solutions<C, S2>(self, conv: &mut C) -> ParetoPoint<S2>
     where
@@ -118,11 +124,6 @@ where
     /// Gets the costs of the Pareto point
     pub fn costs(&self) -> &Vec<isize> {
         &self.costs
-    }
-
-    /// Gets the number of solutions
-    pub fn n_sols(&self) -> usize {
-        self.sols.len()
     }
 }
 
