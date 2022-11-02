@@ -16,21 +16,22 @@
 //!   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
 //!   2009.
 
-use std::ops::Not;
-
 use rustsat::{
     instances::{ManageVars, MultiOptInstance},
-    types::{Clause, Lit, Solution},
+    types::{Clause, Solution},
 };
 
 mod options;
-pub use options::Options;
+pub use options::{Limits, Options};
 
 pub mod types;
 use types::{ParetoFront, ParetoPoint};
 
 mod pminimal;
-pub use pminimal::PMinimal;
+pub use crate::pminimal::PMinimal;
+
+#[cfg(feature = "build-binary")]
+pub mod cli;
 
 /// Main interface for using this multi-objective optimization solver
 pub trait Solve<VM, BCG>
@@ -64,7 +65,7 @@ where
 }
 
 /// Trait for getting statistics from the solver
-trait ExtendedSolveStats {
+pub trait ExtendedSolveStats {
     /// Gets statistics from the internal oracle
     fn oracle_stats(&self) -> OracleStats;
     /// Gets statistics from the objective encodings
@@ -144,30 +145,6 @@ pub struct EncodingStats {
     pub unit_weight: Option<usize>,
 }
 
-/// Limits for a call to [`Solver::solve`]
-pub struct Limits {
-    /// The maximum number of Pareto points to enumerate
-    pub pps: Option<usize>,
-    /// The maximum number of solutions to enumerate
-    pub sols: Option<usize>,
-    /// The maximum number of candidates to consider
-    pub candidates: Option<usize>,
-    /// The maximum number of SAT oracle calls to make
-    pub oracle_calls: Option<usize>,
-}
-
-impl Limits {
-    /// No limits
-    pub fn none() -> Limits {
-        Limits {
-            pps: None,
-            sols: None,
-            candidates: None,
-            oracle_calls: None,
-        }
-    }
-}
-
 /// A logger to attach to a solver
 pub trait WriteSolverLog {
     /// Adds a candidate cost point to the log
@@ -178,9 +155,4 @@ pub trait WriteSolverLog {
     fn log_solution(&mut self);
     /// Adds a Pareto point to the log
     fn log_pareto_point(&mut self, pareto_point: &ParetoPoint);
-}
-
-/// The default blocking clause generator
-fn default_blocking_clause(sol: Solution) -> Clause {
-    Clause::from(sol.into_iter().map(Lit::not))
 }

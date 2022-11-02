@@ -512,65 +512,77 @@ where
     /// Logs a cost point candidate. Can error a termination if the candidates limit is reached.
     fn log_candidate(&mut self, costs: &Vec<usize>) -> Result<(), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
+        self.stats.n_candidates += 1;
+        // Dispatch to loggers
+        self.loggers.iter_mut().for_each(|opt_logger| {
+            if let Some(logger) = opt_logger {
+                logger.log_candidate(costs)
+            }
+        });
+        // Update limit and check termination
         if let Some(candidates) = &mut self.lims.candidates {
             *candidates -= 1;
             if *candidates <= 0 {
                 return Err(Termination::CandidatesLimit);
             }
         }
-        self.loggers.iter_mut().for_each(|opt_logger| {
-            if let Some(logger) = opt_logger {
-                logger.log_candidate(costs)
-            }
-        });
         Ok(())
     }
 
     /// Logs an oracle call. Can return a termination if the oracle call limit is reached.
     fn log_oracle_call(&mut self) -> Result<(), Termination> {
+        self.stats.n_oracle_calls += 1;
+        // Dispatch to loggers
+        self.loggers.iter_mut().for_each(|opt_logger| {
+            if let Some(logger) = opt_logger {
+                logger.log_oracle_call()
+            }
+        });
+        // Update limit and check termination
         if let Some(oracle_calls) = &mut self.lims.oracle_calls {
             *oracle_calls -= 1;
             if *oracle_calls <= 0 {
                 return Err(Termination::OracleCallsLimit);
             }
         }
-        self.loggers.iter_mut().for_each(|opt_logger| {
-            if let Some(logger) = opt_logger {
-                logger.log_oracle_call()
-            }
-        });
         Ok(())
     }
 
     /// Logs a solution. Can return a termination if the solution limit is reached.
     fn log_solution(&mut self) -> Result<(), Termination> {
+        self.stats.n_solutions += 1;
+        // Dispatch to loggers
+        self.loggers.iter_mut().for_each(|opt_logger| {
+            if let Some(logger) = opt_logger {
+                logger.log_solution()
+            }
+        });
+        // Update limit and check termination
         if let Some(solutions) = &mut self.lims.sols {
             *solutions -= 1;
             if *solutions <= 0 {
                 return Err(Termination::SolsLimit);
             }
         }
-        self.loggers.iter_mut().for_each(|opt_logger| {
-            if let Some(logger) = opt_logger {
-                logger.log_solution()
-            }
-        });
         Ok(())
     }
 
     /// Logs a Pareto point. Can return a termination if the Pareto point limit is reached.
     fn log_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), Termination> {
+        self.stats.n_pareto_points += 1;
+        // Dispatch to loggers
+        self.loggers.iter_mut().for_each(|opt_logger| {
+            if let Some(logger) = opt_logger {
+                logger.log_pareto_point(pareto_point)
+            }
+        });
+        // Update limit and check termination
         if let Some(pps) = &mut self.lims.pps {
             *pps -= 1;
             if *pps <= 0 {
                 return Err(Termination::PPLimit);
             }
         }
-        self.loggers.iter_mut().for_each(|opt_logger| {
-            if let Some(logger) = opt_logger {
-                logger.log_pareto_point(pareto_point)
-            }
-        });
         Ok(())
     }
 
