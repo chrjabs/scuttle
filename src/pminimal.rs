@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits, Options, OracleStats,
-    ParetoFront, Solve, Stats, Termination, WriteSolverLog,
+    types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits, LoggerError, Options,
+    OracleStats, ParetoFront, Solve, Stats, Termination, WriteSolverLog,
 };
 use rustsat::{
     encodings,
@@ -234,12 +234,14 @@ where
             // Minimize solution
             let (costs, solution) = self.get_solution_and_internal_costs();
             self.log_candidate(&costs)?;
-            let (costs, solution, block_lit) = self.p_minimization(costs, solution)?;
+            let (costs, solution, block_switch) = self.p_minimization(costs, solution)?;
 
             self.enumerate_at_pareto_point(costs, solution)?;
 
-            // Block last Pareto point
-            self.oracle.add_unit(block_lit).unwrap();
+            // Block last Pareto point, if temporarily blocked
+            if let Some(block_lit) = block_switch {
+                self.oracle.add_unit(block_lit).unwrap();
+            }
         }
     }
 
@@ -248,7 +250,7 @@ where
         &mut self,
         mut costs: Vec<usize>,
         mut solution: Solution,
-    ) -> Result<(Vec<usize>, Solution, Lit), Termination> {
+    ) -> Result<(Vec<usize>, Solution, Option<Lit>), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         let mut block_switch = None;
         loop {
@@ -276,7 +278,7 @@ where
             self.log_oracle_call()?;
             if res == SolverResult::UNSAT {
                 // Termination criteria, return last solution and costs
-                return Ok((costs, solution, block_switch.unwrap()));
+                return Ok((costs, solution, block_switch));
             }
 
             (costs, solution) = self.get_solution_and_internal_costs();
@@ -409,15 +411,11 @@ where
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         let mut assumps = vec![];
         costs.iter().enumerate().for_each(|(idx, &cst)| {
-            // Don't block
-            if cst <= 0 {
-                return;
-            }
             match &mut self.obj_encs[idx] {
                 ObjEncoding::Weighted { encoding, .. } => {
                     // Encode and add to solver
                     self.oracle
-                        .add_cnf(encoding.encode_ub(cst, cst, &mut self.var_manager).unwrap())
+                        .add_cnf(encoding.encode_ub_change(cst, cst, &mut self.var_manager).unwrap())
                         .unwrap();
                     // Extend assumptions
                     assumps.extend(encoding.enforce_ub(cst).unwrap());
@@ -425,11 +423,7 @@ where
                 ObjEncoding::Unweighted { encoding, .. } => {
                     // Encode and add to solver
                     self.oracle
-                        .add_cnf(
-                            encoding
-                                .encode_ub(cst - 1, cst - 1, &mut self.var_manager)
-                                .unwrap(),
-                        )
+                        .add_cnf(encoding.encode_ub_change(cst, cst, &mut self.var_manager).unwrap())
                         .unwrap();
                     // Extend assumptions
                     assumps.extend(encoding.enforce_ub(cst).unwrap());
@@ -466,7 +460,7 @@ where
                     self.oracle
                         .add_cnf(
                             encoding
-                                .encode_ub(cst - 1, cst - 1, &mut self.var_manager)
+                                .encode_ub_change(cst - 1, cst - 1, &mut self.var_manager)
                                 .unwrap(),
                         )
                         .unwrap();
@@ -487,7 +481,7 @@ where
                     self.oracle
                         .add_cnf(
                             encoding
-                                .encode_ub(cst - 1, cst - 1, &mut self.var_manager)
+                                .encode_ub_change(cst - 1, cst - 1, &mut self.var_manager)
                                 .unwrap(),
                         )
                         .unwrap();
@@ -505,7 +499,6 @@ where
                 }
             }
         });
-        debug_assert_eq!(clause.len(), self.stats.n_objs);
         clause
     }
 
@@ -514,11 +507,22 @@ where
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.stats.n_candidates += 1;
         // Dispatch to loggers
-        self.loggers.iter_mut().for_each(|opt_logger| {
-            if let Some(logger) = opt_logger {
-                logger.log_candidate(costs)
-            }
-        });
+        if let Err(log_err) =
+            self.loggers
+                .iter_mut()
+                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
+                    if res.is_ok() {
+                        if let Some(logger) = opt_logger {
+                            logger.log_candidate(costs)?
+                        }
+                        Ok(())
+                    } else {
+                        res
+                    }
+                })
+        {
+            return Err(Termination::LoggerError(log_err));
+        }
         // Update limit and check termination
         if let Some(candidates) = &mut self.lims.candidates {
             *candidates -= 1;
@@ -533,11 +537,22 @@ where
     fn log_oracle_call(&mut self) -> Result<(), Termination> {
         self.stats.n_oracle_calls += 1;
         // Dispatch to loggers
-        self.loggers.iter_mut().for_each(|opt_logger| {
-            if let Some(logger) = opt_logger {
-                logger.log_oracle_call()
-            }
-        });
+        if let Err(log_err) =
+            self.loggers
+                .iter_mut()
+                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
+                    if res.is_ok() {
+                        if let Some(logger) = opt_logger {
+                            logger.log_oracle_call()?
+                        }
+                        Ok(())
+                    } else {
+                        res
+                    }
+                })
+        {
+            return Err(Termination::LoggerError(log_err));
+        }
         // Update limit and check termination
         if let Some(oracle_calls) = &mut self.lims.oracle_calls {
             *oracle_calls -= 1;
@@ -552,11 +567,22 @@ where
     fn log_solution(&mut self) -> Result<(), Termination> {
         self.stats.n_solutions += 1;
         // Dispatch to loggers
-        self.loggers.iter_mut().for_each(|opt_logger| {
-            if let Some(logger) = opt_logger {
-                logger.log_solution()
-            }
-        });
+        if let Err(log_err) =
+            self.loggers
+                .iter_mut()
+                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
+                    if res.is_ok() {
+                        if let Some(logger) = opt_logger {
+                            logger.log_solution()?
+                        }
+                        Ok(())
+                    } else {
+                        res
+                    }
+                })
+        {
+            return Err(Termination::LoggerError(log_err));
+        }
         // Update limit and check termination
         if let Some(solutions) = &mut self.lims.sols {
             *solutions -= 1;
@@ -571,11 +597,22 @@ where
     fn log_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), Termination> {
         self.stats.n_pareto_points += 1;
         // Dispatch to loggers
-        self.loggers.iter_mut().for_each(|opt_logger| {
-            if let Some(logger) = opt_logger {
-                logger.log_pareto_point(pareto_point)
-            }
-        });
+        if let Err(log_err) =
+            self.loggers
+                .iter_mut()
+                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
+                    if res.is_ok() {
+                        if let Some(logger) = opt_logger {
+                            logger.log_pareto_point(pareto_point)?
+                        }
+                        Ok(())
+                    } else {
+                        res
+                    }
+                })
+        {
+            return Err(Termination::LoggerError(log_err));
+        }
         // Update limit and check termination
         if let Some(pps) = &mut self.lims.pps {
             *pps -= 1;

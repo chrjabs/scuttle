@@ -1,8 +1,9 @@
 #![cfg(feature = "build-binary")]
 
-use std::{ffi::OsString, fmt, ops::Not, path::Path};
+use std::{ffi::OsString, fmt, path::Path};
 
 use pminimal::{
+    self,
     cli::{Cli, FileFormat},
     ExtendedSolveStats, PMinimal, Solve,
 };
@@ -10,7 +11,6 @@ use rustsat::{
     encodings::{card::Totalizer, pb::GeneralizedTotalizer},
     instances::{MultiOptInstance, ParsingError},
     solvers,
-    types::{Clause, Lit, Solution},
 };
 
 #[cfg(feature = "cadical")]
@@ -19,41 +19,52 @@ type Oracle = solvers::CaDiCaL<'static>;
 compile_error!("At least one of the solver features needs to be turned on");
 
 fn main() -> Result<(), MainError> {
-    let cli = Cli::init();
+    let cli = Cli::init(MainError::IO);
+
+    cli.print_header()?;
+    cli.print_solver_config()?;
+
+    cli.info(&format!("solving instance {}", cli.inst_path))?;
 
     let inst = parse_instance(cli.inst_path.clone(), cli.file_format.clone())?;
 
     let mut solver: PMinimal<GeneralizedTotalizer, Totalizer, _, _, Oracle> =
-        PMinimal::init_with_options(inst, cli.options.clone(), default_blocking_clause);
+        PMinimal::init_with_options(inst, cli.options.clone(), pminimal::default_blocking_clause);
 
-    let logger_id = solver.attach_logger(Box::new(cli.new_cli_logger()));
+    solver.attach_logger(Box::new(cli.new_cli_logger()));
 
     if let Err(term) = solver.solve(cli.limits.clone()) {
         match term {
             pminimal::Termination::PPLimit => {
-                println!("Solver terminated early because of Pareto point limit")
+                cli.info("Solver terminated early because of Pareto point limit")
             }
             pminimal::Termination::SolsLimit => {
-                println!("Solver terminated early because of solution limit")
+                cli.info("Solver terminated early because of solution limit")
             }
             pminimal::Termination::CandidatesLimit => {
-                println!("Solver terminated early because of candidate limit")
+                cli.info("Solver terminated early because of candidate limit")
             }
             pminimal::Termination::OracleCallsLimit => {
-                println!("Solver terminated early because of oracle call limit")
+                cli.info("Solver terminated early because of oracle call limit")
             }
-        }
+            pminimal::Termination::LoggerError(log_error) => cli.error(&format!(
+                "Solver terminated because logger failed: {}",
+                log_error
+            )),
+        }?
     };
+    
+    cli.info("finished solving the instance")?;
 
     let pareto_front = solver.pareto_front();
-    cli.print_pareto_front(pareto_front);
+    cli.print_pareto_front(pareto_front)?;
 
-    cli.print_stats(solver.stats());
+    cli.print_stats(solver.stats())?;
     #[cfg(feature = "cadical")]
     {
         // Get extended stats for solver that supports stats
-        cli.print_oracle_stats(solver.oracle_stats());
-        cli.print_encoding_stats(solver.encoding_stats());
+        cli.print_oracle_stats(solver.oracle_stats())?;
+        cli.print_encoding_stats(solver.encoding_stats())?;
     }
 
     Ok(())
@@ -61,7 +72,7 @@ fn main() -> Result<(), MainError> {
 
 macro_rules! is_one_of {
     ($a:expr, $($b:expr),*) => {
-        $( $a == $b || )* true
+        $( $a == $b || )* false
     }
 }
 
@@ -83,7 +94,7 @@ fn parse_instance(
                 } else {
                     ext
                 };
-                if is_one_of!(ext, "mcnf", "wcnf", "cnf", "dimacs") {
+                if is_one_of!(ext, "mcnf", "bicnf", "wcnf", "cnf", "dimacs") {
                     MainError::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path))
                 } else if is_one_of!(ext, "opb") {
                     MainError::wrap_parser(MultiOptInstance::from_opb_path(inst_path))
@@ -103,6 +114,7 @@ enum MainError {
     UnknownFileExtension(OsString),
     NoFileExtension,
     Parsing(ParsingError),
+    IO(std::io::Error),
 }
 
 impl MainError {
@@ -127,11 +139,7 @@ impl fmt::Debug for MainError {
                 "To infer the file format, the file needs to have a file extension"
             ),
             Self::Parsing(err) => write!(f, "Error while parsing the input file: {}", err),
+            Self::IO(err) => write!(f, "IO Error: {}", err),
         }
     }
-}
-
-/// The default blocking clause generator
-fn default_blocking_clause(sol: Solution) -> Clause {
-    Clause::from(sol.into_iter().map(Lit::not))
 }

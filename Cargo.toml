@@ -1,6 +1,6 @@
 [package]
 name = "pminimal"
-author = "Christoph Jabs <christoph.jabs@helsinki.fi"
+authors = ["Christoph Jabs <christoph.jabs@helsinki.fi>"]
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,8 @@ edition = "2021"
 
 [dependencies]
 rustsat = { path = "../rustsat", default-feature = false, features = ["multiopt"] }
-clap = { optional = true, version = "4.0", features = ["derive"] }
+cpu-time = "1.0"
+clap = { optional = true, version = "4.0", features = ["derive", "cargo"] }
 concolor-clap = { optional = true, version = "0.0.12" }
 termcolor = { optional = true, version = "1.1" }
 atty = { optional = true, version = "0.2" }
@@ -17,3 +18,6 @@ atty = { optional = true, version = "0.2" }
 default = ["cadical", "build-binary"]
 cadical = ["rustsat/cadical"]
 build-binary = ["dep:clap", "dep:concolor-clap", "dep:termcolor", "dep:atty", "rustsat/compression"]
+
+[profile.release]
+lto = true

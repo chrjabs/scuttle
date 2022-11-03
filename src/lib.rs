@@ -16,9 +16,11 @@
 //!   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
 //!   2009.
 
+use std::{fmt, ops::Not};
+
 use rustsat::{
     instances::{ManageVars, MultiOptInstance},
-    types::{Clause, Solution},
+    types::{Clause, Lit, Solution},
 };
 
 mod options;
@@ -73,6 +75,7 @@ pub trait ExtendedSolveStats {
 }
 
 /// Early termination reasons for [`Solve::solve`]
+#[derive(Debug)]
 pub enum Termination {
     /// Terminated because of maximum number of Pareto points reached
     PPLimit,
@@ -82,6 +85,8 @@ pub enum Termination {
     CandidatesLimit,
     /// Terminated because of maximum number of oracle calls reached
     OracleCallsLimit,
+    /// Termination because an attached logger failed
+    LoggerError(LoggerError),
 }
 
 /// Statistics of the solver
@@ -148,11 +153,41 @@ pub struct EncodingStats {
 /// A logger to attach to a solver
 pub trait WriteSolverLog {
     /// Adds a candidate cost point to the log
-    fn log_candidate(&mut self, costs: &Vec<usize>);
+    fn log_candidate(&mut self, costs: &Vec<usize>) -> Result<(), LoggerError>;
     /// Adds an oracle call to the log
-    fn log_oracle_call(&mut self);
+    fn log_oracle_call(&mut self) -> Result<(), LoggerError>;
     /// Adds a solution to the log
-    fn log_solution(&mut self);
+    fn log_solution(&mut self) -> Result<(), LoggerError>;
     /// Adds a Pareto point to the log
-    fn log_pareto_point(&mut self, pareto_point: &ParetoPoint);
+    fn log_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), LoggerError>;
+}
+
+/// Error type for loggers
+pub struct LoggerError {
+    ierror: Box<dyn fmt::Display>,
+}
+
+impl LoggerError {
+    fn new<IE: fmt::Display + 'static>(ierror: IE) -> Self {
+        LoggerError {
+            ierror: Box::new(ierror),
+        }
+    }
+}
+
+impl fmt::Display for LoggerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LoggerError: {}", self.ierror)
+    }
+}
+
+impl fmt::Debug for LoggerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LoggerError: {}", self.ierror)
+    }
+}
+
+/// The default blocking clause generator
+pub fn default_blocking_clause(sol: Solution) -> Clause {
+    Clause::from(sol.into_iter().map(Lit::not))
 }
