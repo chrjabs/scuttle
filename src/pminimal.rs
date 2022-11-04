@@ -22,11 +22,11 @@ use rustsat::{
 /// variable manager to use and the SAT backend.
 pub struct PMinimal<PBE, CE, VM, BCG, O>
 where
-    for<'a> PBE: pb::IncUBPB<'a>,
-    for<'a> CE: card::IncUBCard<'a>,
+    PBE: pb::IncUBPB,
+    CE: card::IncUBCard,
     VM: ManageVars,
     BCG: FnMut(Solution) -> Clause,
-    O: IncrementalSolve,
+    O: IncrementalSolve + Default,
 {
     /// The SAT solver backend
     oracle: O,
@@ -61,17 +61,17 @@ where
 
 impl<PBE, CE, VM, BCG, O> Solve<VM, BCG> for PMinimal<PBE, CE, VM, BCG, O>
 where
-    for<'a> PBE: pb::IncUBPB<'a>,
-    for<'a> CE: card::IncUBCard<'a>,
+    PBE: pb::IncUBPB,
+    CE: card::IncUBCard,
     VM: ManageVars,
     BCG: FnMut(Solution) -> Clause,
-    O: IncrementalSolve,
+    O: IncrementalSolve + Default,
 {
     fn init_with_options(inst: MultiOptInstance<VM>, opts: Options, block_clause_gen: BCG) -> Self {
         let (constr, objs) = inst.decompose();
         let (cnf, var_manager) = constr.as_cnf();
         let mut solver = PMinimal {
-            oracle: O::new(),
+            oracle: O::default(),
             var_manager: var_manager,
             obj_encs: vec![],
             obj_clauses: vec![],
@@ -130,11 +130,11 @@ where
 
 impl<PBE, CE, VM, BCG, O> ExtendedSolveStats for PMinimal<PBE, CE, VM, BCG, O>
 where
-    for<'a> PBE: pb::IncUBPB<'a> + encodings::EncodeStats,
-    for<'a> CE: card::IncUBCard<'a> + encodings::EncodeStats,
+    PBE: pb::IncUBPB + encodings::EncodeStats,
+    CE: card::IncUBCard + encodings::EncodeStats,
     VM: ManageVars,
     BCG: FnMut(Solution) -> Clause,
-    O: IncrementalSolve + SolveStats,
+    O: IncrementalSolve + SolveStats + Default,
 {
     fn oracle_stats(&self) -> OracleStats {
         OracleStats {
@@ -176,11 +176,11 @@ where
 
 impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
 where
-    for<'a> PBE: pb::IncUBPB<'a>,
-    for<'a> CE: card::IncUBCard<'a>,
+    PBE: pb::IncUBPB,
+    CE: card::IncUBCard,
     VM: ManageVars,
     BCG: FnMut(Solution) -> Clause,
-    O: IncrementalSolve,
+    O: IncrementalSolve + Default,
 {
     /// Initializes the solver
     fn init(&mut self, mut cnf: CNF, objs: Vec<Objective>) {
@@ -415,7 +415,11 @@ where
                 ObjEncoding::Weighted { encoding, .. } => {
                     // Encode and add to solver
                     self.oracle
-                        .add_cnf(encoding.encode_ub_change(cst, cst, &mut self.var_manager).unwrap())
+                        .add_cnf(
+                            encoding
+                                .encode_ub_change(cst, cst, &mut self.var_manager)
+                                .unwrap(),
+                        )
                         .unwrap();
                     // Extend assumptions
                     assumps.extend(encoding.enforce_ub(cst).unwrap());
@@ -423,7 +427,11 @@ where
                 ObjEncoding::Unweighted { encoding, .. } => {
                     // Encode and add to solver
                     self.oracle
-                        .add_cnf(encoding.encode_ub_change(cst, cst, &mut self.var_manager).unwrap())
+                        .add_cnf(
+                            encoding
+                                .encode_ub_change(cst, cst, &mut self.var_manager)
+                                .unwrap(),
+                        )
                         .unwrap();
                     // Extend assumptions
                     assumps.extend(encoding.enforce_ub(cst).unwrap());
@@ -751,8 +759,8 @@ struct ObjLitData {
 /// Internal data associated with an objective
 enum ObjEncoding<PBE, CE>
 where
-    for<'a> PBE: pb::IncUBPB<'a>,
-    for<'a> CE: card::IncUBCard<'a>,
+    PBE: pb::IncUBPB,
+    CE: card::IncUBCard,
 {
     Weighted {
         offset: isize,
@@ -767,8 +775,8 @@ where
 
 impl<PBE, CE> ObjEncoding<PBE, CE>
 where
-    for<'a> PBE: pb::IncUBPB<'a>,
-    for<'a> CE: card::IncUBCard<'a>,
+    PBE: pb::IncUBPB,
+    CE: card::IncUBCard,
 {
     /// Initializes a new objective encoding for a weighted objective
     fn new_weighted(lits: HashMap<Lit, usize>, offset: isize) -> Self {
