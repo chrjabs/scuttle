@@ -27,6 +27,9 @@ struct CliArgs {
     /// Whether to perform model tightening
     #[arg(long)]
     model_tightening: bool,
+    /// Reserve variables for the encodings in advance
+    #[arg(long)]
+    reserve_encoding_vars: bool,
     /// Limit the number of Pareto points to enumerate (0 is no limit)
     #[arg(long, default_value_t = 0)]
     pp_limit: usize,
@@ -129,6 +132,7 @@ where
             options: Options {
                 max_sols_per_pp: none_if_zero!(args.max_sols_per_pp),
                 model_tightening: args.model_tightening,
+                reserve_enc_vars: args.reserve_encoding_vars,
             },
             limits: Limits {
                 pps: none_if_zero!(args.pp_limit),
@@ -326,16 +330,13 @@ where
         buffer.set_color(ColorSpec::new().set_bold(true))?;
         writeln!(&mut buffer, ": ")?;
         buffer.reset()?;
-        pareto_front
-            .into_iter()
-            .fold(Ok(()), |res: Result<(), IOError>, pp| {
-                if res.is_ok() {
-                    self.print_pareto_point(&mut buffer, pp)?;
-                    Ok(())
-                } else {
-                    res
-                }
-            })?;
+        pareto_front.into_iter().fold(Ok(()), |res, pp| {
+            if res.is_ok() {
+                self.print_pareto_point(&mut buffer, pp)
+            } else {
+                res
+            }
+        })?;
         Self::end_block(&mut buffer)?;
         self.stdout.print(&buffer)?;
         Ok(())
@@ -406,17 +407,16 @@ where
             buffer.set_color(ColorSpec::new().set_bold(true))?;
             writeln!(&mut buffer, ": ")?;
             buffer.reset()?;
-            stats.into_iter().enumerate().fold(
-                Ok(()),
-                |res: Result<(), IOError>, (idx, stats)| {
+            stats
+                .into_iter()
+                .enumerate()
+                .fold(Ok(()), |res, (idx, stats)| {
                     if res.is_ok() {
-                        Self::print_enc_stats(&mut buffer, idx, stats)?;
-                        Ok(())
+                        Self::print_enc_stats(&mut buffer, idx, stats)
                     } else {
                         res
                     }
-                },
-            )?;
+                })?;
             Self::end_block(&mut buffer)?;
             self.stdout.print(&buffer)?;
         }
@@ -439,16 +439,13 @@ where
             pareto_point.n_sols()
         )?;
         if self.print_solutions {
-            pareto_point
-                .into_iter()
-                .fold(Ok(()), |res: Result<(), IOError>, sol| {
-                    if res.is_ok() {
-                        write!(buffer, "s {}", sol)?;
-                        Ok(())
-                    } else {
-                        res
-                    }
-                })?
+            pareto_point.into_iter().fold(Ok(()), |res, sol| {
+                if res.is_ok() {
+                    write!(buffer, "s {}", sol)
+                } else {
+                    res
+                }
+            })?
         }
         Self::end_block(buffer)?;
         Ok(())

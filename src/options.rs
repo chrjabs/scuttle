@@ -9,6 +9,8 @@ pub struct Options {
     pub max_sols_per_pp: Option<usize>,
     /// Whether to perform model tightening
     pub model_tightening: bool,
+    /// Reserve encoding variables in advance
+    pub reserve_enc_vars: bool,
 }
 
 impl Default for Options {
@@ -17,6 +19,7 @@ impl Default for Options {
         Options {
             max_sols_per_pp: Some(1),
             model_tightening: false,
+            reserve_enc_vars: false,
         }
     }
 }

@@ -1,5 +1,3 @@
-//! # The $P$-Minimal Algorithm for Multi-Objective Optimization
-//!
 //! This the main module of the solver containing the implementation of the algorithm.
 
 use std::collections::HashMap;
@@ -673,7 +671,11 @@ where
                 })
                 .collect();
             // Initialize encoder for objective
-            self.obj_encs.push(ObjEncoding::new_weighted(lits, offset));
+            self.obj_encs.push(ObjEncoding::new_weighted(
+                lits,
+                offset,
+                self.opts.reserve_enc_vars,
+            ));
         } else {
             // Add unweighted objective
             let (soft_cl, unit_weight, offset) = obj.as_unweighted_soft_cls();
@@ -712,8 +714,12 @@ where
                 })
                 .collect();
             // Initialize encoder for objective
-            self.obj_encs
-                .push(ObjEncoding::new_unweighted(lits, offset, unit_weight));
+            self.obj_encs.push(ObjEncoding::new_unweighted(
+                lits,
+                offset,
+                unit_weight,
+                self.opts.reserve_enc_vars,
+            ));
         }
         cnf
     }
@@ -779,19 +785,27 @@ where
     CE: card::IncUBCard,
 {
     /// Initializes a new objective encoding for a weighted objective
-    fn new_weighted(lits: HashMap<Lit, usize>, offset: isize) -> Self {
+    fn new_weighted(lits: HashMap<Lit, usize>, offset: isize, reserve: bool) -> Self {
         ObjEncoding::Weighted {
             offset,
-            encoding: PBE::new_from_lits(lits.into_iter()),
+            encoding: if reserve {
+                PBE::new_reserving_from_lits(lits.into_iter())
+            } else {
+                PBE::new_from_lits(lits.into_iter())
+            },
         }
     }
 
     /// Initializes a new objective encoding for a weighted objective
-    fn new_unweighted(lits: Vec<Lit>, offset: isize, unit_weight: usize) -> Self {
+    fn new_unweighted(lits: Vec<Lit>, offset: isize, unit_weight: usize, reserve: bool) -> Self {
         ObjEncoding::Unweighted {
             offset,
             unit_weight,
-            encoding: CE::new_from_lits(lits.into_iter()),
+            encoding: if reserve {
+                CE::new_reserving_from_lits(lits.into_iter())
+            } else {
+                CE::new_from_lits(lits.into_iter())
+            },
         }
     }
 }
