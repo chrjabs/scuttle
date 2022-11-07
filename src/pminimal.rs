@@ -3,14 +3,14 @@
 use std::collections::HashMap;
 
 use crate::{
-    types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits, LoggerError, Options,
-    OracleStats, ParetoFront, Solve, Stats, Termination, WriteSolverLog,
+    default_blocking_clause, types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits,
+    LoggerError, Options, OracleStats, ParetoFront, Solve, Stats, Termination, WriteSolverLog,
 };
 use rustsat::{
     encodings,
     encodings::{card, pb},
     instances::{ManageVars, MultiOptInstance, Objective, CNF},
-    solvers::{IncrementalSolve, SolveStats, SolverResult},
+    solvers::{DefIncSolver, IncrementalSolve, SolveStats, SolverResult},
     types::{Clause, Lit, Solution, TernaryVal, Var},
     var,
 };
@@ -20,8 +20,8 @@ use rustsat::{
 /// variable manager to use and the SAT backend.
 pub struct PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUBPB,
-    CE: card::IncUBCard,
+    PBE: pb::IncUB,
+    CE: card::IncUB,
     VM: ManageVars,
     BCG: FnMut(Solution) -> Clause,
     O: IncrementalSolve + Default,
@@ -57,10 +57,22 @@ where
     loggers: Vec<Option<Box<dyn WriteSolverLog>>>,
 }
 
+impl<'a, PBE, CE, VM> PMinimal<PBE, CE, VM, fn(Solution) -> Clause, DefIncSolver<'a>>
+where
+    PBE: pb::IncUB,
+    CE: card::IncUB,
+    VM: ManageVars,
+{
+    /// Initializes a default solver
+    pub fn default_init(inst: MultiOptInstance<VM>) -> Self {
+        Self::init_with_options(inst, Options::default(), default_blocking_clause)
+    }
+}
+
 impl<PBE, CE, VM, BCG, O> Solve<VM, BCG> for PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUBPB,
-    CE: card::IncUBCard,
+    PBE: pb::IncUB,
+    CE: card::IncUB,
     VM: ManageVars,
     BCG: FnMut(Solution) -> Clause,
     O: IncrementalSolve + Default,
@@ -79,7 +91,7 @@ where
             block_clause_gen,
             pareto_front: ParetoFront::new(),
             opts,
-            stats: Stats::init(),
+            stats: Stats::default(),
             lims: Limits::none(),
             loggers: vec![],
         };
@@ -128,8 +140,8 @@ where
 
 impl<PBE, CE, VM, BCG, O> ExtendedSolveStats for PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUBPB + encodings::EncodeStats,
-    CE: card::IncUBCard + encodings::EncodeStats,
+    PBE: pb::IncUB + encodings::EncodeStats,
+    CE: card::IncUB + encodings::EncodeStats,
     VM: ManageVars,
     BCG: FnMut(Solution) -> Clause,
     O: IncrementalSolve + SolveStats + Default,
@@ -174,8 +186,8 @@ where
 
 impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUBPB,
-    CE: card::IncUBCard,
+    PBE: pb::IncUB,
+    CE: card::IncUB,
     VM: ManageVars,
     BCG: FnMut(Solution) -> Clause,
     O: IncrementalSolve + Default,
@@ -328,6 +340,7 @@ where
             self.log_oracle_call()?;
             if res == SolverResult::UNSAT {
                 // All solutions enumerated
+                self.pareto_front.add_pp(pareto_point);
                 return Ok(());
             }
             solution = self.oracle.solution(self.max_orig_var).unwrap();
@@ -675,6 +688,7 @@ where
                 lits,
                 offset,
                 self.opts.reserve_enc_vars,
+                &mut self.var_manager,
             ));
         } else {
             // Add unweighted objective
@@ -719,6 +733,7 @@ where
                 offset,
                 unit_weight,
                 self.opts.reserve_enc_vars,
+                &mut self.var_manager,
             ));
         }
         cnf
@@ -765,8 +780,8 @@ struct ObjLitData {
 /// Internal data associated with an objective
 enum ObjEncoding<PBE, CE>
 where
-    PBE: pb::IncUBPB,
-    CE: card::IncUBCard,
+    PBE: pb::IncUB,
+    CE: card::IncUB,
 {
     Weighted {
         offset: isize,
@@ -781,31 +796,39 @@ where
 
 impl<PBE, CE> ObjEncoding<PBE, CE>
 where
-    PBE: pb::IncUBPB,
-    CE: card::IncUBCard,
+    PBE: pb::IncUB,
+    CE: card::IncUB,
 {
     /// Initializes a new objective encoding for a weighted objective
-    fn new_weighted(lits: HashMap<Lit, usize>, offset: isize, reserve: bool) -> Self {
-        ObjEncoding::Weighted {
-            offset,
-            encoding: if reserve {
-                PBE::new_reserving_from_lits(lits.into_iter())
-            } else {
-                PBE::new_from_lits(lits.into_iter())
-            },
+    fn new_weighted<VM: ManageVars>(
+        lits: HashMap<Lit, usize>,
+        offset: isize,
+        reserve: bool,
+        var_manager: &mut VM,
+    ) -> Self {
+        let mut encoding = PBE::from_iter(lits);
+        if reserve {
+            encoding.reserve(var_manager);
         }
+        ObjEncoding::Weighted { offset, encoding }
     }
 
     /// Initializes a new objective encoding for a weighted objective
-    fn new_unweighted(lits: Vec<Lit>, offset: isize, unit_weight: usize, reserve: bool) -> Self {
+    fn new_unweighted<VM: ManageVars>(
+        lits: Vec<Lit>,
+        offset: isize,
+        unit_weight: usize,
+        reserve: bool,
+        var_manager: &mut VM,
+    ) -> Self {
+        let mut encoding = CE::from_iter(lits);
+        if reserve {
+            encoding.reserve(var_manager);
+        }
         ObjEncoding::Unweighted {
             offset,
             unit_weight,
-            encoding: if reserve {
-                CE::new_reserving_from_lits(lits.into_iter())
-            } else {
-                CE::new_from_lits(lits.into_iter())
-            },
+            encoding,
         }
     }
 }

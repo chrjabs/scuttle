@@ -25,7 +25,7 @@ impl Default for Options {
 }
 
 /// Limits for a call to [`Solver::solve`]
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Limits {
     /// The maximum number of Pareto points to enumerate
     pub pps: Option<usize>,

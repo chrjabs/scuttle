@@ -90,7 +90,7 @@ pub enum Termination {
 }
 
 /// Statistics of the solver
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Stats {
     /// The number of calls to [`Solve::solve`]
     pub n_solve_calls: usize,
@@ -106,22 +106,8 @@ pub struct Stats {
     pub n_objs: usize,
 }
 
-impl Stats {
-    /// Creates a new set of statistics
-    fn init() -> Self {
-        Stats {
-            n_solve_calls: 0,
-            n_solutions: 0,
-            n_pareto_points: 0,
-            n_candidates: 0,
-            n_oracle_calls: 0,
-            n_objs: 0,
-        }
-    }
-}
-
 /// Statistics of the used SAT solver
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub struct OracleStats {
     /// The number of satisfiable queries
     pub n_sat_solves: u32,
@@ -138,7 +124,7 @@ pub struct OracleStats {
 }
 
 /// Statistics of a used cardinality or pseudo-boolean encodings
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct EncodingStats {
     /// The number of clauses in the encoding
     pub n_clauses: usize,

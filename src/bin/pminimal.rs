@@ -8,15 +8,10 @@ use pminimal::{
     ExtendedSolveStats, PMinimal, Solve,
 };
 use rustsat::{
-    encodings::{card::Totalizer, pb::GeneralizedTotalizer},
+    encodings::{card, pb},
     instances::{MultiOptInstance, ParsingError},
-    solvers,
+    solvers::DefIncSolver,
 };
-
-#[cfg(feature = "cadical")]
-type Oracle = solvers::CaDiCaL<'static>;
-#[cfg(not(feature = "cadical"))]
-compile_error!("At least one of the solver features needs to be turned on");
 
 fn main() -> Result<(), MainError> {
     let cli = Cli::init(MainError::IO);
@@ -28,7 +23,7 @@ fn main() -> Result<(), MainError> {
 
     let inst = parse_instance(cli.inst_path.clone(), cli.file_format.clone())?;
 
-    let mut solver: PMinimal<GeneralizedTotalizer, Totalizer, _, _, Oracle> =
+    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, DefIncSolver> =
         PMinimal::init_with_options(inst, cli.options.clone(), pminimal::default_blocking_clause);
 
     solver.attach_logger(Box::new(cli.new_cli_logger()));
@@ -53,7 +48,7 @@ fn main() -> Result<(), MainError> {
             )),
         }?
     };
-    
+
     cli.info("finished solving the instance")?;
 
     let pareto_front = solver.pareto_front();
