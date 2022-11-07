@@ -13,6 +13,23 @@ type Oracle = solvers::CaDiCaL<'static>;
 compile_error!("At least one of the solver features needs to be turned on");
 
 #[test]
+fn small() {
+    let inst: MultiOptInstance =
+        MultiOptInstance::from_dimacs_path(Path::new("./data/small.mcnf")).unwrap();
+    let mut solver: PMinimal<GeneralizedTotalizer, Totalizer, _, _, Oracle> =
+        PMinimal::init(inst, pminimal::default_blocking_clause);
+    solver.solve(Limits::none()).unwrap();
+    let pf = solver.pareto_front();
+    assert_eq!(pf.n_pps(), 3);
+    let pps: HashSet<Vec<isize>> = pf.into_iter().map(|pp| pp.costs().clone()).collect();
+    let mut shape = HashSet::new();
+    shape.insert(vec![0, 4]);
+    shape.insert(vec![2, 2]);
+    shape.insert(vec![4, 0]);
+    assert_eq!(pps, shape);
+}
+
+#[test]
 fn medium() {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path(Path::new("./data/medium.mcnf")).unwrap();
