@@ -33,8 +33,8 @@ struct CliArgs {
     #[arg(long, default_value_t = HeurImprOptions::default().tightening_clauses)]
     tightening_clauses: HeurImprWhen,
     /// Reserve variables for the encodings in advance
-    #[arg(long)]
-    reserve_encoding_vars: bool,
+    #[arg(long, default_value_t = Bool::from(Options::default().reserve_enc_vars))]
+    reserve_encoding_vars: Bool,
     /// Limit the number of Pareto points to enumerate (0 is no limit)
     #[arg(long, default_value_t = 0)]
     pp_limit: usize,
@@ -79,7 +79,40 @@ struct CliArgs {
     log_heuristic_obj_improvement: bool,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub enum Bool {
+    /// Turn on feature
+    True,
+    /// Torn off feature
+    False,
+}
+
+impl Bool {
+    fn is_true(&self) -> bool {
+        self == &Bool::True
+    }
+}
+
+impl fmt::Display for Bool {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Bool::True => write!(f, "true"),
+            Bool::False => write!(f, "false"),
+        }
+    }
+}
+
+impl From<bool> for Bool {
+    fn from(val: bool) -> Self {
+        if val {
+            Bool::True
+        } else {
+            Bool::False
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum FileFormat {
     /// Infer the file format from the file extension. `.mcnf`, `.bicnf`,
     /// `.cnf`, `.wcnf` or `.dimacs` are all interpreted as DIMACS files and
@@ -143,7 +176,7 @@ where
                     solution_tightening: args.solution_tightening,
                     tightening_clauses: args.tightening_clauses,
                 },
-                reserve_enc_vars: args.reserve_encoding_vars,
+                reserve_enc_vars: args.reserve_encoding_vars.is_true(),
             },
             limits: Limits {
                 pps: none_if_zero!(args.pp_limit),
