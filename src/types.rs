@@ -117,7 +117,7 @@ where
     {
         ParetoPoint {
             costs: self.costs,
-            sols: self.sols.into_iter().map(|s| conv(s)).collect(),
+            sols: self.sols.into_iter().map(conv).collect(),
         }
     }
 

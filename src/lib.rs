@@ -161,7 +161,7 @@ pub struct EncodingStats {
 /// A logger to attach to a solver
 pub trait WriteSolverLog {
     /// Adds a candidate cost point to the log
-    fn log_candidate(&mut self, costs: &Vec<usize>, phase: Phase) -> Result<(), LoggerError>;
+    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> Result<(), LoggerError>;
     /// Adds an oracle call to the log
     fn log_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), LoggerError>;
     /// Adds a solution to the log

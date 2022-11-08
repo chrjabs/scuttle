@@ -91,7 +91,7 @@ where
         let (cnf, var_manager) = constr.as_cnf();
         let mut solver = PMinimal {
             oracle: O::default(),
-            var_manager: var_manager,
+            var_manager,
             obj_encs: vec![],
             obj_clauses: vec![],
             blits: HashMap::new(),
@@ -128,8 +128,7 @@ where
             .loggers
             .iter_mut()
             .enumerate()
-            .skip_while(|(_, opt_logger)| opt_logger.is_some())
-            .next()
+            .find(|(_, opt_logger)| opt_logger.is_none())
         {
             *opt_logger = Some(boxed_logger);
             return idx;
@@ -557,7 +556,7 @@ where
         let mut clause = Clause::new();
         costs.iter().enumerate().for_each(|(idx, &cst)| {
             // Don't block
-            if cst <= 0 {
+            if cst == 0 {
                 return;
             }
             match &mut self.obj_encs[idx] {
@@ -632,7 +631,7 @@ where
         // Update limit and check termination
         if let Some(candidates) = &mut self.lims.candidates {
             *candidates -= 1;
-            if *candidates <= 0 {
+            if *candidates == 0 {
                 return Err(Termination::CandidatesLimit);
             }
         }
@@ -662,7 +661,7 @@ where
         // Update limit and check termination
         if let Some(oracle_calls) = &mut self.lims.oracle_calls {
             *oracle_calls -= 1;
-            if *oracle_calls <= 0 {
+            if *oracle_calls == 0 {
                 return Err(Termination::OracleCallsLimit);
             }
         }
@@ -692,7 +691,7 @@ where
         // Update limit and check termination
         if let Some(solutions) = &mut self.lims.sols {
             *solutions -= 1;
-            if *solutions <= 0 {
+            if *solutions == 0 {
                 return Err(Termination::SolsLimit);
             }
         }
@@ -722,7 +721,7 @@ where
         // Update limit and check termination
         if let Some(pps) = &mut self.lims.pps {
             *pps -= 1;
-            if *pps <= 0 {
+            if *pps == 0 {
                 return Err(Termination::PPLimit);
             }
         }
@@ -788,18 +787,15 @@ where
                         }
                     };
                     // Add hard clause to CNF and track olit appearance
-                    match opt_cls_info {
-                        Some((cls_idx, hard_cl)) => {
-                            cnf.add_clause(hard_cl);
-                            if self.opts.heuristic_improvements.must_store_clauses() {
-                                self.obj_lit_data
-                                    .get_mut(&olit)
-                                    .unwrap()
-                                    .clauses
-                                    .push(cls_idx);
-                            }
+                    if let Some((cls_idx, hard_cl)) = opt_cls_info {
+                        cnf.add_clause(hard_cl);
+                        if self.opts.heuristic_improvements.must_store_clauses() {
+                            self.obj_lit_data
+                                .get_mut(&olit)
+                                .unwrap()
+                                .clauses
+                                .push(cls_idx);
                         }
-                        None => (),
                     };
                     (olit, w)
                 })
@@ -832,18 +828,15 @@ where
                         }
                     };
                     // Add hard clause to CNF and track olit appearance
-                    match opt_cls_info {
-                        Some((cls_idx, hard_cl)) => {
-                            cnf.add_clause(hard_cl);
-                            if self.opts.heuristic_improvements.must_store_clauses() {
-                                self.obj_lit_data
-                                    .get_mut(&olit)
-                                    .unwrap()
-                                    .clauses
-                                    .push(cls_idx);
-                            }
+                    if let Some((cls_idx, hard_cl)) = opt_cls_info {
+                        cnf.add_clause(hard_cl);
+                        if self.opts.heuristic_improvements.must_store_clauses() {
+                            self.obj_lit_data
+                                .get_mut(&olit)
+                                .unwrap()
+                                .clauses
+                                .push(cls_idx);
                         }
-                        None => (),
                     };
                     olit
                 })
@@ -954,7 +947,7 @@ where
     }
 
     /// Unified iterator over encodings
-    fn iter<'a>(&'a self) -> ObjEncIter<'a, PBE, CE> {
+    fn iter(&self) -> ObjEncIter<'_, PBE, CE> {
         match self {
             ObjEncoding::Weighted { encoding, .. } => ObjEncIter::Weighted(encoding.iter()),
             ObjEncoding::Unweighted { encoding, .. } => ObjEncIter::Unweighted(encoding.iter()),
@@ -981,10 +974,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             ObjEncIter::Weighted(iter) => iter.next(),
-            ObjEncIter::Unweighted(iter) => match iter.next() {
-                Some(l) => Some((l, 1)),
-                None => None,
-            },
+            ObjEncIter::Unweighted(iter) => iter.next().map(|l| (l, 1)),
         }
     }
 }

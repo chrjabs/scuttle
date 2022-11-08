@@ -169,7 +169,7 @@ where
 {
     pub fn init(error_wrapper: EWrapper) -> Self {
         let args = CliArgs::parse();
-        let cli = Cli {
+        Self {
             options: Options {
                 max_sols_per_pp: none_if_zero!(args.max_sols_per_pp),
                 heuristic_improvements: HeurImprOptions {
@@ -220,8 +220,7 @@ where
                 log_heuristic_obj_improvement: args.log_heuristic_obj_improvement,
             },
             error_wrapper,
-        };
-        cli
+        }
     }
 
     pub fn new_cli_logger(&self) -> CliLogger {
@@ -316,7 +315,7 @@ where
         buffer.set_color(ColorSpec::new().set_bold(true))?;
         write!(buffer, "==============================")?;
         buffer.reset()?;
-        writeln!(buffer, "")?;
+        writeln!(buffer)?;
         self.stdout.print(&buffer)?;
         Ok(())
     }
@@ -485,7 +484,7 @@ where
         writeln!(
             buffer,
             ": costs: {}, n-sols: {}",
-            CostPrinter::new(pareto_point.costs().clone()),
+            CostPrinter::new(pareto_point.costs()),
             pareto_point.n_sols()
         )?;
         if self.print_solutions {
@@ -535,7 +534,7 @@ where
         buffer.set_color(ColorSpec::new().set_dimmed(true))?;
         write!(buffer, ">>>>>")?;
         buffer.reset()?;
-        writeln!(buffer, "")?;
+        writeln!(buffer)?;
         Ok(())
     }
 
@@ -543,7 +542,7 @@ where
         buffer.set_color(ColorSpec::new().set_dimmed(true))?;
         write!(buffer, "<<<<<")?;
         buffer.reset()?;
-        writeln!(buffer, "")?;
+        writeln!(buffer)?;
         Ok(())
     }
 }
@@ -570,7 +569,7 @@ impl CliLogger {
         }
     }
 
-    fn ilog_candidate(&self, costs: &Vec<usize>, phase: Phase) -> Result<(), IOError> {
+    fn ilog_candidate(&self, costs: &[usize], phase: Phase) -> Result<(), IOError> {
         if self.config.log_candidates {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -579,7 +578,7 @@ impl CliLogger {
             writeln!(
                 &mut buffer,
                 ": costs: {}, phase: {}, cpu-time: {}",
-                CostPrinter::new(costs.clone()),
+                CostPrinter::new(costs),
                 phase,
                 ProcessTime::now().as_duration().as_secs_f32(),
             )?;
@@ -631,7 +630,7 @@ impl CliLogger {
             writeln!(
                 &mut buffer,
                 ": costs: {}, n-sols: {}, cpu-time: {}",
-                CostPrinter::new(pareto_point.costs().clone()),
+                CostPrinter::new(pareto_point.costs()),
                 pareto_point.n_sols(),
                 ProcessTime::now().as_duration().as_secs_f32(),
             )?;
@@ -665,7 +664,7 @@ impl CliLogger {
 }
 
 impl WriteSolverLog for CliLogger {
-    fn log_candidate(&mut self, costs: &Vec<usize>, phase: Phase) -> Result<(), LoggerError> {
+    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> Result<(), LoggerError> {
         Self::wrap_error(self.ilog_candidate(costs, phase))
     }
 
@@ -716,17 +715,20 @@ impl<T: fmt::Display> fmt::Display for OptVal<T> {
     }
 }
 
-struct CostPrinter<C> {
-    costs: Vec<C>,
+struct CostPrinter<'a, C>
+where
+    C: 'a,
+{
+    costs: &'a [C],
 }
 
-impl<C> CostPrinter<C> {
-    fn new(costs: Vec<C>) -> Self {
+impl<'a, C> CostPrinter<'a, C> {
+    fn new(costs: &'a [C]) -> Self {
         CostPrinter { costs }
     }
 }
 
-impl<C: fmt::Display> fmt::Display for CostPrinter<C> {
+impl<'a, C: fmt::Display> fmt::Display for CostPrinter<'a, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "(")?;
         self.costs.iter().fold(Ok(true), |res, cost| {

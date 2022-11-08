@@ -21,7 +21,7 @@ fn main() -> Result<(), MainError> {
 
     cli.info(&format!("solving instance {}", cli.inst_path))?;
 
-    let inst = parse_instance(cli.inst_path.clone(), cli.file_format.clone())?;
+    let inst = parse_instance(cli.inst_path.clone(), cli.file_format)?;
 
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, DefIncSolver> =
         PMinimal::init_with_options(inst, cli.options, pminimal::default_blocking_clause);
