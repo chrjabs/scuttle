@@ -2,11 +2,11 @@
 //!
 //! Shared types for the $P$-minimal solver.
 
-use rustsat::types::Solution;
+use rustsat::types::Assignment;
 
 /// The Pareto front of an instance. This is the return type of the solver.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParetoFront<S = Solution>
+pub struct ParetoFront<S = Assignment>
 where
     S: Clone + Eq,
 {
@@ -79,7 +79,7 @@ where
 /// tuple of costs. Multiple Pareto-optimal solutions can be associated with one
 /// Pareto point.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParetoPoint<S = Solution>
+pub struct ParetoPoint<S = Assignment>
 where
     S: Clone + Eq,
 {

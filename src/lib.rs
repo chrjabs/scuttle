@@ -20,10 +20,11 @@ use std::{fmt, ops::Not};
 
 use rustsat::{
     instances::{ManageVars, MultiOptInstance},
-    types::{Clause, Lit, Solution},
+    solvers::SolverResult,
+    types::{Assignment, Clause, Lit},
 };
 
-mod options;
+pub mod options;
 pub use options::{Limits, Options};
 
 pub mod types;
@@ -39,7 +40,7 @@ pub mod cli;
 pub trait Solve<VM, BCG>
 where
     VM: ManageVars,
-    BCG: FnMut(Solution) -> Clause,
+    BCG: FnMut(Assignment) -> Clause,
 {
     /// Initializes a new solver from a multi-objective optimization instance
     fn init(inst: MultiOptInstance<VM>, block_clause_gen: BCG) -> Self
@@ -89,8 +90,29 @@ pub enum Termination {
     LoggerError(LoggerError),
 }
 
+/// Algorithm phases that the solver can be in
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    /// Outer loop
+    OuterLoop,
+    /// $P$-minimization of a model
+    Minimization,
+    /// Enumeration of solutions at a Pareto point
+    Enumeration,
+}
+
+impl fmt::Display for Phase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Phase::OuterLoop => write!(f, "outer-loop"),
+            Phase::Minimization => write!(f, "minimization"),
+            Phase::Enumeration => write!(f, "enumeration"),
+        }
+    }
+}
+
 /// Statistics of the solver
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub struct Stats {
     /// The number of calls to [`Solve::solve`]
     pub n_solve_calls: usize,
@@ -107,7 +129,7 @@ pub struct Stats {
 }
 
 /// Statistics of the used SAT solver
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
 pub struct OracleStats {
     /// The number of satisfiable queries
     pub n_sat_solves: u32,
@@ -124,7 +146,7 @@ pub struct OracleStats {
 }
 
 /// Statistics of a used cardinality or pseudo-boolean encodings
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub struct EncodingStats {
     /// The number of clauses in the encoding
     pub n_clauses: usize,
@@ -139,13 +161,21 @@ pub struct EncodingStats {
 /// A logger to attach to a solver
 pub trait WriteSolverLog {
     /// Adds a candidate cost point to the log
-    fn log_candidate(&mut self, costs: &Vec<usize>) -> Result<(), LoggerError>;
+    fn log_candidate(&mut self, costs: &Vec<usize>, phase: Phase) -> Result<(), LoggerError>;
     /// Adds an oracle call to the log
-    fn log_oracle_call(&mut self) -> Result<(), LoggerError>;
+    fn log_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), LoggerError>;
     /// Adds a solution to the log
     fn log_solution(&mut self) -> Result<(), LoggerError>;
     /// Adds a Pareto point to the log
     fn log_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), LoggerError>;
+    /// Adds a heuristic objective improvement to the log
+    fn log_heuristic_obj_improvement(
+        &mut self,
+        obj_idx: usize,
+        apparent_cost: usize,
+        improved_cost: usize,
+        learned_clauses: usize,
+    ) -> Result<(), LoggerError>;
 }
 
 /// Error type for loggers
@@ -174,6 +204,6 @@ impl fmt::Debug for LoggerError {
 }
 
 /// The default blocking clause generator
-pub fn default_blocking_clause(sol: Solution) -> Clause {
-    Clause::from(sol.into_iter().map(Lit::not))
+pub fn default_blocking_clause(sol: Assignment) -> Clause {
+    Clause::from_iter(sol.into_iter().map(Lit::not))
 }

@@ -24,11 +24,11 @@ fn main() -> Result<(), MainError> {
     let inst = parse_instance(cli.inst_path.clone(), cli.file_format.clone())?;
 
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, DefIncSolver> =
-        PMinimal::init_with_options(inst, cli.options.clone(), pminimal::default_blocking_clause);
+        PMinimal::init_with_options(inst, cli.options, pminimal::default_blocking_clause);
 
     solver.attach_logger(Box::new(cli.new_cli_logger()));
 
-    if let Err(term) = solver.solve(cli.limits.clone()) {
+    if let Err(term) = solver.solve(cli.limits) {
         match term {
             pminimal::Termination::PPLimit => {
                 cli.info("Solver terminated early because of Pareto point limit")

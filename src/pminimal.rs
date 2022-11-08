@@ -1,17 +1,21 @@
 //! This the main module of the solver containing the implementation of the algorithm.
 
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Not,
+};
 
 use crate::{
     default_blocking_clause, types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits,
-    LoggerError, Options, OracleStats, ParetoFront, Solve, Stats, Termination, WriteSolverLog,
+    LoggerError, Options, OracleStats, ParetoFront, Phase, Solve, Stats, Termination,
+    WriteSolverLog,
 };
 use rustsat::{
     encodings,
     encodings::{card, pb},
     instances::{ManageVars, MultiOptInstance, Objective, CNF},
     solvers::{DefIncSolver, IncrementalSolve, SolveStats, SolverResult},
-    types::{Clause, Lit, Solution, TernaryVal, Var},
+    types::{Assignment, Clause, Lit, TernaryVal, Var},
     var,
 };
 
@@ -20,10 +24,10 @@ use rustsat::{
 /// variable manager to use and the SAT backend.
 pub struct PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUB,
-    CE: card::IncUB,
+    PBE: pb::IncUB + 'static,
+    CE: card::IncUB + 'static,
     VM: ManageVars,
-    BCG: FnMut(Solution) -> Clause,
+    BCG: FnMut(Assignment) -> Clause,
     O: IncrementalSolve + Default,
 {
     /// The SAT solver backend
@@ -57,7 +61,7 @@ where
     loggers: Vec<Option<Box<dyn WriteSolverLog>>>,
 }
 
-impl<'a, PBE, CE, VM> PMinimal<PBE, CE, VM, fn(Solution) -> Clause, DefIncSolver<'a>>
+impl<'a, PBE, CE, VM> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, DefIncSolver<'a>>
 where
     PBE: pb::IncUB,
     CE: card::IncUB,
@@ -67,6 +71,11 @@ where
     pub fn default_init(inst: MultiOptInstance<VM>) -> Self {
         Self::init_with_options(inst, Options::default(), default_blocking_clause)
     }
+
+    /// Initializes a default solver with options
+    pub fn default_init_with_options(inst: MultiOptInstance<VM>, opts: Options) -> Self {
+        Self::init_with_options(inst, opts, default_blocking_clause)
+    }
 }
 
 impl<PBE, CE, VM, BCG, O> Solve<VM, BCG> for PMinimal<PBE, CE, VM, BCG, O>
@@ -74,7 +83,7 @@ where
     PBE: pb::IncUB,
     CE: card::IncUB,
     VM: ManageVars,
-    BCG: FnMut(Solution) -> Clause,
+    BCG: FnMut(Assignment) -> Clause,
     O: IncrementalSolve + Default,
 {
     fn init_with_options(inst: MultiOptInstance<VM>, opts: Options, block_clause_gen: BCG) -> Self {
@@ -109,7 +118,7 @@ where
     }
 
     fn stats(&self) -> Stats {
-        self.stats.clone()
+        self.stats
     }
 
     type LoggerId = usize;
@@ -143,7 +152,7 @@ where
     PBE: pb::IncUB + encodings::EncodeStats,
     CE: card::IncUB + encodings::EncodeStats,
     VM: ManageVars,
-    BCG: FnMut(Solution) -> Clause,
+    BCG: FnMut(Assignment) -> Clause,
     O: IncrementalSolve + SolveStats + Default,
 {
     fn oracle_stats(&self) -> OracleStats {
@@ -189,7 +198,7 @@ where
     PBE: pb::IncUB,
     CE: card::IncUB,
     VM: ManageVars,
-    BCG: FnMut(Solution) -> Clause,
+    BCG: FnMut(Assignment) -> Clause,
     O: IncrementalSolve + Default,
 {
     /// Initializes the solver
@@ -235,15 +244,15 @@ where
         loop {
             // Find minimization starting point
             let res = self.oracle.solve().unwrap();
-            self.log_oracle_call()?;
+            self.log_oracle_call(res, Phase::OuterLoop)?;
             if res == SolverResult::UNSAT {
                 return Ok(());
             }
             debug_assert_eq!(res, SolverResult::SAT);
 
             // Minimize solution
-            let (costs, solution) = self.get_solution_and_internal_costs();
-            self.log_candidate(&costs)?;
+            let (costs, solution) = self.get_solution_and_internal_costs(Phase::OuterLoop)?;
+            self.log_candidate(&costs, Phase::OuterLoop)?;
             let (costs, solution, block_switch) = self.p_minimization(costs, solution)?;
 
             self.enumerate_at_pareto_point(costs, solution)?;
@@ -259,8 +268,8 @@ where
     fn p_minimization(
         &mut self,
         mut costs: Vec<usize>,
-        mut solution: Solution,
-    ) -> Result<(Vec<usize>, Solution, Option<Lit>), Termination> {
+        mut solution: Assignment,
+    ) -> Result<(Vec<usize>, Assignment, Option<Lit>), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         let mut block_switch = None;
         loop {
@@ -285,14 +294,14 @@ where
             // Check if dominating solution exists
             let res = self.oracle.solve_assumps(assumps).unwrap();
             debug_assert_ne!(res, SolverResult::Interrupted);
-            self.log_oracle_call()?;
+            self.log_oracle_call(res, Phase::Minimization)?;
             if res == SolverResult::UNSAT {
                 // Termination criteria, return last solution and costs
                 return Ok((costs, solution, block_switch));
             }
 
-            (costs, solution) = self.get_solution_and_internal_costs();
-            self.log_candidate(&costs)?;
+            (costs, solution) = self.get_solution_and_internal_costs(Phase::Minimization)?;
+            self.log_candidate(&costs, Phase::Minimization)?;
         }
     }
 
@@ -300,7 +309,7 @@ where
     fn enumerate_at_pareto_point(
         &mut self,
         costs: Vec<usize>,
-        mut solution: Solution,
+        mut solution: Assignment,
     ) -> Result<(), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
 
@@ -311,6 +320,7 @@ where
         let mut pareto_point = ParetoPoint::new(self.externalize_internal_costs(costs));
 
         loop {
+            // TODO: add debug assert checking solution cost
             pareto_point.add_sol(solution.clone());
             match self.log_solution() {
                 Ok(_) => (),
@@ -337,7 +347,7 @@ where
             // Find next solution
             let res = self.oracle.solve_assumps(assumps.clone()).unwrap();
             debug_assert_ne!(res, SolverResult::Interrupted);
-            self.log_oracle_call()?;
+            self.log_oracle_call(res, Phase::Enumeration)?;
             if res == SolverResult::UNSAT {
                 // All solutions enumerated
                 self.pareto_front.add_pp(pareto_point);
@@ -347,46 +357,123 @@ where
         }
     }
 
-    /// Gets the current objective costs without offset or multiplier
-    fn get_solution_and_internal_costs(&mut self) -> (Vec<usize>, Solution) {
+    /// Gets the current objective costs without offset or multiplier. The phase
+    /// parameter is needed to determine if the solution should be heuristically
+    /// improved.
+    fn get_solution_and_internal_costs(
+        &mut self,
+        phase: Phase,
+    ) -> Result<(Vec<usize>, Assignment), Termination> {
         let mut costs = Vec::new();
         costs.resize(self.stats.n_objs, 0);
-        let sol = self.oracle.solution(self.max_orig_var).unwrap();
-        let costs: Vec<usize> = self
-            .obj_encs
-            .iter()
-            .map(|enc| Self::get_internal_obj_cost(enc, &sol))
-            .collect();
+        let mut sol = self.oracle.solution(self.max_orig_var).unwrap();
+        let tightening = self
+            .opts
+            .heuristic_improvements
+            .solution_tightening
+            .wanted(phase);
+        let learning = self
+            .opts
+            .heuristic_improvements
+            .tightening_clauses
+            .wanted(phase);
+        let costs = (0..self.obj_encs.len())
+            .map(|idx| {
+                self.get_cost_with_heuristic_improvements(idx, &mut sol, tightening, learning)
+            })
+            .collect::<Result<Vec<usize>, _>>()?;
         debug_assert_eq!(costs.len(), self.stats.n_objs);
-        (costs, sol)
+        Ok((costs, sol))
     }
 
-    /// Gets an objectives cost for a current model
-    fn get_internal_obj_cost(obj_enc: &ObjEncoding<PBE, CE>, sol: &Solution) -> usize {
-        match obj_enc {
-            ObjEncoding::Weighted { encoding, .. } => encoding.iter().fold(0, |cst, (l, w)| {
-                if let Some(val) = sol.lit_value(l) {
-                    if val == TernaryVal::True {
+    /// Performs heuristic solution improvement and computes the improved
+    /// (internal) cost for one objective
+    fn get_cost_with_heuristic_improvements(
+        &mut self,
+        obj_idx: usize,
+        sol: &mut Assignment,
+        tightening: bool,
+        learning: bool,
+    ) -> Result<usize, Termination> {
+        debug_assert!(obj_idx < self.stats.n_objs);
+        let mut reduction = 0;
+        let mut learned_cnf = CNF::new();
+        let cost = self.obj_encs[obj_idx].iter().fold(0, |cst, (l, w)| {
+            if let Some(val) = sol.lit_value(l) {
+                if val == TernaryVal::True {
+                    if (tightening || learning) && !self.obj_lit_data.contains_key(&!l) {
+                        // If tightening or learning and the negated literal
+                        // does not appear in any objective
+                        if let Some(witness) = self.find_flip_witness(l, sol) {
+                            // Has a witness -> literal can be flipped or clause learned
+                            if learning {
+                                // Create learned clause from flip witness
+                                let mut learned_clause =
+                                    Clause::from_iter(witness.into_iter().map(Lit::not));
+                                learned_clause.add(!l);
+                                learned_cnf.add_clause(learned_clause);
+                            }
+                            if tightening {
+                                // Flip literal
+                                sol.assign_lit(!l);
+                                reduction += w;
+                                cst
+                            } else {
+                                cst + w
+                            }
+                        } else {
+                            cst + w
+                        }
+                    } else {
                         cst + w
-                    } else {
-                        cst
                     }
                 } else {
                     cst
                 }
-            }),
-            ObjEncoding::Unweighted { encoding, .. } => encoding.iter().fold(0, |cst, l| {
-                if let Some(val) = sol.lit_value(l) {
-                    if val == TernaryVal::True {
-                        cst + 1
-                    } else {
-                        cst
-                    }
-                } else {
-                    cst
-                }
-            }),
+            } else {
+                cst
+            }
+        });
+        if tightening || learning {
+            self.log_heuristic_obj_improvement(obj_idx, cost + reduction, cost, learned_cnf.len())?;
         }
+        self.oracle.add_cnf(learned_cnf).unwrap();
+        Ok(cost)
+    }
+
+    /// Finds witness that allows flipping a given literal. A witness here is a
+    /// subset of the solution that satisfies all clauses in which lit appears.
+    /// This assumes that flipping the literal will not make the solution worse.
+    fn find_flip_witness(&self, lit: Lit, sol: &Assignment) -> Option<HashSet<Lit>> {
+        debug_assert!(self.obj_lit_data.contains_key(&lit));
+        let lit_data = self.obj_lit_data.get(&lit).unwrap();
+        lit_data
+            .clauses
+            .iter()
+            .fold(Some(HashSet::new()), |witness, cl_idx| {
+                if let Some(mut witness) = witness {
+                    if let Some(other) =
+                        self.obj_clauses[*cl_idx]
+                            .iter()
+                            .fold(None, |sat_lit, other| {
+                                if sat_lit.is_some() || *other == lit {
+                                    sat_lit
+                                } else if sol.lit_value(*other).unwrap() == TernaryVal::True {
+                                    Some(*other)
+                                } else {
+                                    sat_lit
+                                }
+                            })
+                    {
+                        witness.insert(other);
+                        Some(witness)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
     }
 
     /// Converts an internal cost vector to an external one. Internal cost is
@@ -522,7 +609,7 @@ where
     }
 
     /// Logs a cost point candidate. Can error a termination if the candidates limit is reached.
-    fn log_candidate(&mut self, costs: &Vec<usize>) -> Result<(), Termination> {
+    fn log_candidate(&mut self, costs: &Vec<usize>, phase: Phase) -> Result<(), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.stats.n_candidates += 1;
         // Dispatch to loggers
@@ -532,7 +619,7 @@ where
                 .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
                     if res.is_ok() {
                         if let Some(logger) = opt_logger {
-                            logger.log_candidate(costs)?
+                            logger.log_candidate(costs, phase)?
                         }
                         Ok(())
                     } else {
@@ -553,7 +640,7 @@ where
     }
 
     /// Logs an oracle call. Can return a termination if the oracle call limit is reached.
-    fn log_oracle_call(&mut self) -> Result<(), Termination> {
+    fn log_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), Termination> {
         self.stats.n_oracle_calls += 1;
         // Dispatch to loggers
         if let Err(log_err) =
@@ -562,7 +649,7 @@ where
                 .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
                     if res.is_ok() {
                         if let Some(logger) = opt_logger {
-                            logger.log_oracle_call()?
+                            logger.log_oracle_call(result, phase)?
                         }
                         Ok(())
                     } else {
@@ -642,6 +729,40 @@ where
         Ok(())
     }
 
+    /// Logs a heuristic objective improvement. Can return a logger error.
+    fn log_heuristic_obj_improvement(
+        &mut self,
+        obj_idx: usize,
+        apparent_cost: usize,
+        improved_cost: usize,
+        learned_clauses: usize,
+    ) -> Result<(), Termination> {
+        self.stats.n_pareto_points += 1;
+        // Dispatch to loggers
+        if let Err(log_err) =
+            self.loggers
+                .iter_mut()
+                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
+                    if res.is_ok() {
+                        if let Some(logger) = opt_logger {
+                            logger.log_heuristic_obj_improvement(
+                                obj_idx,
+                                apparent_cost,
+                                improved_cost,
+                                learned_clauses,
+                            )?
+                        }
+                        Ok(())
+                    } else {
+                        res
+                    }
+                })
+        {
+            return Err(Termination::LoggerError(log_err));
+        }
+        Ok(())
+    }
+
     /// Adds a new objective to the solver. This shall only be called during
     /// initialization.
     fn add_objective(&mut self, obj: Objective) -> CNF {
@@ -670,7 +791,7 @@ where
                     match opt_cls_info {
                         Some((cls_idx, hard_cl)) => {
                             cnf.add_clause(hard_cl);
-                            if self.opts.model_tightening {
+                            if self.opts.heuristic_improvements.must_store_clauses() {
                                 self.obj_lit_data
                                     .get_mut(&olit)
                                     .unwrap()
@@ -714,7 +835,7 @@ where
                     match opt_cls_info {
                         Some((cls_idx, hard_cl)) => {
                             cnf.add_clause(hard_cl);
-                            if self.opts.model_tightening {
+                            if self.opts.heuristic_improvements.must_store_clauses() {
                                 self.obj_lit_data
                                     .get_mut(&olit)
                                     .unwrap()
@@ -758,7 +879,7 @@ where
         // Save blit in case same soft clause reappears
         // TODO: find way to not have to clone the clause here
         self.blits.insert(cls.clone(), blit);
-        if self.opts.model_tightening {
+        if self.opts.heuristic_improvements.must_store_clauses() {
             // Add clause to the saved objective clauses
             self.obj_clauses.push(cls.clone());
         }
@@ -829,6 +950,41 @@ where
             offset,
             unit_weight,
             encoding,
+        }
+    }
+
+    /// Unified iterator over encodings
+    fn iter<'a>(&'a self) -> ObjEncIter<'a, PBE, CE> {
+        match self {
+            ObjEncoding::Weighted { encoding, .. } => ObjEncIter::Weighted(encoding.iter()),
+            ObjEncoding::Unweighted { encoding, .. } => ObjEncIter::Unweighted(encoding.iter()),
+        }
+    }
+}
+
+enum ObjEncIter<'a, PBE, CE>
+where
+    PBE: pb::IncUB + 'static,
+    CE: card::IncUB + 'static,
+{
+    Weighted(PBE::Iter<'a>),
+    Unweighted(CE::Iter<'a>),
+}
+
+impl<PBE, CE> Iterator for ObjEncIter<'_, PBE, CE>
+where
+    PBE: pb::IncUB,
+    CE: card::IncUB,
+{
+    type Item = (Lit, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ObjEncIter::Weighted(iter) => iter.next(),
+            ObjEncIter::Unweighted(iter) => match iter.next() {
+                Some(l) => Some((l, 1)),
+                None => None,
+            },
         }
     }
 }

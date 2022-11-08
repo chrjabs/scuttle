@@ -1,6 +1,8 @@
 use std::{collections::HashSet, path::Path};
 
-use pminimal::{self, types::ParetoFront, Limits, Options, PMinimal, Solve};
+use pminimal::{
+    self, options::HeurImprOptions, types::ParetoFront, Limits, Options, PMinimal, Solve,
+};
 use rustsat::{
     encodings::{card, pb},
     instances::MultiOptInstance,
@@ -21,12 +23,11 @@ fn check_pf_shape(pf: ParetoFront, shape: Vec<(Vec<isize>, usize)>) {
     assert_eq!(pps_set, shape_set);
 }
 
-#[test]
-fn small() {
+fn small(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path(Path::new("./data/small.mcnf")).unwrap();
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, Oracle> =
-        PMinimal::default_init(inst);
+        PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
     assert_eq!(pf.n_pps(), 3);
@@ -34,12 +35,11 @@ fn small() {
     check_pf_shape(pf, shape);
 }
 
-#[test]
-fn medium_single() {
+fn medium_single(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path(Path::new("./data/medium.mcnf")).unwrap();
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, Oracle> =
-        PMinimal::default_init(inst);
+        PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
     assert_eq!(pf.n_pps(), 6);
@@ -54,14 +54,11 @@ fn medium_single() {
     check_pf_shape(pf, shape);
 }
 
-#[test]
-fn medium_all() {
+fn medium_all(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path(Path::new("./data/medium.mcnf")).unwrap();
-    let mut opts = Options::default();
-    opts.max_sols_per_pp = None;
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, Oracle> =
-        PMinimal::init_with_options(inst, opts, pminimal::default_blocking_clause);
+        PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
     assert_eq!(pf.n_pps(), 6);
@@ -76,12 +73,11 @@ fn medium_all() {
     check_pf_shape(pf, shape);
 }
 
-#[test]
-fn four() {
+fn four(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path(Path::new("./data/four.mcnf")).unwrap();
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, Oracle> =
-        PMinimal::default_init(inst);
+        PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
     assert_eq!(pf.n_pps(), 4);
@@ -94,12 +90,11 @@ fn four() {
     check_pf_shape(pf, shape);
 }
 
-#[test]
-fn parkinsons_single() {
+fn parkinsons(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path(Path::new("./data/parkinsons_mlic.mcnf")).unwrap();
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, Oracle> =
-        PMinimal::default_init(inst);
+        PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
     assert_eq!(pf.n_pps(), 8);
@@ -114,4 +109,103 @@ fn parkinsons_single() {
         (vec![8, 8], 1),
     ];
     check_pf_shape(pf, shape);
+}
+
+#[test]
+fn small_default() {
+    small(Options::default())
+}
+
+#[test]
+fn medium_single_default() {
+    medium_single(Options::default())
+}
+
+#[test]
+fn medium_all_default() {
+    let mut opts = Options::default();
+    opts.max_sols_per_pp = None;
+    medium_all(opts)
+}
+
+#[test]
+fn four_default() {
+    four(Options::default())
+}
+
+#[test]
+fn parkinsons_default() {
+    parkinsons(Options::default())
+}
+
+#[test]
+fn small_no_heur() {
+    let mut opts = Options::default();
+    opts.heuristic_improvements = HeurImprOptions::none();
+    small(opts)
+}
+
+#[test]
+fn medium_single_no_heur() {
+    let mut opts = Options::default();
+    opts.heuristic_improvements = HeurImprOptions::none();
+    medium_single(opts)
+}
+
+#[test]
+fn medium_all_no_heur() {
+    let mut opts = Options::default();
+    opts.max_sols_per_pp = None;
+    opts.heuristic_improvements = HeurImprOptions::none();
+    medium_all(opts)
+}
+
+#[test]
+fn four_no_heur() {
+    let mut opts = Options::default();
+    opts.heuristic_improvements = HeurImprOptions::none();
+    four(opts)
+}
+
+#[test]
+fn parkinsons_no_heur() {
+    let mut opts = Options::default();
+    opts.heuristic_improvements = HeurImprOptions::none();
+    parkinsons(opts)
+}
+
+#[test]
+fn small_all_heur() {
+    let mut opts = Options::default();
+    opts.heuristic_improvements = HeurImprOptions::all();
+    small(opts)
+}
+
+#[test]
+fn medium_single_all_heur() {
+    let mut opts = Options::default();
+    opts.heuristic_improvements = HeurImprOptions::all();
+    medium_single(opts)
+}
+
+#[test]
+fn medium_all_all_heur() {
+    let mut opts = Options::default();
+    opts.max_sols_per_pp = None;
+    opts.heuristic_improvements = HeurImprOptions::all();
+    medium_all(opts)
+}
+
+#[test]
+fn four_all_heur() {
+    let mut opts = Options::default();
+    opts.heuristic_improvements = HeurImprOptions::all();
+    four(opts)
+}
+
+#[test]
+fn parkinsons_all_heur() {
+    let mut opts = Options::default();
+    opts.heuristic_improvements = HeurImprOptions::all();
+    parkinsons(opts)
 }

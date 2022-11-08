@@ -6,13 +6,15 @@ use std::{
     io::Write,
 };
 
-use crate::LoggerError;
+use crate::options::{HeurImprOptions, HeurImprWhen};
 use crate::{
     types::{ParetoFront, ParetoPoint},
     EncodingStats, Limits, Options, OracleStats, Stats, WriteSolverLog,
 };
+use crate::{LoggerError, Phase};
 use clap::{crate_authors, crate_name, crate_version, Parser, ValueEnum};
 use cpu_time::ProcessTime;
+use rustsat::solvers::SolverResult;
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 
 #[derive(Parser)]
@@ -24,9 +26,12 @@ struct CliArgs {
     /// The maximum number of solutions to enumerate per Pareto point (0 is no limit)
     #[arg(long, default_value_t = 1)]
     max_sols_per_pp: usize,
-    /// Whether to perform model tightening
-    #[arg(long)]
-    model_tightening: bool,
+    /// When to perform solution tightening
+    #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening)]
+    solution_tightening: HeurImprWhen,
+    /// When to learn tightening clauses
+    #[arg(long, default_value_t = HeurImprOptions::default().tightening_clauses)]
+    tightening_clauses: HeurImprWhen,
     /// Reserve variables for the encodings in advance
     #[arg(long)]
     reserve_encoding_vars: bool,
@@ -69,6 +74,9 @@ struct CliArgs {
     /// Log SAT oracle calls
     #[arg(long)]
     log_oracle_calls: bool,
+    /// Log heuristic objective improvement
+    #[arg(long)]
+    log_heuristic_obj_improvement: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -131,7 +139,10 @@ where
         let cli = Cli {
             options: Options {
                 max_sols_per_pp: none_if_zero!(args.max_sols_per_pp),
-                model_tightening: args.model_tightening,
+                heuristic_improvements: HeurImprOptions {
+                    solution_tightening: args.solution_tightening,
+                    tightening_clauses: args.tightening_clauses,
+                },
                 reserve_enc_vars: args.reserve_encoding_vars,
             },
             limits: Limits {
@@ -173,6 +184,7 @@ where
                 log_solutions: args.log_solutions,
                 log_pareto_points: args.log_pareto_points,
                 log_oracle_calls: args.log_oracle_calls,
+                log_heuristic_obj_improvement: args.log_heuristic_obj_improvement,
             },
             error_wrapper,
         };
@@ -297,8 +309,13 @@ where
             )?;
             Self::print_parameter(
                 &mut buffer,
-                "model-tightening",
-                self.options.model_tightening,
+                "solution-tightening",
+                self.options.heuristic_improvements.solution_tightening,
+            )?;
+            Self::print_parameter(
+                &mut buffer,
+                "tightening-clauses",
+                self.options.heuristic_improvements.tightening_clauses,
             )?;
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;
             Self::print_parameter(&mut buffer, "sol-limit", OptVal::new(self.limits.sols))?;
@@ -504,6 +521,7 @@ struct LoggerConfig {
     log_solutions: bool,
     log_pareto_points: bool,
     log_oracle_calls: bool,
+    log_heuristic_obj_improvement: bool,
 }
 
 pub struct CliLogger {
@@ -519,7 +537,7 @@ impl CliLogger {
         }
     }
 
-    fn ilog_candidate(&self, costs: &Vec<usize>) -> Result<(), IOError> {
+    fn ilog_candidate(&self, costs: &Vec<usize>, phase: Phase) -> Result<(), IOError> {
         if self.config.log_candidates {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -527,8 +545,9 @@ impl CliLogger {
             buffer.reset()?;
             writeln!(
                 &mut buffer,
-                ": costs: {}, cpu-time: {}",
+                ": costs: {}, phase: {}, cpu-time: {}",
                 CostPrinter::new(costs.clone()),
+                phase,
                 ProcessTime::now().as_duration().as_secs_f32(),
             )?;
             self.stdout.print(&buffer)?;
@@ -536,7 +555,7 @@ impl CliLogger {
         Ok(())
     }
 
-    fn ilog_oracle_call(&mut self) -> Result<(), IOError> {
+    fn ilog_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), IOError> {
         if self.config.log_oracle_calls {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -544,7 +563,9 @@ impl CliLogger {
             buffer.reset()?;
             writeln!(
                 &mut buffer,
-                ": cpu-time: {}",
+                ": result: {}, phase: {}, cpu-time: {}",
+                result,
+                phase,
                 ProcessTime::now().as_duration().as_secs_f32(),
             )?;
             self.stdout.print(&buffer)?;
@@ -585,15 +606,38 @@ impl CliLogger {
         }
         Ok(())
     }
+
+    fn ilog_heuristic_obj_improvement(
+        &mut self,
+        obj_idx: usize,
+        apparent_cost: usize,
+        improved_cost: usize,
+        learned_clauses: usize,
+    ) -> Result<(), IOError> {
+        if self.config.log_heuristic_obj_improvement {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
+            write!(&mut buffer, "heuristic objective improvement")?;
+            buffer.reset()?;
+            writeln!(
+                &mut buffer,
+                ": obj-idx: {}, apparent-cost: {}, improved-cost: {}, learned-clauses: {}, cpu-time: {}",
+                obj_idx, apparent_cost, improved_cost, learned_clauses,
+                ProcessTime::now().as_duration().as_secs_f32(),
+            )?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
 }
 
 impl WriteSolverLog for CliLogger {
-    fn log_candidate(&mut self, costs: &Vec<usize>) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_candidate(costs))
+    fn log_candidate(&mut self, costs: &Vec<usize>, phase: Phase) -> Result<(), LoggerError> {
+        Self::wrap_error(self.ilog_candidate(costs, phase))
     }
 
-    fn log_oracle_call(&mut self) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_oracle_call())
+    fn log_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), LoggerError> {
+        Self::wrap_error(self.ilog_oracle_call(result, phase))
     }
 
     fn log_solution(&mut self) -> Result<(), LoggerError> {
@@ -602,6 +646,21 @@ impl WriteSolverLog for CliLogger {
 
     fn log_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), LoggerError> {
         Self::wrap_error(self.ilog_pareto_point(pareto_point))
+    }
+
+    fn log_heuristic_obj_improvement(
+        &mut self,
+        obj_idx: usize,
+        apparent_cost: usize,
+        improved_cost: usize,
+        learned_clauses: usize,
+    ) -> Result<(), LoggerError> {
+        Self::wrap_error(self.ilog_heuristic_obj_improvement(
+            obj_idx,
+            apparent_cost,
+            improved_cost,
+            learned_clauses,
+        ))
     }
 }
 
