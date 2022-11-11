@@ -1,9 +1,6 @@
 //! This the main module of the solver containing the implementation of the algorithm.
 
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Not,
-};
+use std::ops::Not;
 
 use crate::{
     default_blocking_clause, types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits,
@@ -15,7 +12,7 @@ use rustsat::{
     encodings::{card, pb},
     instances::{ManageVars, MultiOptInstance, Objective, CNF},
     solvers::{DefIncSolver, IncrementalSolve, SolveStats, SolverResult},
-    types::{Assignment, Clause, Lit, TernaryVal, Var},
+    types::{Assignment, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
     var,
 };
 
@@ -41,9 +38,9 @@ where
     /// blocking literal is _not_ in the clause kept here.
     obj_clauses: Vec<Clause>,
     /// Maps soft clauses to blocking literals
-    blits: HashMap<Clause, Lit>,
+    blits: RsHashMap<Clause, Lit>,
     /// Objective literal data
-    obj_lit_data: HashMap<Lit, ObjLitData>,
+    obj_lit_data: RsHashMap<Lit, ObjLitData>,
     /// The maximum variable of the original encoding after introducing blocking
     /// variables
     max_orig_var: Var,
@@ -94,8 +91,8 @@ where
             var_manager: var_manager,
             obj_encs: vec![],
             obj_clauses: vec![],
-            blits: HashMap::new(),
-            obj_lit_data: HashMap::new(),
+            blits: RsHashMap::default(),
+            obj_lit_data: RsHashMap::default(),
             max_orig_var: var![0],
             block_clause_gen,
             pareto_front: ParetoFront::new(),
@@ -444,13 +441,13 @@ where
     /// Finds witness that allows flipping a given literal. A witness here is a
     /// subset of the solution that satisfies all clauses in which lit appears.
     /// This assumes that flipping the literal will not make the solution worse.
-    fn find_flip_witness(&self, lit: Lit, sol: &Assignment) -> Option<HashSet<Lit>> {
+    fn find_flip_witness(&self, lit: Lit, sol: &Assignment) -> Option<RsHashSet<Lit>> {
         debug_assert!(self.obj_lit_data.contains_key(&lit));
         let lit_data = self.obj_lit_data.get(&lit).unwrap();
         lit_data
             .clauses
             .iter()
-            .fold(Some(HashSet::new()), |witness, cl_idx| {
+            .fold(Some(RsHashSet::default()), |witness, cl_idx| {
                 if let Some(mut witness) = witness {
                     if let Some(other) =
                         self.obj_clauses[*cl_idx]
@@ -770,7 +767,7 @@ where
         if obj.weighted() {
             // Add weighted objective
             let (soft_cl, offset) = obj.as_soft_cls();
-            let lits: HashMap<Lit, usize> = soft_cl
+            let lits: RsHashMap<Lit, usize> = soft_cl
                 .into_iter()
                 .map(|(cl, w)| {
                     let (olit, opt_cls_info) = self.add_soft_clause(cl);
@@ -922,7 +919,7 @@ where
 {
     /// Initializes a new objective encoding for a weighted objective
     fn new_weighted<VM: ManageVars>(
-        lits: HashMap<Lit, usize>,
+        lits: RsHashMap<Lit, usize>,
         offset: isize,
         reserve: bool,
         var_manager: &mut VM,
