@@ -885,7 +885,7 @@ where
     fn add_soft_clause(&mut self, mut cls: Clause) -> (Lit, Option<(usize, Clause)>) {
         if cls.len() == 1 {
             // No blit needed
-            return (cls[0], None);
+            return (!cls[0], None);
         }
         if self.blits.contains_key(&cls) {
             // Reuse clause with blit that was already added

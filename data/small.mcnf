@@ -1,8 +1,8 @@
-c A Small bicnf example
+c A Small MCNF example
 h 1 2 0
 h 2 3 0
 h 3 4 0
-o1 2 2 0
-o1 2 4 0
-o2 2 1 0
-o2 2 3 0
+o1 2 -2 0
+o1 2 -4 0
+o2 2 -1 0
+o2 2 -3 0
