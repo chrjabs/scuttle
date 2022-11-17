@@ -4,14 +4,16 @@ use std::ops::Not;
 
 use crate::{
     default_blocking_clause, types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits,
-    Options, OracleStats, ParetoFront, Phase, Solve, Stats, Termination,
-    WriteSolverLog,
+    Options, ParetoFront, Phase, Solve, Stats, Termination, WriteSolverLog,
 };
 use rustsat::{
     encodings,
     encodings::{card, pb},
     instances::{ManageVars, MultiOptInstance, Objective, CNF},
-    solvers::{ControlSignal, DefIncSolver, IncrementalSolve, SolveStats, SolverResult, Terminate},
+    solvers::{
+        ControlSignal, DefIncSolver, IncrementalSolve, SolveStats, SolverResult, SolverStats,
+        Terminate,
+    },
     types::{Assignment, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
     var,
 };
@@ -163,15 +165,8 @@ where
     BCG: FnMut(Assignment) -> Clause,
     O: IncrementalSolve + SolveStats + Default + Terminate<'static>,
 {
-    fn oracle_stats(&self) -> OracleStats {
-        OracleStats {
-            n_sat_solves: self.oracle.n_sat_solves(),
-            n_unsat_solves: self.oracle.n_unsat_solves(),
-            n_clauses: self.oracle.n_clauses(),
-            n_vars: self.oracle.n_vars(),
-            avg_clause_len: self.oracle.avg_clause_len(),
-            cpu_solve_time: self.oracle.cpu_solve_time(),
-        }
+    fn oracle_stats(&self) -> SolverStats {
+        self.oracle.stats()
     }
 
     fn encoding_stats(&self) -> Vec<EncodingStats> {

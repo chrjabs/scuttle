@@ -35,7 +35,7 @@ fn main() -> Result<(), MainError> {
     let inst = parse_instance(cli.inst_path.clone(), cli.file_format)?;
 
     // MaxPre Preprocessing
-    let (prepro, inst) = if cli.preprocessing {
+    let (mut prepro, inst) = if cli.preprocessing {
         let (cnf, softs, _) = inst.as_hard_cls_soft_cls();
         let (softs, offsets) = softs.into_iter().unzip::<_, _, _, Vec<isize>>();
         let mut prepro = MaxPre::new(cnf, softs, false);
@@ -124,7 +124,7 @@ fn main() -> Result<(), MainError> {
     let pareto_front = solver.pareto_front();
 
     // Solution reconstruction
-    let pareto_front = if let Some(prepro) = prepro {
+    let pareto_front = if let Some(ref mut prepro) = prepro {
         pareto_front.convert_solutions(&mut |s| prepro.reconstruct(s))
     } else {
         pareto_front
@@ -138,6 +138,9 @@ fn main() -> Result<(), MainError> {
         // Get extended stats for solver that supports stats
         cli.print_oracle_stats(solver.oracle_stats())?;
         cli.print_encoding_stats(solver.encoding_stats())?;
+    }
+    if let Some(prepro) = prepro {
+        cli.print_maxpre_stats(prepro.stats())?;
     }
 
     Ok(())

@@ -20,7 +20,7 @@ use std::{fmt, ops::Not};
 
 use rustsat::{
     instances::{ManageVars, MultiOptInstance},
-    solvers::{ControlSignal, SolverError, SolverResult},
+    solvers::{ControlSignal, SolverError, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit},
 };
 
@@ -74,7 +74,7 @@ where
 /// Trait for getting statistics from the solver
 pub trait ExtendedSolveStats {
     /// Gets statistics from the internal oracle
-    fn oracle_stats(&self) -> OracleStats;
+    fn oracle_stats(&self) -> SolverStats;
     /// Gets statistics from the objective encodings
     fn encoding_stats(&self) -> Vec<EncodingStats>;
 }
@@ -146,23 +146,6 @@ pub struct Stats {
     pub n_oracle_calls: usize,
     /// The number of objectives in the solver
     pub n_objs: usize,
-}
-
-/// Statistics of the used SAT solver
-#[derive(Debug, PartialEq, Clone, Copy, Default)]
-pub struct OracleStats {
-    /// The number of satisfiable queries
-    pub n_sat_solves: u32,
-    /// The number of unsatisfiable queries
-    pub n_unsat_solves: u32,
-    /// The number of irredundant clauses in the solver
-    pub n_clauses: u32,
-    /// The number of variables in the solver
-    pub n_vars: usize,
-    /// The average length of irredundant clauses
-    pub avg_clause_len: f32,
-    /// The total CPU time spent in the oracle
-    pub cpu_solve_time: f32,
 }
 
 /// Statistics of a used cardinality or pseudo-boolean encodings

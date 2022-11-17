@@ -2,6 +2,7 @@
 
 use std::io::Error as IOError;
 use std::path::PathBuf;
+use std::time::Duration;
 use std::{
     fmt::{self},
     io::Write,
@@ -10,12 +11,12 @@ use std::{
 use crate::options::{HeurImprOptions, HeurImprWhen};
 use crate::{
     types::{ParetoFront, ParetoPoint},
-    EncodingStats, Limits, Options, OracleStats, Stats, WriteSolverLog,
+    EncodingStats, Limits, Options, Stats, WriteSolverLog,
 };
 use crate::{LoggerError, Phase};
 use clap::{crate_authors, crate_name, crate_version, Parser, ValueEnum};
 use cpu_time::ProcessTime;
-use rustsat::solvers::SolverResult;
+use rustsat::solvers::{SolverResult, SolverStats};
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 
 #[derive(Parser)]
@@ -384,7 +385,7 @@ impl Cli {
         Ok(())
     }
 
-    pub fn print_oracle_stats(&self, stats: OracleStats) -> Result<(), IOError> {
+    pub fn print_oracle_stats(&self, stats: SolverStats) -> Result<(), IOError> {
         if self.print_stats {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;
@@ -394,12 +395,16 @@ impl Cli {
             buffer.set_color(ColorSpec::new().set_bold(true))?;
             writeln!(&mut buffer, ": ")?;
             buffer.reset()?;
-            Self::print_parameter(&mut buffer, "n-sat-solves", stats.n_sat_solves)?;
-            Self::print_parameter(&mut buffer, "n-unsat-solves", stats.n_unsat_solves)?;
+            Self::print_parameter(&mut buffer, "n-sat-solves", stats.n_sat)?;
+            Self::print_parameter(&mut buffer, "n-unsat-solves", stats.n_unsat)?;
             Self::print_parameter(&mut buffer, "n-clauses", stats.n_clauses)?;
-            Self::print_parameter(&mut buffer, "n-vars", stats.n_vars)?;
+            Self::print_parameter(&mut buffer, "max-var", OptVal::new(stats.max_var))?;
             Self::print_parameter(&mut buffer, "avg-clause-len", stats.avg_clause_len)?;
-            Self::print_parameter(&mut buffer, "cpu-solve-time", stats.cpu_solve_time)?;
+            Self::print_parameter(
+                &mut buffer,
+                "cpu-solve-time",
+                DurPrinter::new(stats.cpu_solve_time),
+            )?;
             Self::end_block(&mut buffer)?;
             self.stdout.print(&buffer)?;
         }
@@ -432,6 +437,59 @@ impl Cli {
         Ok(())
     }
 
+    pub fn print_maxpre_stats(&self, stats: maxpre::Stats) -> Result<(), IOError> {
+        if self.print_stats {
+            let mut buffer = self.stdout.buffer();
+            Self::start_block(&mut buffer)?;
+            buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
+            write!(&mut buffer, "MaxPre Stats")?;
+            buffer.reset()?;
+            buffer.set_color(ColorSpec::new().set_bold(true))?;
+            writeln!(&mut buffer, ": ")?;
+            buffer.reset()?;
+            Self::print_parameter(&mut buffer, "n-objs", stats.n_objs)?;
+            Self::print_parameter(
+                &mut buffer,
+                "n-orig-hard-clauses",
+                stats.n_orig_hard_clauses,
+            )?;
+            Self::print_parameter(
+                &mut buffer,
+                "n-orig-soft-clauses",
+                VecPrinter::new(&stats.n_orig_soft_clauses),
+            )?;
+            Self::print_parameter(&mut buffer, "max-orig-var", OptVal::new(stats.max_orig_var))?;
+            Self::print_parameter(
+                &mut buffer,
+                "n-prepro-hard-clauses",
+                stats.n_prepro_hard_clauses,
+            )?;
+            Self::print_parameter(
+                &mut buffer,
+                "n-prepro-soft-clauses",
+                VecPrinter::new(&stats.n_prepro_soft_clauses),
+            )?;
+            Self::print_parameter(
+                &mut buffer,
+                "max-prepro-var",
+                OptVal::new(stats.max_prepro_var),
+            )?;
+            Self::print_parameter(
+                &mut buffer,
+                "prepro-time",
+                DurPrinter::new(stats.prepro_time),
+            )?;
+            Self::print_parameter(
+                &mut buffer,
+                "reconst-time",
+                DurPrinter::new(stats.reconst_time),
+            )?;
+            Self::end_block(&mut buffer)?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
+
     fn print_pareto_point(
         &self,
         buffer: &mut Buffer,
@@ -444,7 +502,7 @@ impl Cli {
         writeln!(
             buffer,
             ": costs: {}, n-sols: {}",
-            CostPrinter::new(pareto_point.costs()),
+            VecPrinter::new(pareto_point.costs()),
             pareto_point.n_sols()
         )?;
         if self.print_solutions {
@@ -538,7 +596,7 @@ impl CliLogger {
             writeln!(
                 &mut buffer,
                 ": costs: {}, phase: {}, cpu-time: {}",
-                CostPrinter::new(costs),
+                VecPrinter::new(costs),
                 phase,
                 ProcessTime::now().as_duration().as_secs_f32(),
             )?;
@@ -590,7 +648,7 @@ impl CliLogger {
             writeln!(
                 &mut buffer,
                 ": costs: {}, n-sols: {}, cpu-time: {}",
-                CostPrinter::new(pareto_point.costs()),
+                VecPrinter::new(pareto_point.costs()),
                 pareto_point.n_sols(),
                 ProcessTime::now().as_duration().as_secs_f32(),
             )?;
@@ -675,20 +733,20 @@ impl<T: fmt::Display> fmt::Display for OptVal<T> {
     }
 }
 
-struct CostPrinter<'a, C>
+struct VecPrinter<'a, C>
 where
     C: 'a,
 {
     costs: &'a [C],
 }
 
-impl<'a, C> CostPrinter<'a, C> {
+impl<'a, C> VecPrinter<'a, C> {
     fn new(costs: &'a [C]) -> Self {
-        CostPrinter { costs }
+        VecPrinter { costs }
     }
 }
 
-impl<'a, C: fmt::Display> fmt::Display for CostPrinter<'a, C> {
+impl<'a, C: fmt::Display> fmt::Display for VecPrinter<'a, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "(")?;
         self.costs.iter().fold(Ok(true), |res, cost| {
@@ -703,6 +761,22 @@ impl<'a, C: fmt::Display> fmt::Display for CostPrinter<'a, C> {
             }
         })?;
         write!(f, ")")
+    }
+}
+
+struct DurPrinter {
+    dur: Duration,
+}
+
+impl DurPrinter {
+    fn new(dur: Duration) -> Self {
+        Self { dur }
+    }
+}
+
+impl fmt::Display for DurPrinter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.dur)
     }
 }
 
