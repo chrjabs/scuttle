@@ -11,7 +11,7 @@ use rustsat::{
     encodings,
     encodings::{card, pb},
     instances::{ManageVars, MultiOptInstance, Objective, CNF},
-    solvers::{DefIncSolver, IncrementalSolve, SolveStats, SolverResult},
+    solvers::{ControlSignal, DefIncSolver, IncrementalSolve, SolveStats, SolverResult, Terminate},
     types::{Assignment, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
     var,
 };
@@ -25,7 +25,7 @@ where
     CE: card::IncUB + 'static,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + Default,
+    O: IncrementalSolve + Default + Terminate<'static>,
 {
     /// The SAT solver backend
     oracle: O,
@@ -56,9 +56,11 @@ where
     lims: Limits,
     /// Loggers to log with
     loggers: Vec<Option<Box<dyn WriteSolverLog>>>,
+    /// Termination callback
+    term_cb: Option<fn() -> ControlSignal>,
 }
 
-impl<'a, PBE, CE, VM> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, DefIncSolver<'a>>
+impl<PBE, CE, VM> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, DefIncSolver<'static, '_>>
 where
     PBE: pb::IncUB,
     CE: card::IncUB,
@@ -81,7 +83,7 @@ where
     CE: card::IncUB,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + Default,
+    O: IncrementalSolve + Default + Terminate<'static>,
 {
     fn init_with_options(inst: MultiOptInstance<VM>, opts: Options, block_clause_gen: BCG) -> Self {
         let (constr, objs) = inst.decompose();
@@ -100,6 +102,7 @@ where
             stats: Stats::default(),
             lims: Limits::none(),
             loggers: vec![],
+            term_cb: None,
         };
         solver.init(cnf, objs);
         solver
@@ -141,6 +144,15 @@ where
             self.loggers[id].take()
         }
     }
+
+    fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal) {
+        self.term_cb = Some(term_cb);
+        self.oracle.attach_terminator(term_cb);
+    }
+
+    fn detach_terminator(&mut self) {
+        self.term_cb = None;
+    }
 }
 
 impl<PBE, CE, VM, BCG, O> ExtendedSolveStats for PMinimal<PBE, CE, VM, BCG, O>
@@ -149,7 +161,7 @@ where
     CE: card::IncUB + encodings::EncodeStats,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + SolveStats + Default,
+    O: IncrementalSolve + SolveStats + Default + Terminate<'static>,
 {
     fn oracle_stats(&self) -> OracleStats {
         OracleStats {
@@ -195,7 +207,7 @@ where
     CE: card::IncUB,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + Default,
+    O: IncrementalSolve + Default + Terminate<'static>,
 {
     /// Initializes the solver
     fn init(&mut self, mut cnf: CNF, objs: Vec<Objective>) {
@@ -245,10 +257,12 @@ where
                 return Ok(());
             }
             debug_assert_eq!(res, SolverResult::SAT);
+            self.check_terminator()?;
 
             // Minimize solution
             let (costs, solution) = self.get_solution_and_internal_costs(Phase::OuterLoop)?;
             self.log_candidate(&costs, Phase::OuterLoop)?;
+            self.check_terminator()?;
             let (costs, solution, block_switch) = self.p_minimization(costs, solution)?;
 
             self.enumerate_at_pareto_point(costs, solution)?;
@@ -295,9 +309,11 @@ where
                 // Termination criteria, return last solution and costs
                 return Ok((costs, solution, block_switch));
             }
+            self.check_terminator()?;
 
             (costs, solution) = self.get_solution_and_internal_costs(Phase::Minimization)?;
             self.log_candidate(&costs, Phase::Minimization)?;
+            self.check_terminator()?;
         }
     }
 
@@ -334,6 +350,7 @@ where
                     return pp_term;
                 }
             }
+            self.check_terminator()?;
 
             // Block last solution
             self.oracle
@@ -349,6 +366,7 @@ where
                 self.pareto_front.add_pp(pareto_point);
                 return Ok(());
             }
+            self.check_terminator()?;
             solution = self.oracle.solution(self.max_orig_var).unwrap();
         }
     }
@@ -602,6 +620,16 @@ where
             }
         });
         clause
+    }
+
+    /// Checks the termination callback and terminates if appropriate
+    fn check_terminator(&mut self) -> Result<(), Termination> {
+        if let Some(cb) = &mut self.term_cb {
+            if cb() == ControlSignal::Terminate {
+                return Err(Termination::Callback);
+            }
+        }
+        Ok(())
     }
 
     /// Logs a cost point candidate. Can error a termination if the candidates limit is reached.

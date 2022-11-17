@@ -135,10 +135,7 @@ impl fmt::Display for FileFormat {
     }
 }
 
-pub struct Cli<E, EWrapper>
-where
-    EWrapper: FnMut(IOError) -> E,
-{
+pub struct Cli {
     pub options: Options,
     pub limits: Limits,
     pub file_format: FileFormat,
@@ -150,7 +147,6 @@ where
     print_stats: bool,
     color: concolor_clap::Color,
     logger_config: LoggerConfig,
-    error_wrapper: EWrapper,
 }
 
 macro_rules! none_if_zero {
@@ -163,11 +159,8 @@ macro_rules! none_if_zero {
     };
 }
 
-impl<E, EWrapper> Cli<E, EWrapper>
-where
-    EWrapper: Fn(IOError) -> E,
-{
-    pub fn init(error_wrapper: EWrapper) -> Self {
+impl Cli {
+    pub fn init() -> Self {
         let args = CliArgs::parse();
         Self {
             options: Options {
@@ -219,7 +212,6 @@ where
                 log_oracle_calls: args.log_oracle_calls,
                 log_heuristic_obj_improvement: args.log_heuristic_obj_improvement,
             },
-            error_wrapper,
         }
     }
 
@@ -240,18 +232,7 @@ where
         }
     }
 
-    fn wrap_error<T>(&self, in_res: Result<T, IOError>) -> Result<T, E> {
-        match in_res {
-            Ok(t) => Ok(t),
-            Err(err) => Err((self.error_wrapper)(err)),
-        }
-    }
-
-    pub fn warning(&self, msg: &str) -> Result<(), E> {
-        self.wrap_error(self.iwarning(msg))
-    }
-
-    fn iwarning(&self, msg: &str) -> Result<(), IOError> {
+    pub fn warning(&self, msg: &str) -> Result<(), IOError> {
         let mut buffer = self.stderr.buffer();
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Yellow)))?;
         write!(&mut buffer, "warning")?;
@@ -264,11 +245,7 @@ where
         Ok(())
     }
 
-    pub fn error(&self, msg: &str) -> Result<(), E> {
-        self.wrap_error(self.ierror(msg))
-    }
-
-    fn ierror(&self, msg: &str) -> Result<(), IOError> {
+    pub fn error(&self, msg: &str) -> Result<(), IOError> {
         let mut buffer = self.stderr.buffer();
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Red)))?;
         write!(&mut buffer, "error")?;
@@ -281,11 +258,7 @@ where
         Ok(())
     }
 
-    pub fn info(&self, msg: &str) -> Result<(), E> {
-        self.wrap_error(self.iinfo(msg))
-    }
-
-    fn iinfo(&self, msg: &str) -> Result<(), IOError> {
+    pub fn info(&self, msg: &str) -> Result<(), IOError> {
         let mut buffer = self.stdout.buffer();
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
         write!(&mut buffer, "info")?;
@@ -298,11 +271,7 @@ where
         Ok(())
     }
 
-    pub fn print_header(&self) -> Result<(), E> {
-        self.wrap_error(self.iprint_header())
-    }
-
-    fn iprint_header(&self) -> Result<(), IOError> {
+    pub fn print_header(&self) -> Result<(), IOError> {
         let mut buffer = self.stdout.buffer();
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Green)))?;
         write!(&mut buffer, "{}", crate_name!())?;
@@ -320,11 +289,7 @@ where
         Ok(())
     }
 
-    pub fn print_solver_config(&self) -> Result<(), E> {
-        self.wrap_error(self.iprint_solver_config())
-    }
-
-    fn iprint_solver_config(&self) -> Result<(), IOError> {
+    pub fn print_solver_config(&self) -> Result<(), IOError> {
         if self.print_solver_config {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;
@@ -367,11 +332,7 @@ where
         Ok(())
     }
 
-    pub fn print_pareto_front(&self, pareto_front: ParetoFront) -> Result<(), E> {
-        self.wrap_error(self.iprint_pareto_front(pareto_front))
-    }
-
-    fn iprint_pareto_front(&self, pareto_front: ParetoFront) -> Result<(), IOError> {
+    pub fn print_pareto_front(&self, pareto_front: ParetoFront) -> Result<(), IOError> {
         let mut buffer = self.stdout.buffer();
         Self::start_block(&mut buffer)?;
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
@@ -391,11 +352,7 @@ where
         Ok(())
     }
 
-    pub fn print_stats(&self, stats: Stats) -> Result<(), E> {
-        self.wrap_error(self.iprint_stats(stats))
-    }
-
-    fn iprint_stats(&self, stats: Stats) -> Result<(), IOError> {
+    pub fn print_stats(&self, stats: Stats) -> Result<(), IOError> {
         if self.print_stats {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;
@@ -416,11 +373,7 @@ where
         Ok(())
     }
 
-    pub fn print_oracle_stats(&self, stats: OracleStats) -> Result<(), E> {
-        self.wrap_error(self.iprint_oracle_stats(stats))
-    }
-
-    fn iprint_oracle_stats(&self, stats: OracleStats) -> Result<(), IOError> {
+    pub fn print_oracle_stats(&self, stats: OracleStats) -> Result<(), IOError> {
         if self.print_stats {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;
@@ -442,11 +395,7 @@ where
         Ok(())
     }
 
-    pub fn print_encoding_stats(&self, stats: Vec<EncodingStats>) -> Result<(), E> {
-        self.wrap_error(self.iprint_encoding_stats(stats))
-    }
-
-    fn iprint_encoding_stats(&self, stats: Vec<EncodingStats>) -> Result<(), IOError> {
+    pub fn print_encoding_stats(&self, stats: Vec<EncodingStats>) -> Result<(), IOError> {
         if self.print_stats {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;

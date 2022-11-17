@@ -1,6 +1,14 @@
 #![cfg(feature = "build-binary")]
 
-use std::{ffi::OsString, fmt, path::Path};
+use std::{
+    ffi::OsString,
+    fmt,
+    path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use pminimal::{
     self,
@@ -10,11 +18,13 @@ use pminimal::{
 use rustsat::{
     encodings::{card, pb},
     instances::{MultiOptInstance, ParsingError},
-    solvers::DefIncSolver,
+    solvers::{ControlSignal, DefIncSolver},
 };
 
+static mut SIG_TERM_FLAG: Option<Arc<AtomicBool>> = None;
+
 fn main() -> Result<(), MainError> {
-    let cli = Cli::init(MainError::IO);
+    let cli = Cli::init();
 
     cli.print_header()?;
     cli.print_solver_config()?;
@@ -25,6 +35,35 @@ fn main() -> Result<(), MainError> {
 
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, DefIncSolver> =
         PMinimal::init_with_options(inst, cli.options, pminimal::default_blocking_clause);
+
+    // Set up signal handling
+    unsafe { SIG_TERM_FLAG = Some(Arc::new(AtomicBool::new(false))) };
+    signal_hook::flag::register(
+        signal_hook::consts::SIGTERM,
+        Arc::clone(unsafe { SIG_TERM_FLAG.as_ref().unwrap() }),
+    )?;
+    signal_hook::flag::register(
+        signal_hook::consts::SIGINT,
+        Arc::clone(unsafe { SIG_TERM_FLAG.as_ref().unwrap() }),
+    )?;
+    signal_hook::flag::register(
+        signal_hook::consts::SIGABRT,
+        Arc::clone(unsafe { SIG_TERM_FLAG.as_ref().unwrap() }),
+    )?;
+    signal_hook::flag::register(
+        signal_hook::consts::SIGXCPU,
+        Arc::clone(unsafe { SIG_TERM_FLAG.as_ref().unwrap() }),
+    )?;
+    solver.attach_terminator(|| {
+        unsafe {
+            if let Some(flag) = &SIG_TERM_FLAG {
+                if flag.load(Ordering::Relaxed) {
+                    return ControlSignal::Terminate;
+                }
+            }
+        }
+        ControlSignal::Continue
+    });
 
     solver.attach_logger(Box::new(cli.new_cli_logger()));
 
@@ -46,6 +85,9 @@ fn main() -> Result<(), MainError> {
                 "Solver terminated because logger failed: {}",
                 log_error
             )),
+            pminimal::Termination::Callback => {
+                cli.info("Solver terminated early because of interrupt signal")
+            }
         }?
     };
 
@@ -110,6 +152,12 @@ enum MainError {
     NoFileExtension,
     Parsing(ParsingError),
     IO(std::io::Error),
+}
+
+impl From<std::io::Error> for MainError {
+    fn from(ioe: std::io::Error) -> Self {
+        MainError::IO(ioe)
+    }
 }
 
 impl MainError {

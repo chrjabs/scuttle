@@ -20,7 +20,7 @@ use std::{fmt, ops::Not};
 
 use rustsat::{
     instances::{ManageVars, MultiOptInstance},
-    solvers::SolverResult,
+    solvers::{ControlSignal, SolverResult},
     types::{Assignment, Clause, Lit},
 };
 
@@ -65,6 +65,10 @@ where
     fn attach_logger(&mut self, boxed_logger: Box<dyn WriteSolverLog>) -> Self::LoggerId;
     /// Detaches a logger from the solver
     fn detach_logger(&mut self, id: Self::LoggerId) -> Option<Box<dyn WriteSolverLog>>;
+    /// Attaches a terminator callback. Only one callback can be attached at a time.
+    fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal);
+    /// Detaches the termination callback
+    fn detach_terminator(&mut self);
 }
 
 /// Trait for getting statistics from the solver
@@ -88,6 +92,8 @@ pub enum Termination {
     OracleCallsLimit,
     /// Termination because an attached logger failed
     LoggerError(LoggerError),
+    /// Termination because of termination callback
+    Callback,
 }
 
 /// Algorithm phases that the solver can be in
