@@ -39,7 +39,7 @@ fn main() -> Result<(), MainError> {
         let (cnf, softs, _) = inst.as_hard_cls_soft_cls();
         let (softs, offsets) = softs.into_iter().unzip::<_, _, _, Vec<isize>>();
         let mut prepro = MaxPre::new(cnf, softs, false);
-        prepro.preprocess(&cli.maxpre_techniques, 2, 1e9, false);
+        prepro.preprocess(&cli.maxpre_techniques, 0, 1e9, false);
         let (cnf, softs) = prepro.prepro_instance();
         let sat_inst = SatInstance::from_iter(cnf);
         let objs = softs.into_iter().map(|s| Objective::from_iter(s));
@@ -111,7 +111,10 @@ fn main() -> Result<(), MainError> {
                 log_error
             )),
             pminimal::Termination::Callback => {
-                cli.info("Solver terminated early because of interrupt signal")
+                cli.warning("Solver terminated early because of interrupt signal")
+            }
+            pminimal::Termination::OracleError(oe) => {
+                cli.error(&format!("The SAT oracle returned an error: {}", oe))
             }
         }?
     };

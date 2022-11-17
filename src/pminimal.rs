@@ -4,7 +4,7 @@ use std::ops::Not;
 
 use crate::{
     default_blocking_clause, types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits,
-    LoggerError, Options, OracleStats, ParetoFront, Phase, Solve, Stats, Termination,
+    Options, OracleStats, ParetoFront, Phase, Solve, Stats, Termination,
     WriteSolverLog,
 };
 use rustsat::{
@@ -251,7 +251,7 @@ where
         debug_assert_eq!(self.obj_encs.len(), self.stats.n_objs);
         loop {
             // Find minimization starting point
-            let res = self.oracle.solve().unwrap();
+            let res = self.oracle.solve()?;
             self.log_oracle_call(res, Phase::OuterLoop)?;
             if res == SolverResult::UNSAT {
                 return Ok(());
@@ -269,7 +269,7 @@ where
 
             // Block last Pareto point, if temporarily blocked
             if let Some(block_lit) = block_switch {
-                self.oracle.add_unit(block_lit).unwrap();
+                self.oracle.add_unit(block_lit)?;
             }
         }
     }
@@ -289,11 +289,11 @@ where
             if self.opts.max_sols_per_pp == Some(1) {
                 // Block permanently since no enumeration at Pareto point
                 let block_clause = self.dominated_block_clause(&costs);
-                self.oracle.add_clause(block_clause).unwrap();
+                self.oracle.add_clause(block_clause)?;
             } else {
                 // Permanently block last candidate
                 if let Some(block_lit) = block_switch {
-                    self.oracle.add_unit(block_lit).unwrap();
+                    self.oracle.add_unit(block_lit)?;
                 }
                 // Temporarily block to allow for enumeration at Pareto point
                 let block_lit = self.tmp_block_dominated(&costs);
@@ -302,7 +302,7 @@ where
             }
 
             // Check if dominating solution exists
-            let res = self.oracle.solve_assumps(assumps).unwrap();
+            let res = self.oracle.solve_assumps(assumps)?;
             debug_assert_ne!(res, SolverResult::Interrupted);
             self.log_oracle_call(res, Phase::Minimization)?;
             if res == SolverResult::UNSAT {
@@ -353,12 +353,10 @@ where
             self.check_terminator()?;
 
             // Block last solution
-            self.oracle
-                .add_clause((self.block_clause_gen)(solution))
-                .unwrap();
+            self.oracle.add_clause((self.block_clause_gen)(solution))?;
 
             // Find next solution
-            let res = self.oracle.solve_assumps(assumps.clone()).unwrap();
+            let res = self.oracle.solve_assumps(assumps.clone())?;
             debug_assert_ne!(res, SolverResult::Interrupted);
             self.log_oracle_call(res, Phase::Enumeration)?;
             if res == SolverResult::UNSAT {
@@ -367,7 +365,7 @@ where
                 return Ok(());
             }
             self.check_terminator()?;
-            solution = self.oracle.solution(self.max_orig_var).unwrap();
+            solution = self.oracle.solution(self.max_orig_var)?;
         }
     }
 
@@ -380,7 +378,7 @@ where
     ) -> Result<(Vec<usize>, Assignment), Termination> {
         let mut costs = Vec::new();
         costs.resize(self.stats.n_objs, 0);
-        let mut sol = self.oracle.solution(self.max_orig_var).unwrap();
+        let mut sol = self.oracle.solution(self.max_orig_var)?;
         let tightening = self
             .opts
             .heuristic_improvements
@@ -451,7 +449,7 @@ where
         if tightening || learning {
             self.log_heuristic_obj_improvement(obj_idx, cost + reduction, cost, learned_cnf.len())?;
         }
-        self.oracle.add_cnf(learned_cnf).unwrap();
+        self.oracle.add_cnf(learned_cnf)?;
         Ok(cost)
     }
 
@@ -637,22 +635,12 @@ where
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.stats.n_candidates += 1;
         // Dispatch to loggers
-        if let Err(log_err) =
-            self.loggers
-                .iter_mut()
-                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
-                    if res.is_ok() {
-                        if let Some(logger) = opt_logger {
-                            logger.log_candidate(costs, phase)?
-                        }
-                        Ok(())
-                    } else {
-                        res
-                    }
-                })
-        {
-            return Err(Termination::LoggerError(log_err));
-        }
+        self.loggers.iter_mut().try_for_each(|l| {
+            if let Some(l) = l {
+                return l.log_candidate(costs, phase);
+            }
+            Ok(())
+        })?;
         // Update limit and check termination
         if let Some(candidates) = &mut self.lims.candidates {
             *candidates -= 1;
@@ -667,22 +655,12 @@ where
     fn log_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), Termination> {
         self.stats.n_oracle_calls += 1;
         // Dispatch to loggers
-        if let Err(log_err) =
-            self.loggers
-                .iter_mut()
-                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
-                    if res.is_ok() {
-                        if let Some(logger) = opt_logger {
-                            logger.log_oracle_call(result, phase)?
-                        }
-                        Ok(())
-                    } else {
-                        res
-                    }
-                })
-        {
-            return Err(Termination::LoggerError(log_err));
-        }
+        self.loggers.iter_mut().try_for_each(|l| {
+            if let Some(l) = l {
+                return l.log_oracle_call(result, phase);
+            }
+            Ok(())
+        })?;
         // Update limit and check termination
         if let Some(oracle_calls) = &mut self.lims.oracle_calls {
             *oracle_calls -= 1;
@@ -697,22 +675,12 @@ where
     fn log_solution(&mut self) -> Result<(), Termination> {
         self.stats.n_solutions += 1;
         // Dispatch to loggers
-        if let Err(log_err) =
-            self.loggers
-                .iter_mut()
-                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
-                    if res.is_ok() {
-                        if let Some(logger) = opt_logger {
-                            logger.log_solution()?
-                        }
-                        Ok(())
-                    } else {
-                        res
-                    }
-                })
-        {
-            return Err(Termination::LoggerError(log_err));
-        }
+        self.loggers.iter_mut().try_for_each(|l| {
+            if let Some(l) = l {
+                return l.log_solution();
+            }
+            Ok(())
+        })?;
         // Update limit and check termination
         if let Some(solutions) = &mut self.lims.sols {
             *solutions -= 1;
@@ -727,22 +695,12 @@ where
     fn log_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), Termination> {
         self.stats.n_pareto_points += 1;
         // Dispatch to loggers
-        if let Err(log_err) =
-            self.loggers
-                .iter_mut()
-                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
-                    if res.is_ok() {
-                        if let Some(logger) = opt_logger {
-                            logger.log_pareto_point(pareto_point)?
-                        }
-                        Ok(())
-                    } else {
-                        res
-                    }
-                })
-        {
-            return Err(Termination::LoggerError(log_err));
-        }
+        self.loggers.iter_mut().try_for_each(|l| {
+            if let Some(l) = l {
+                return l.log_pareto_point(pareto_point);
+            }
+            Ok(())
+        })?;
         // Update limit and check termination
         if let Some(pps) = &mut self.lims.pps {
             *pps -= 1;
@@ -763,27 +721,17 @@ where
     ) -> Result<(), Termination> {
         self.stats.n_pareto_points += 1;
         // Dispatch to loggers
-        if let Err(log_err) =
-            self.loggers
-                .iter_mut()
-                .fold(Ok(()), |res: Result<(), LoggerError>, opt_logger| {
-                    if res.is_ok() {
-                        if let Some(logger) = opt_logger {
-                            logger.log_heuristic_obj_improvement(
-                                obj_idx,
-                                apparent_cost,
-                                improved_cost,
-                                learned_clauses,
-                            )?
-                        }
-                        Ok(())
-                    } else {
-                        res
-                    }
-                })
-        {
-            return Err(Termination::LoggerError(log_err));
-        }
+        self.loggers.iter_mut().try_for_each(|l| {
+            if let Some(l) = l {
+                return l.log_heuristic_obj_improvement(
+                    obj_idx,
+                    apparent_cost,
+                    improved_cost,
+                    learned_clauses,
+                );
+            }
+            Ok(())
+        })?;
         Ok(())
     }
 

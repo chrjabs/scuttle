@@ -20,7 +20,7 @@ use std::{fmt, ops::Not};
 
 use rustsat::{
     instances::{ManageVars, MultiOptInstance},
-    solvers::{ControlSignal, SolverResult},
+    solvers::{ControlSignal, SolverError, SolverResult},
     types::{Assignment, Clause, Lit},
 };
 
@@ -94,6 +94,20 @@ pub enum Termination {
     LoggerError(LoggerError),
     /// Termination because of termination callback
     Callback,
+    /// An error occured in the oracle
+    OracleError(SolverError),
+}
+
+impl From<SolverError> for Termination {
+    fn from(se: SolverError) -> Self {
+        Termination::OracleError(se)
+    }
+}
+
+impl From<LoggerError> for Termination {
+    fn from(le: LoggerError) -> Self {
+        Termination::LoggerError(le)
+    }
 }
 
 /// Algorithm phases that the solver can be in
