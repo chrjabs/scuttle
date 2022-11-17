@@ -3,13 +3,14 @@
 use std::{
     ffi::OsString,
     fmt,
-    path::Path,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
 
+use maxpre::MaxPre;
 use pminimal::{
     self,
     cli::{Cli, FileFormat},
@@ -17,7 +18,7 @@ use pminimal::{
 };
 use rustsat::{
     encodings::{card, pb},
-    instances::{MultiOptInstance, ParsingError},
+    instances::{MultiOptInstance, Objective, ParsingError, SatInstance},
     solvers::{ControlSignal, DefIncSolver},
 };
 
@@ -29,9 +30,33 @@ fn main() -> Result<(), MainError> {
     cli.print_header()?;
     cli.print_solver_config()?;
 
-    cli.info(&format!("solving instance {}", cli.inst_path))?;
+    cli.info(&format!("solving instance {:?}", cli.inst_path))?;
 
     let inst = parse_instance(cli.inst_path.clone(), cli.file_format)?;
+
+    // MaxPre Preprocessing
+    let (prepro, inst) = if cli.preprocessing {
+        let (cnf, softs, _) = inst.as_hard_cls_soft_cls();
+        let (softs, offsets) = softs.into_iter().unzip::<_, _, _, Vec<isize>>();
+        let mut prepro = MaxPre::new(cnf, softs, false);
+        prepro.preprocess(&cli.maxpre_techniques, 2, 1e9, false);
+        let (cnf, softs) = prepro.prepro_instance();
+        let sat_inst = SatInstance::from_iter(cnf);
+        let objs = softs.into_iter().map(|s| Objective::from_iter(s));
+        let removed_weight = prepro.removed_weight();
+        let objs = std::iter::zip(offsets, removed_weight)
+            .map(|(o1, o2)| o1 + o2 as isize)
+            .zip(objs)
+            .map(|(o, mut obj)| {
+                obj.increase_offset(o);
+                obj
+            })
+            .collect();
+        let inst = MultiOptInstance::compose(sat_inst, objs);
+        (Some(prepro), inst)
+    } else {
+        (None, inst)
+    };
 
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, DefIncSolver> =
         PMinimal::init_with_options(inst, cli.options, pminimal::default_blocking_clause);
@@ -94,6 +119,14 @@ fn main() -> Result<(), MainError> {
     cli.info("finished solving the instance")?;
 
     let pareto_front = solver.pareto_front();
+
+    // Solution reconstruction
+    let pareto_front = if let Some(prepro) = prepro {
+        pareto_front.convert_solutions(&mut |s| prepro.reconstruct(s))
+    } else {
+        pareto_front
+    };
+
     cli.print_pareto_front(pareto_front)?;
 
     cli.print_stats(solver.stats())?;
@@ -114,10 +147,9 @@ macro_rules! is_one_of {
 }
 
 fn parse_instance(
-    inst_path: String,
+    inst_path: PathBuf,
     file_format: FileFormat,
 ) -> Result<MultiOptInstance, MainError> {
-    let inst_path = Path::new(&inst_path);
     match file_format {
         FileFormat::Infer => {
             if let Some(ext) = inst_path.extension() {

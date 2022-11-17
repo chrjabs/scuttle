@@ -1,6 +1,7 @@
 //! # Command Line Interface for the Solver Binary
 
 use std::io::Error as IOError;
+use std::path::PathBuf;
 use std::{
     fmt::{self},
     io::Write,
@@ -22,7 +23,7 @@ use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 struct CliArgs {
     /// The path to the instance file to load. Compressed files with an
     /// extension like `.bz2` or `.gz` can be read.
-    inst_path: String,
+    inst_path: PathBuf,
     /// The maximum number of solutions to enumerate per Pareto point (0 is no limit)
     #[arg(long, default_value_t = 1)]
     max_sols_per_pp: usize,
@@ -35,6 +36,12 @@ struct CliArgs {
     /// Reserve variables for the encodings in advance
     #[arg(long, default_value_t = Bool::from(Options::default().reserve_enc_vars))]
     reserve_encoding_vars: Bool,
+    /// Preprocess the instance with MaxPre before solving
+    #[arg(long, default_value_t = Bool::from(false))]
+    preprocessing: Bool,
+    /// The preprocessing technique string to use
+    #[arg(long, default_value_t = String::from("[[uvsrgc]VRTG]"))]
+    maxpre_techniques: String,
     /// Limit the number of Pareto points to enumerate (0 is no limit)
     #[arg(long, default_value_t = 0)]
     pp_limit: usize,
@@ -139,7 +146,9 @@ pub struct Cli {
     pub options: Options,
     pub limits: Limits,
     pub file_format: FileFormat,
-    pub inst_path: String,
+    pub inst_path: PathBuf,
+    pub preprocessing: bool,
+    pub maxpre_techniques: String,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,
@@ -179,6 +188,8 @@ impl Cli {
             },
             file_format: args.file_format,
             inst_path: args.inst_path.clone(),
+            preprocessing: args.preprocessing.is_true(),
+            maxpre_techniques: args.maxpre_techniques,
             stdout: BufferWriter::stdout(match args.color.color {
                 concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
                 concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,

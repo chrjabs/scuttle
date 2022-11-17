@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 rustsat = { path = "../rustsat", default-features = false, features = ["multiopt"] }
+maxpre = { path = "../maxpre-rs", optional = true }
 cpu-time = { optional = true, version = "1.0" }
 clap = { optional = true, version = "4.0", features = ["derive", "cargo"] }
 concolor-clap = { optional = true, version = "0.0.12" }
@@ -24,6 +25,7 @@ build-binary = [
   "dep:termcolor",
   "dep:atty",
   "dep:cpu-time",
+  "dep:maxpre",
   "dep:signal-hook",
   "rustsat/compression",
 ]
