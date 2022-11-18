@@ -476,6 +476,11 @@ impl Cli {
             )?;
             Self::print_parameter(
                 &mut buffer,
+                "removed-weight",
+                VecPrinter::new(&stats.removed_weight),
+            )?;
+            Self::print_parameter(
+                &mut buffer,
                 "prepro-time",
                 DurPrinter::new(stats.prepro_time),
             )?;

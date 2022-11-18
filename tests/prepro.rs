@@ -1,21 +1,20 @@
 #![cfg(feature = "build-binary")]
 
-use std::{collections::HashSet, path::Path};
-
 use maxpre::MaxPre;
 use pminimal::{self, types::ParetoFront, Limits, Options, PMinimal, Solve};
 use rustsat::{
     encodings::{card, pb},
     instances::{MultiOptInstance, Objective, SatInstance},
     solvers,
+    types::RsHashSet,
 };
 
 fn check_pf_shape(pf: ParetoFront, shape: Vec<(Vec<isize>, usize)>) {
-    let pps_set: HashSet<(Vec<isize>, usize)> = pf
+    let pps_set: RsHashSet<(Vec<isize>, usize)> = pf
         .into_iter()
         .map(|pp| (pp.costs().clone(), pp.n_sols()))
         .collect();
-    let shape_set: HashSet<(Vec<isize>, usize)> = shape.into_iter().collect();
+    let shape_set: RsHashSet<(Vec<isize>, usize)> = shape.into_iter().collect();
     assert_eq!(pps_set, shape_set);
 }
 
@@ -41,9 +40,8 @@ fn preprocess_inst(inst: MultiOptInstance, techniques: &str) -> (MultiOptInstanc
 }
 
 fn small(opts: Options) {
-    let inst: MultiOptInstance =
-        MultiOptInstance::from_dimacs_path(Path::new("./data/small.mcnf")).unwrap();
-    let (inst, prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
+    let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/small.mcnf").unwrap();
+    let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
@@ -56,9 +54,8 @@ fn small(opts: Options) {
 }
 
 fn medium_single(opts: Options) {
-    let inst: MultiOptInstance =
-        MultiOptInstance::from_dimacs_path(Path::new("./data/medium.mcnf")).unwrap();
-    let (inst, prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
+    let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/medium.mcnf").unwrap();
+    let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
@@ -78,9 +75,8 @@ fn medium_single(opts: Options) {
 }
 
 fn four(opts: Options) {
-    let inst: MultiOptInstance =
-        MultiOptInstance::from_dimacs_path(Path::new("./data/four.mcnf")).unwrap();
-    let (inst, prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
+    let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/four.mcnf").unwrap();
+    let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
@@ -99,8 +95,8 @@ fn four(opts: Options) {
 
 fn parkinsons(opts: Options) {
     let inst: MultiOptInstance =
-        MultiOptInstance::from_dimacs_path(Path::new("./data/parkinsons_mlic.mcnf")).unwrap();
-    let (inst, prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
+        MultiOptInstance::from_dimacs_path("./data/parkinsons_mlic.mcnf").unwrap();
+    let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
@@ -123,8 +119,8 @@ fn parkinsons(opts: Options) {
 
 fn mushroom(opts: Options) {
     let inst: MultiOptInstance =
-        MultiOptInstance::from_dimacs_path(Path::new("./data/mushroom_mlic.mcnf")).unwrap();
-    let (inst, prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
+        MultiOptInstance::from_dimacs_path("./data/mushroom_mlic.mcnf").unwrap();
+    let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
@@ -143,6 +139,74 @@ fn mushroom(opts: Options) {
         (vec![8, 3], 1),
         (vec![9, 2], 1),
         (vec![10, 0], 1),
+    ];
+    check_pf_shape(pf, shape);
+}
+
+pub fn dal(opts: Options) {
+    let inst: MultiOptInstance = MultiOptInstance::from_opb_path("./data/dal.opb").unwrap();
+    let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
+    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
+        PMinimal::default_init_with_options(inst, opts);
+    solver.solve(Limits::none()).unwrap();
+    let pf = solver
+        .pareto_front()
+        .convert_solutions(&mut |s| prepro.reconstruct(s));
+    assert_eq!(pf.n_pps(), 21);
+    let shape = vec![
+        (vec![8, 0, 0, 0, 0, 7, 2], 1),
+        (vec![7, 1, 0, 0, 0, 7, 2], 1),
+        (vec![7, 0, 1, 0, 0, 7, 2], 1),
+        (vec![6, 0, 2, 0, 0, 7, 2], 1),
+        (vec![6, 2, 0, 0, 0, 7, 2], 1),
+        (vec![6, 1, 1, 0, 0, 7, 2], 1),
+        (vec![5, 1, 2, 0, 0, 7, 2], 1),
+        (vec![4, 1, 3, 0, 0, 7, 2], 1),
+        (vec![3, 1, 4, 0, 0, 7, 2], 1),
+        (vec![3, 0, 5, 0, 0, 7, 2], 1),
+        (vec![4, 0, 4, 0, 0, 7, 2], 1),
+        (vec![4, 2, 2, 0, 0, 7, 2], 1),
+        (vec![3, 2, 3, 0, 0, 7, 2], 1),
+        (vec![5, 0, 3, 0, 0, 7, 2], 1),
+        (vec![5, 3, 0, 0, 0, 7, 2], 1),
+        (vec![5, 2, 1, 0, 0, 7, 2], 1),
+        (vec![4, 4, 0, 0, 0, 7, 2], 1),
+        (vec![4, 3, 1, 0, 0, 7, 2], 1),
+        (vec![3, 3, 2, 0, 0, 7, 2], 1),
+        (vec![3, 5, 0, 0, 0, 7, 2], 1),
+        (vec![3, 4, 1, 0, 0, 7, 2], 1),
+    ];
+    check_pf_shape(pf, shape);
+}
+
+pub fn set_cover(opts: Options) {
+    let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/set-cover.mcnf").unwrap();
+    let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
+    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
+        PMinimal::default_init_with_options(inst, opts);
+    solver.solve(Limits::none()).unwrap();
+    let pf = solver
+        .pareto_front()
+        .convert_solutions(&mut |s| prepro.reconstruct(s));
+    assert_eq!(pf.n_pps(), 17);
+    let shape = vec![
+        (vec![302, 133], 1),
+        (vec![195, 228], 1),
+        (vec![253, 175], 1),
+        (vec![284, 143], 1),
+        (vec![173, 278], 1),
+        (vec![147, 289], 1),
+        (vec![223, 185], 1),
+        (vec![268, 162], 1),
+        (vec![343, 119], 1),
+        (vec![341, 123], 1),
+        (vec![325, 129], 1),
+        (vec![273, 152], 1),
+        (vec![264, 171], 1),
+        (vec![216, 216], 1),
+        (vec![220, 196], 1),
+        (vec![192, 266], 1),
+        (vec![185, 274], 1),
     ];
     check_pf_shape(pf, shape);
 }
@@ -171,4 +235,14 @@ fn parkinsons_prepro() {
 #[ignore]
 fn mushroom_prepro() {
     mushroom(Options::default())
+}
+
+#[test]
+fn dal_prepro() {
+    dal(Options::default())
+}
+
+#[test]
+fn set_cover_prepro() {
+    set_cover(Options::default())
 }
