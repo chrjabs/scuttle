@@ -600,10 +600,10 @@ impl CliLogger {
             buffer.reset()?;
             writeln!(
                 &mut buffer,
-                ": costs: {}, phase: {}, cpu-time: {}",
+                ": costs: {}; phase: {}; cpu-time: {}",
                 VecPrinter::new(costs),
                 phase,
-                ProcessTime::now().as_duration().as_secs_f32(),
+                DurPrinter::new(ProcessTime::now().as_duration()),
             )?;
             self.stdout.print(&buffer)?;
         }
@@ -618,10 +618,10 @@ impl CliLogger {
             buffer.reset()?;
             writeln!(
                 &mut buffer,
-                ": result: {}, phase: {}, cpu-time: {}",
+                ": result: {}; phase: {}; cpu-time: {}",
                 result,
                 phase,
-                ProcessTime::now().as_duration().as_secs_f32(),
+                DurPrinter::new(ProcessTime::now().as_duration()),
             )?;
             self.stdout.print(&buffer)?;
         }
@@ -637,7 +637,7 @@ impl CliLogger {
             writeln!(
                 &mut buffer,
                 ": cpu-time: {}",
-                ProcessTime::now().as_duration().as_secs_f32(),
+                DurPrinter::new(ProcessTime::now().as_duration()),
             )?;
             self.stdout.print(&buffer)?;
         }
@@ -652,10 +652,10 @@ impl CliLogger {
             buffer.reset()?;
             writeln!(
                 &mut buffer,
-                ": costs: {}, n-sols: {}, cpu-time: {}",
+                ": costs: {}; n-sols: {}; cpu-time: {}",
                 VecPrinter::new(pareto_point.costs()),
                 pareto_point.n_sols(),
-                ProcessTime::now().as_duration().as_secs_f32(),
+                DurPrinter::new(ProcessTime::now().as_duration()),
             )?;
             self.stdout.print(&buffer)?;
         }
@@ -676,9 +676,9 @@ impl CliLogger {
             buffer.reset()?;
             writeln!(
                 &mut buffer,
-                ": obj-idx: {}, apparent-cost: {}, improved-cost: {}, learned-clauses: {}, cpu-time: {}",
+                ": obj-idx: {}; apparent-cost: {}; improved-cost: {}; learned-clauses: {}; cpu-time: {}",
                 obj_idx, apparent_cost, improved_cost, learned_clauses,
-                ProcessTime::now().as_duration().as_secs_f32(),
+                DurPrinter::new(ProcessTime::now().as_duration()),
             )?;
             self.stdout.print(&buffer)?;
         }

@@ -111,6 +111,7 @@ where
     }
 
     fn solve(&mut self, limits: Limits) -> Result<(), Termination> {
+        self.stats.n_solve_calls += 1;
         self.lims = limits;
         self.alg_main()
     }
