@@ -79,6 +79,83 @@ where
     }
 }
 
+impl<PBE, CE, VM, O> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, O>
+where
+    PBE: pb::IncUB,
+    CE: card::IncUB,
+    VM: ManageVars,
+    O: IncrementalSolve + Default + Terminate<'static>,
+{
+    /// Initializes a default solver with a configured oracle and options. The
+    /// oracle should _not_ have any clauses loaded yet.
+    pub fn default_init_with_oracle_and_options(
+        inst: MultiOptInstance<VM>,
+        oracle: O,
+        opts: Options,
+    ) -> Self {
+        let (constr, objs) = inst.decompose();
+        let (cnf, var_manager) = constr.as_cnf();
+        let block_clause_gen: fn(Assignment) -> Clause = default_blocking_clause;
+        let mut solver = PMinimal {
+            oracle,
+            var_manager,
+            obj_encs: vec![],
+            obj_clauses: vec![],
+            blits: RsHashMap::default(),
+            obj_lit_data: RsHashMap::default(),
+            max_orig_var: var![0],
+            block_clause_gen,
+            pareto_front: ParetoFront::new(),
+            opts,
+            stats: Stats::default(),
+            lims: Limits::none(),
+            loggers: vec![],
+            term_cb: None,
+        };
+        solver.init(cnf, objs);
+        solver
+    }
+}
+
+impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
+where
+    PBE: pb::IncUB,
+    CE: card::IncUB,
+    VM: ManageVars,
+    BCG: FnMut(Assignment) -> Clause,
+    O: IncrementalSolve + Default + Terminate<'static>,
+{
+    /// Initializes a default solver with a configured oracle and options. The
+    /// oracle should _not_ have any clauses loaded yet.
+    pub fn init_with_oracle_and_options(
+        inst: MultiOptInstance<VM>,
+        oracle: O,
+        opts: Options,
+        block_clause_gen: BCG,
+    ) -> Self {
+        let (constr, objs) = inst.decompose();
+        let (cnf, var_manager) = constr.as_cnf();
+        let mut solver = PMinimal {
+            oracle,
+            var_manager,
+            obj_encs: vec![],
+            obj_clauses: vec![],
+            blits: RsHashMap::default(),
+            obj_lit_data: RsHashMap::default(),
+            max_orig_var: var![0],
+            block_clause_gen,
+            pareto_front: ParetoFront::new(),
+            opts,
+            stats: Stats::default(),
+            lims: Limits::none(),
+            loggers: vec![],
+            term_cb: None,
+        };
+        solver.init(cnf, objs);
+        solver
+    }
+}
+
 impl<PBE, CE, VM, BCG, O> Solve<VM, BCG> for PMinimal<PBE, CE, VM, BCG, O>
 where
     PBE: pb::IncUB,
@@ -190,6 +267,12 @@ where
                     offset: *offset,
                     unit_weight: Some(*unit_weight),
                 },
+                ObjEncoding::Constant { offset } => EncodingStats {
+                    n_clauses: 0,
+                    n_vars: 0,
+                    offset: *offset,
+                    unit_weight: None,
+                },
             })
             .collect()
     }
@@ -208,6 +291,7 @@ where
     /// Initializes the solver
     fn init(&mut self, mut cnf: CNF, objs: Vec<Objective>) {
         self.stats.n_objs = objs.len();
+        self.stats.n_orig_clauses = cnf.n_clauses();
         self.obj_encs.reserve_exact(objs.len());
         // Add objectives to solver
         let mut obj_cnf = CNF::new();
@@ -251,8 +335,9 @@ where
             self.log_oracle_call(res, Phase::OuterLoop)?;
             if res == SolverResult::UNSAT {
                 return Ok(());
+            } else if res == SolverResult::Interrupted {
+                return Err(Termination::Callback);
             }
-            debug_assert_eq!(res, SolverResult::SAT);
             self.check_terminator()?;
 
             // Minimize solution
@@ -299,7 +384,9 @@ where
 
             // Check if dominating solution exists
             let res = self.oracle.solve_assumps(assumps)?;
-            debug_assert_ne!(res, SolverResult::Interrupted);
+            if res == SolverResult::Interrupted {
+                return Err(Termination::Callback);
+            }
             self.log_oracle_call(res, Phase::Minimization)?;
             if res == SolverResult::UNSAT {
                 // Termination criteria, return last solution and costs
@@ -353,7 +440,9 @@ where
 
             // Find next solution
             let res = self.oracle.solve_assumps(assumps.clone())?;
-            debug_assert_ne!(res, SolverResult::Interrupted);
+            if res == SolverResult::Interrupted {
+                return Err(Termination::Callback);
+            }
             self.log_oracle_call(res, Phase::Enumeration)?;
             if res == SolverResult::UNSAT {
                 // All solutions enumerated
@@ -507,6 +596,10 @@ where
                         .expect("multiplied cost exceeds `isize`");
                     signed_mult_cost + offset
                 }
+                ObjEncoding::Constant { offset } => {
+                    debug_assert_eq!(cst, 0);
+                    offset
+                }
             })
             .collect()
     }
@@ -542,6 +635,7 @@ where
                     // Extend assumptions
                     assumps.extend(encoding.enforce_ub(cst).unwrap());
                 }
+                ObjEncoding::Constant { .. } => (),
             }
         });
         assumps
@@ -611,6 +705,7 @@ where
                         clause.add(and_lit);
                     }
                 }
+                ObjEncoding::Constant { .. } => (),
             }
         });
         clause
@@ -875,6 +970,9 @@ where
         unit_weight: usize,
         encoding: CE,
     },
+    Constant {
+        offset: isize,
+    },
 }
 
 impl<PBE, CE> ObjEncoding<PBE, CE>
@@ -889,6 +987,9 @@ where
         reserve: bool,
         var_manager: &mut VM,
     ) -> Self {
+        if lits.is_empty() {
+            return ObjEncoding::Constant { offset };
+        }
         let mut encoding = PBE::from_iter(lits);
         if reserve {
             encoding.reserve(var_manager);
@@ -904,6 +1005,9 @@ where
         reserve: bool,
         var_manager: &mut VM,
     ) -> Self {
+        if lits.is_empty() {
+            return ObjEncoding::Constant { offset };
+        }
         let mut encoding = CE::from_iter(lits);
         if reserve {
             encoding.reserve(var_manager);
@@ -920,6 +1024,7 @@ where
         match self {
             ObjEncoding::Weighted { encoding, .. } => ObjEncIter::Weighted(encoding.iter()),
             ObjEncoding::Unweighted { encoding, .. } => ObjEncIter::Unweighted(encoding.iter()),
+            ObjEncoding::Constant { .. } => ObjEncIter::Constant,
         }
     }
 }
@@ -931,6 +1036,7 @@ where
 {
     Weighted(PBE::Iter<'a>),
     Unweighted(CE::Iter<'a>),
+    Constant,
 }
 
 impl<PBE, CE> Iterator for ObjEncIter<'_, PBE, CE>
@@ -944,6 +1050,7 @@ where
         match self {
             ObjEncIter::Weighted(iter) => iter.next(),
             ObjEncIter::Unweighted(iter) => iter.next().map(|l| (l, 1)),
+            ObjEncIter::Constant => None,
         }
     }
 }

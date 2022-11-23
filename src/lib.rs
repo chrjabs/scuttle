@@ -146,6 +146,8 @@ pub struct Stats {
     pub n_oracle_calls: usize,
     /// The number of objectives in the solver
     pub n_objs: usize,
+    /// The number of original clauses
+    pub n_orig_clauses: usize,
 }
 
 /// Statistics of a used cardinality or pseudo-boolean encodings

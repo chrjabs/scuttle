@@ -10,7 +10,7 @@ use std::{
     },
 };
 
-use maxpre::MaxPre;
+use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
 use pminimal::{
     self,
     cli::{Cli, FileFormat},
@@ -18,8 +18,8 @@ use pminimal::{
 };
 use rustsat::{
     encodings::{card, pb},
-    instances::{MultiOptInstance, Objective, ParsingError, SatInstance},
-    solvers::{ControlSignal, DefIncSolver},
+    instances::{MultiOptInstance, ParsingError},
+    solvers::{self, ControlSignal},
 };
 
 static mut SIG_TERM_FLAG: Option<Arc<AtomicBool>> = None;
@@ -36,30 +36,29 @@ fn main() -> Result<(), MainError> {
 
     // MaxPre Preprocessing
     let (mut prepro, inst) = if cli.preprocessing {
-        let (cnf, softs, _) = inst.as_hard_cls_soft_cls();
-        let (softs, offsets) = softs.into_iter().unzip::<_, _, _, Vec<isize>>();
-        let mut prepro = MaxPre::new(cnf, softs, false);
-        prepro.preprocess(&cli.maxpre_techniques, 0, 1e9, false);
-        let (cnf, softs) = prepro.prepro_instance();
-        let sat_inst = SatInstance::from_iter(cnf);
-        let objs = softs.into_iter().map(|s| Objective::from_iter(s));
-        let removed_weight = prepro.removed_weight();
-        let objs = std::iter::zip(offsets, removed_weight)
-            .map(|(o1, o2)| o1 + o2 as isize)
-            .zip(objs)
-            .map(|(o, mut obj)| {
-                obj.increase_offset(o);
-                obj
-            })
-            .collect();
-        let inst = MultiOptInstance::compose(sat_inst, objs);
+        let mut prepro = <MaxPre as PreproMultiOpt<_>>::new(inst, false);
+        prepro.preprocess(&cli.maxpre_techniques, 0, 1e9);
+        let inst = PreproMultiOpt::prepro_instance(&mut prepro);
         (Some(prepro), inst)
     } else {
         (None, inst)
     };
 
-    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, DefIncSolver> =
-        PMinimal::init_with_options(inst, cli.options, pminimal::default_blocking_clause);
+    let oracle = {
+        #[cfg(feature = "cadical")]
+        {
+            let mut o = solvers::CaDiCaL::default();
+            o.set_configuration(cli.cadical_config).unwrap();
+            o
+        }
+        #[cfg(not(feature = "cadical"))]
+        {
+            DefIncSolver::default()
+        }
+    };
+
+    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, _> =
+        PMinimal::default_init_with_oracle_and_options(inst, oracle, cli.options);
 
     // Set up signal handling
     unsafe { SIG_TERM_FLAG = Some(Arc::new(AtomicBool::new(false))) };

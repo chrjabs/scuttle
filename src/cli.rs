@@ -16,7 +16,7 @@ use crate::{
 use crate::{LoggerError, Phase};
 use clap::{crate_authors, crate_name, crate_version, Parser, ValueEnum};
 use cpu_time::ProcessTime;
-use rustsat::solvers::{SolverResult, SolverStats};
+use rustsat::solvers::{self, SolverResult, SolverStats};
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 
 #[derive(Parser)]
@@ -43,6 +43,10 @@ struct CliArgs {
     /// The preprocessing technique string to use
     #[arg(long, default_value_t = String::from("[[uvsrgc]VRTG]"))]
     maxpre_techniques: String,
+    #[cfg(feature = "cadical")]
+    /// The CaDiCaL profile to use
+    #[arg(long, default_value_t = CadicalConfig::Default)]
+    cadical_config: CadicalConfig,
     /// Limit the number of Pareto points to enumerate (0 is no limit)
     #[arg(long, default_value_t = 0)]
     pp_limit: usize,
@@ -143,6 +147,43 @@ impl fmt::Display for FileFormat {
     }
 }
 
+#[cfg(feature = "cadical")]
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+enum CadicalConfig {
+    /// Set default advanced internal options
+    Default,
+    /// Disable all internal preprocessing options
+    Plain,
+    /// Set internal options to target satisfiable instances
+    SAT,
+    /// Set internal options to target unsatisfiable instances
+    UNSAT,
+}
+
+#[cfg(feature = "cadical")]
+impl fmt::Display for CadicalConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CadicalConfig::Default => write!(f, "default"),
+            CadicalConfig::Plain => write!(f, "plain"),
+            CadicalConfig::SAT => write!(f, "sat"),
+            CadicalConfig::UNSAT => write!(f, "unsat"),
+        }
+    }
+}
+
+#[cfg(feature = "cadical")]
+impl Into<solvers::cadical::Config> for CadicalConfig {
+    fn into(self) -> solvers::cadical::Config {
+        match self {
+            CadicalConfig::Default => solvers::cadical::Config::Default,
+            CadicalConfig::Plain => solvers::cadical::Config::Plain,
+            CadicalConfig::SAT => solvers::cadical::Config::SAT,
+            CadicalConfig::UNSAT => solvers::cadical::Config::UNSAT,
+        }
+    }
+}
+
 pub struct Cli {
     pub options: Options,
     pub limits: Limits,
@@ -150,6 +191,7 @@ pub struct Cli {
     pub inst_path: PathBuf,
     pub preprocessing: bool,
     pub maxpre_techniques: String,
+    pub cadical_config: solvers::cadical::Config,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,
@@ -191,6 +233,7 @@ impl Cli {
             inst_path: args.inst_path.clone(),
             preprocessing: args.preprocessing.is_true(),
             maxpre_techniques: args.maxpre_techniques,
+            cadical_config: args.cadical_config.into(),
             stdout: BufferWriter::stdout(match args.color.color {
                 concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
                 concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
@@ -379,6 +422,7 @@ impl Cli {
             Self::print_parameter(&mut buffer, "n-pareto-points", stats.n_pareto_points)?;
             Self::print_parameter(&mut buffer, "n-candidates", stats.n_candidates)?;
             Self::print_parameter(&mut buffer, "n-objectives", stats.n_objs)?;
+            Self::print_parameter(&mut buffer, "n-orig-clauses", stats.n_orig_clauses)?;
             Self::end_block(&mut buffer)?;
             self.stdout.print(&buffer)?;
         }
@@ -506,7 +550,7 @@ impl Cli {
         buffer.reset()?;
         writeln!(
             buffer,
-            ": costs: {}, n-sols: {}",
+            ": costs: {}; n-sols: {}",
             VecPrinter::new(pareto_point.costs()),
             pareto_point.n_sols()
         )?;
