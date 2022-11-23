@@ -14,7 +14,7 @@ use rustsat::{
         ControlSignal, DefIncSolver, IncrementalSolve, SolveStats, SolverResult, SolverStats,
         Terminate,
     },
-    types::{Assignment, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
+    types::{Assignment, Clause, Lit, LitIter, RsHashMap, RsHashSet, TernaryVal, Var, WLitIter},
     var,
 };
 
@@ -830,10 +830,16 @@ where
     /// initialization.
     fn add_objective(&mut self, obj: Objective) -> CNF {
         let mut cnf = CNF::new();
+        if obj.is_empty() {
+            self.obj_encs.push(ObjEncoding::Constant {
+                offset: obj.offset(),
+            });
+            return cnf;
+        }
         if obj.weighted() {
             // Add weighted objective
             let (soft_cl, offset) = obj.as_soft_cls();
-            let lits: RsHashMap<Lit, usize> = soft_cl
+            let lits: Vec<(Lit, usize)> = soft_cl
                 .into_iter()
                 .map(|(cl, w)| {
                     let (olit, opt_cls_info) = self.add_soft_clause(cl);
@@ -981,15 +987,12 @@ where
     CE: card::IncUB,
 {
     /// Initializes a new objective encoding for a weighted objective
-    fn new_weighted<VM: ManageVars>(
-        lits: RsHashMap<Lit, usize>,
+    fn new_weighted<VM: ManageVars, LI: WLitIter>(
+        lits: LI,
         offset: isize,
         reserve: bool,
         var_manager: &mut VM,
     ) -> Self {
-        if lits.is_empty() {
-            return ObjEncoding::Constant { offset };
-        }
         let mut encoding = PBE::from_iter(lits);
         if reserve {
             encoding.reserve(var_manager);
@@ -998,16 +1001,13 @@ where
     }
 
     /// Initializes a new objective encoding for a weighted objective
-    fn new_unweighted<VM: ManageVars>(
-        lits: Vec<Lit>,
+    fn new_unweighted<VM: ManageVars, LI: LitIter>(
+        lits: LI,
         offset: isize,
         unit_weight: usize,
         reserve: bool,
         var_manager: &mut VM,
     ) -> Self {
-        if lits.is_empty() {
-            return ObjEncoding::Constant { offset };
-        }
         let mut encoding = CE::from_iter(lits);
         if reserve {
             encoding.reserve(var_manager);

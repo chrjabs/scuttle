@@ -37,6 +37,9 @@ struct CliArgs {
     /// Reserve variables for the encodings in advance
     #[arg(long, default_value_t = Bool::from(Options::default().reserve_enc_vars))]
     reserve_encoding_vars: Bool,
+    /// Reindex the variables in the instance before solving
+    #[arg(long)]
+    reindexing: bool,
     /// Preprocess the instance with MaxPre before solving
     #[arg(long, default_value_t = Bool::from(false))]
     preprocessing: Bool,
@@ -192,6 +195,7 @@ pub struct Cli {
     pub preprocessing: bool,
     pub maxpre_techniques: String,
     pub cadical_config: solvers::cadical::Config,
+    pub reindexing: bool,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,
@@ -234,6 +238,7 @@ impl Cli {
             preprocessing: args.preprocessing.is_true(),
             maxpre_techniques: args.maxpre_techniques,
             cadical_config: args.cadical_config.into(),
+            reindexing: args.reindexing,
             stdout: BufferWriter::stdout(match args.color.color {
                 concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
                 concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,

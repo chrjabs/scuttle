@@ -18,7 +18,9 @@ use pminimal::{
 };
 use rustsat::{
     encodings::{card, pb},
-    instances::{MultiOptInstance, ParsingError},
+    instances::{
+        BasicVarManager, ManageVars, MultiOptInstance, ParsingError, ReindexingVarManager,
+    },
     solvers::{self, ControlSignal},
 };
 
@@ -36,12 +38,23 @@ fn main() -> Result<(), MainError> {
 
     // MaxPre Preprocessing
     let (mut prepro, inst) = if cli.preprocessing {
-        let mut prepro = <MaxPre as PreproMultiOpt<_>>::new(inst, false);
+        let mut prepro = <MaxPre as PreproMultiOpt>::new(inst, false);
         prepro.preprocess(&cli.maxpre_techniques, 0, 1e9);
         let inst = PreproMultiOpt::prepro_instance(&mut prepro);
         (Some(prepro), inst)
     } else {
         (None, inst)
+    };
+
+    // Reindexing
+    let (inst, reindexer) = if cli.reindexing {
+        let reindexer = ReindexingVarManager::default();
+        let (inst, reindexer) = inst
+            .reindex(reindexer)
+            .change_var_manager(|vm| BasicVarManager::from_next_free(vm.max_var().unwrap() + 1));
+        (inst, Some(reindexer))
+    } else {
+        (inst, None)
     };
 
     let oracle = {
@@ -121,6 +134,14 @@ fn main() -> Result<(), MainError> {
     cli.info("finished solving the instance")?;
 
     let pareto_front = solver.pareto_front();
+
+    // Reverse reindexing
+    let pareto_front = if let Some(reindexer) = reindexer {
+        let reverse = |l| reindexer.reverse_lit(l);
+        pareto_front.convert_solutions(&mut |s| s.into_iter().filter_map(reverse).collect())
+    } else {
+        pareto_front
+    };
 
     // Solution reconstruction
     let pareto_front = if let Some(ref mut prepro) = prepro {

@@ -19,7 +19,7 @@ fn check_pf_shape(pf: ParetoFront, shape: Vec<(Vec<isize>, usize)>) {
 }
 
 fn preprocess_inst(inst: MultiOptInstance, techniques: &str) -> (MultiOptInstance, MaxPre) {
-    let mut prepro = <MaxPre as PreproMultiOpt<_>>::new(inst, false);
+    let mut prepro = <MaxPre as PreproMultiOpt>::new(inst, false);
     prepro.preprocess(techniques, 0, 1e9);
     let inst = PreproMultiOpt::prepro_instance(&mut prepro);
     (inst, prepro)
