@@ -38,7 +38,7 @@ fn main() -> Result<(), MainError> {
 
     // MaxPre Preprocessing
     let (mut prepro, inst) = if cli.preprocessing {
-        let mut prepro = <MaxPre as PreproMultiOpt>::new(inst, false);
+        let mut prepro = <MaxPre as PreproMultiOpt>::new(inst, !cli.maxpre_reindexing);
         prepro.preprocess(&cli.maxpre_techniques, 0, 1e9);
         let inst = PreproMultiOpt::prepro_instance(&mut prepro);
         (Some(prepro), inst)

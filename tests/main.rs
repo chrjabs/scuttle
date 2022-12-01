@@ -158,7 +158,8 @@ pub fn dal(opts: Options) {
 }
 
 pub fn set_cover(opts: Options) {
-    let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/set-cover.mcnf").unwrap();
+    let inst: MultiOptInstance =
+        MultiOptInstance::from_dimacs_path("./data/set-cover.mcnf").unwrap();
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();

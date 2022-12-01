@@ -46,6 +46,9 @@ struct CliArgs {
     /// The preprocessing technique string to use
     #[arg(long, default_value_t = String::from("[[uvsrgc]VRTG]"))]
     maxpre_techniques: String,
+    /// Reindex the variables in MaxPre
+    #[arg(long)]
+    no_maxpre_reindexing: bool,
     #[cfg(feature = "cadical")]
     /// The CaDiCaL profile to use
     #[arg(long, default_value_t = CadicalConfig::Default)]
@@ -196,6 +199,7 @@ pub struct Cli {
     pub maxpre_techniques: String,
     pub cadical_config: solvers::cadical::Config,
     pub reindexing: bool,
+    pub maxpre_reindexing: bool,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,
@@ -239,6 +243,7 @@ impl Cli {
             maxpre_techniques: args.maxpre_techniques,
             cadical_config: args.cadical_config.into(),
             reindexing: args.reindexing,
+            maxpre_reindexing: !args.no_maxpre_reindexing,
             stdout: BufferWriter::stdout(match args.color.color {
                 concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
                 concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
