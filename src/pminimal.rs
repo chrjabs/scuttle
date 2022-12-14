@@ -810,7 +810,6 @@ where
         improved_cost: usize,
         learned_clauses: usize,
     ) -> Result<(), Termination> {
-        self.stats.n_pareto_points += 1;
         // Dispatch to loggers
         self.loggers.iter_mut().try_for_each(|l| {
             if let Some(l) = l {
