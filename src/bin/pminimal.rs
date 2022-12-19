@@ -19,7 +19,7 @@ use pminimal::{
 use rustsat::{
     encodings::{card, pb},
     instances::{
-        BasicVarManager, ManageVars, MultiOptInstance, ParsingError, ReindexingVarManager,
+        BasicVarManager, ManageVars, MultiOptInstance, ParsingError, ReindexingVarManager, ReindexVars,
     },
     solvers::{self, ControlSignal},
 };
