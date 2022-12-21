@@ -38,8 +38,8 @@ struct CliArgs {
     #[arg(long, default_value_t = Bool::from(Options::default().reserve_enc_vars))]
     reserve_encoding_vars: Bool,
     /// Reindex the variables in the instance before solving
-    #[arg(long)]
-    reindexing: bool,
+    #[arg(long, default_value_t = Bool::from(false))]
+    reindexing: Bool,
     /// Preprocess the instance with MaxPre before solving
     #[arg(long, default_value_t = Bool::from(false))]
     preprocessing: Bool,
@@ -47,8 +47,8 @@ struct CliArgs {
     #[arg(long, default_value_t = String::from("[[uvsrgc]VRTG]"))]
     maxpre_techniques: String,
     /// Reindex the variables in MaxPre
-    #[arg(long)]
-    no_maxpre_reindexing: bool,
+    #[arg(long, default_value_t = Bool::from(false))]
+    maxpre_reindexing: Bool,
     #[cfg(feature = "cadical")]
     /// The CaDiCaL profile to use
     #[arg(long, default_value_t = CadicalConfig::Default)]
@@ -242,8 +242,8 @@ impl Cli {
             preprocessing: args.preprocessing.is_true(),
             maxpre_techniques: args.maxpre_techniques,
             cadical_config: args.cadical_config.into(),
-            reindexing: args.reindexing,
-            maxpre_reindexing: !args.no_maxpre_reindexing,
+            reindexing: args.reindexing.is_true(),
+            maxpre_reindexing: args.maxpre_reindexing.is_true(),
             stdout: BufferWriter::stdout(match args.color.color {
                 concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
                 concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
