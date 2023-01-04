@@ -3,8 +3,9 @@
 use std::ops::Not;
 
 use crate::{
-    default_blocking_clause, types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits,
-    Options, ParetoFront, Phase, Solve, Stats, Termination, WriteSolverLog,
+    default_blocking_clause, options::EnumOptions, types::ParetoPoint, EncodingStats,
+    ExtendedSolveStats, Limits, Options, ParetoFront, Phase, Solve, Stats, Termination,
+    WriteSolverLog,
 };
 use rustsat::{
     encodings,
@@ -367,7 +368,7 @@ where
             // Force next solution to dominate the current one
             let mut assumps = self.enforce_dominating(&costs);
             // Block solutions dominated by the current one
-            if self.opts.max_sols_per_pp == Some(1) {
+            if self.opts.enumeration == EnumOptions::NoEnum {
                 // Block permanently since no enumeration at Pareto point
                 let block_clause = self.dominated_block_clause(&costs);
                 self.oracle.add_clause(block_clause)?;
@@ -426,17 +427,38 @@ where
                     return Err(term);
                 }
             }
-            if let Some(max_pp_sols) = self.opts.max_sols_per_pp {
-                if max_pp_sols >= pareto_point.n_sols() {
-                    let pp_term = self.log_pareto_point(&pareto_point);
-                    self.pareto_front.add_pp(pareto_point);
-                    return pp_term;
+            if match self.opts.enumeration {
+                EnumOptions::NoEnum => true,
+                EnumOptions::Solutions(Some(limit)) => {
+                    if pareto_point.n_sols() >= limit {
+                        true
+                    } else {
+                        false
+                    }
                 }
+                EnumOptions::PMCSs(Some(limit)) => {
+                    if pareto_point.n_sols() >= limit {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _unlimited => false,
+            } {
+                let pp_term = self.log_pareto_point(&pareto_point);
+                self.pareto_front.add_pp(pareto_point);
+                return pp_term;
             }
             self.check_terminator()?;
 
             // Block last solution
-            self.oracle.add_clause((self.block_clause_gen)(solution))?;
+            match self.opts.enumeration {
+                EnumOptions::Solutions(_) => {
+                    self.oracle.add_clause((self.block_clause_gen)(solution))?
+                }
+                EnumOptions::PMCSs(_) => self.oracle.add_clause(self.block_pareto_mcs(solution))?,
+                EnumOptions::NoEnum => panic!("Should never reach this"),
+            }
 
             // Find next solution
             let res = self.oracle.solve_assumps(assumps.clone())?;
@@ -496,28 +518,25 @@ where
         let mut reduction = 0;
         let mut learned_cnf = CNF::new();
         let cost = self.obj_encs[obj_idx].iter().fold(0, |cst, (l, w)| {
-            if let Some(val) = sol.lit_value(l) {
-                if val == TernaryVal::True {
-                    if (tightening || learning) && !self.obj_lit_data.contains_key(&!l) {
-                        // If tightening or learning and the negated literal
-                        // does not appear in any objective
-                        if let Some(witness) = self.find_flip_witness(l, sol) {
-                            // Has a witness -> literal can be flipped or clause learned
-                            if learning {
-                                // Create learned clause from flip witness
-                                let mut learned_clause =
-                                    Clause::from_iter(witness.into_iter().map(Lit::not));
-                                learned_clause.add(!l);
-                                learned_cnf.add_clause(learned_clause);
-                            }
-                            if tightening {
-                                // Flip literal
-                                sol.assign_lit(!l);
-                                reduction += w;
-                                cst
-                            } else {
-                                cst + w
-                            }
+            let val = sol.lit_value(l);
+            if val == TernaryVal::True {
+                if (tightening || learning) && !self.obj_lit_data.contains_key(&!l) {
+                    // If tightening or learning and the negated literal
+                    // does not appear in any objective
+                    if let Some(witness) = self.find_flip_witness(l, sol) {
+                        // Has a witness -> literal can be flipped or clause learned
+                        if learning {
+                            // Create learned clause from flip witness
+                            let mut learned_clause =
+                                Clause::from_iter(witness.into_iter().map(Lit::not));
+                            learned_clause.add(!l);
+                            learned_cnf.add_clause(learned_clause);
+                        }
+                        if tightening {
+                            // Flip literal
+                            sol.assign_lit(!l);
+                            reduction += w;
+                            cst
                         } else {
                             cst + w
                         }
@@ -525,7 +544,7 @@ where
                         cst + w
                     }
                 } else {
-                    cst
+                    cst + w
                 }
             } else {
                 cst
@@ -555,7 +574,7 @@ where
                             .fold(None, |sat_lit, other| {
                                 if sat_lit.is_some() || *other == lit {
                                     sat_lit
-                                } else if sol.lit_value(*other).unwrap() == TernaryVal::True {
+                                } else if sol.lit_value(*other) == TernaryVal::True {
                                     Some(*other)
                                 } else {
                                     sat_lit
@@ -709,6 +728,21 @@ where
             }
         });
         clause
+    }
+
+    /// Blocks the current Pareto-MCS by blocking all blocking variables that are set
+    fn block_pareto_mcs(&self, sol: Assignment) -> Clause {
+        let mut blocking_clause = Clause::new();
+        self.obj_encs.iter().for_each(|oe| {
+            oe.iter().for_each(|(l, _)| {
+                if sol.lit_value(l) == TernaryVal::True {
+                    blocking_clause.add(-l)
+                }
+            })
+        });
+        blocking_clause
+            .normalize()
+            .expect("Tautological blocking clause")
     }
 
     /// Checks the termination callback and terminates if appropriate

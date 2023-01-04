@@ -8,7 +8,7 @@ use std::{
     io::Write,
 };
 
-use crate::options::{HeurImprOptions, HeurImprWhen};
+use crate::options::{EnumOptions, HeurImprOptions, HeurImprWhen};
 use crate::{
     types::{ParetoFront, ParetoPoint},
     EncodingStats, Limits, Options, Stats, WriteSolverLog,
@@ -25,9 +25,12 @@ struct CliArgs {
     /// The path to the instance file to load. Compressed files with an
     /// extension like `.bz2` or `.gz` can be read.
     inst_path: PathBuf,
-    /// The maximum number of solutions to enumerate per Pareto point (0 is no limit)
-    #[arg(long, default_value_t = 1)]
-    max_sols_per_pp: usize,
+    /// The type of enumeration to perform at each Pareto point
+    #[arg(long)]
+    enumeration: EnumOptionsArg,
+    /// The limit for enumeration at each Pareto point (0 for no limit)
+    #[arg(long, default_value_t = 0)]
+    enumeration_limit: usize,
     /// When to perform solution tightening
     #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening)]
     solution_tightening: HeurImprWhen,
@@ -190,6 +193,18 @@ impl Into<solvers::cadical::Config> for CadicalConfig {
     }
 }
 
+#[derive(Default, Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub enum EnumOptionsArg {
+    #[default]
+    /// Don't enumerate at each Pareto point
+    NoEnum,
+    /// Enumerate Pareto-optimal solutions (with an optional limit) at each
+    /// Pareto point using the provided blocking clause generator
+    Solutions,
+    /// Enumerate Pareto-MCSs (with an optional limit) at each Pareto point
+    ParetoMCS,
+}
+
 pub struct Cli {
     pub options: Options,
     pub limits: Limits,
@@ -224,7 +239,15 @@ impl Cli {
         let args = CliArgs::parse();
         Self {
             options: Options {
-                max_sols_per_pp: none_if_zero!(args.max_sols_per_pp),
+                enumeration: match args.enumeration {
+                    EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
+                    EnumOptionsArg::Solutions => {
+                        EnumOptions::Solutions(none_if_zero!(args.enumeration_limit))
+                    }
+                    EnumOptionsArg::ParetoMCS => {
+                        EnumOptions::PMCSs(none_if_zero!(args.enumeration_limit))
+                    }
+                },
                 heuristic_improvements: HeurImprOptions {
                     solution_tightening: args.solution_tightening,
                     tightening_clauses: args.tightening_clauses,
@@ -366,8 +389,8 @@ impl Cli {
             buffer.reset()?;
             Self::print_parameter(
                 &mut buffer,
-                "max-sols-per-pp",
-                OptVal::new(self.options.max_sols_per_pp),
+                "enumeration",
+                EnumPrinter::new(self.options.enumeration),
             )?;
             Self::print_parameter(
                 &mut buffer,
@@ -836,6 +859,28 @@ impl DurPrinter {
 impl fmt::Display for DurPrinter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.dur)
+    }
+}
+
+struct EnumPrinter {
+    enumeration: EnumOptions,
+}
+
+impl EnumPrinter {
+    fn new(enumeration: EnumOptions) -> Self {
+        Self { enumeration }
+    }
+}
+
+impl fmt::Display for EnumPrinter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.enumeration {
+            EnumOptions::NoEnum => write!(f, "none"),
+            EnumOptions::Solutions(None) => write!(f, "all solutions"),
+            EnumOptions::PMCSs(None) => write!(f, "all Pareto-MCSs"),
+            EnumOptions::Solutions(Some(limit)) => write!(f, "{} solutions", limit),
+            EnumOptions::PMCSs(Some(limit)) => write!(f, "{} Pareto-MCSs", limit),
+        }
     }
 }
 

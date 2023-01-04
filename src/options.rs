@@ -12,8 +12,8 @@ use crate::Phase;
 /// Configuration options for the $P$-minimal solver
 #[derive(Clone, Copy)]
 pub struct Options {
-    /// The maximum number of solutions to enumerate per Pareto point
-    pub max_sols_per_pp: Option<usize>,
+    /// The Pareto point enumeration mode
+    pub enumeration: EnumOptions,
     /// Heuristic solution improvement options
     pub heuristic_improvements: HeurImprOptions,
     /// Reserve encoding variables in advance
@@ -24,11 +24,24 @@ impl Default for Options {
     /// Get the default options
     fn default() -> Self {
         Options {
-            max_sols_per_pp: Some(1),
+            enumeration: Default::default(),
             heuristic_improvements: Default::default(),
             reserve_enc_vars: false,
         }
     }
+}
+
+/// Enumeration options for the $P$-minimal solver
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum EnumOptions {
+    #[default]
+    /// Don't enumerate at each Pareto point
+    NoEnum,
+    /// Enumerate Pareto-optimal solutions (with an optional limit) at each
+    /// Pareto point using the provided blocking clause generator
+    Solutions(Option<usize>),
+    /// Enumerate Pareto-MCSs (with an optional limit) at each Pareto point
+    PMCSs(Option<usize>),
 }
 
 /// Options regarding heuristic solution improvement
