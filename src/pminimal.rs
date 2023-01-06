@@ -333,6 +333,8 @@ where
             if self.pareto_front.is_empty() {
                 let mut pp = ParetoPoint::new(self.obj_encs.iter().map(|oe| oe.offset()).collect());
                 pp.add_sol(Assignment::from(vec![]));
+                self.log_solution()?;
+                self.log_pareto_point(&pp)?;
                 self.pareto_front.add_pp(pp);
             }
             return Ok(());
