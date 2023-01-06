@@ -467,9 +467,10 @@ where
             }
             self.log_oracle_call(res, Phase::Enumeration)?;
             if res == SolverResult::UNSAT {
+                let pp_term = self.log_pareto_point(&pareto_point);
                 // All solutions enumerated
                 self.pareto_front.add_pp(pareto_point);
-                return Ok(());
+                return pp_term;
             }
             self.check_terminator()?;
             solution = self.oracle.solution(self.max_orig_var)?;
