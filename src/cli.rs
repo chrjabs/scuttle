@@ -26,7 +26,7 @@ struct CliArgs {
     /// extension like `.bz2` or `.gz` can be read.
     inst_path: PathBuf,
     /// The type of enumeration to perform at each Pareto point
-    #[arg(long)]
+    #[arg(long, default_value_t = EnumOptionsArg::NoEnum)]
     enumeration: EnumOptionsArg,
     /// The limit for enumeration at each Pareto point (0 for no limit)
     #[arg(long, default_value_t = 0)]
@@ -203,6 +203,16 @@ pub enum EnumOptionsArg {
     Solutions,
     /// Enumerate Pareto-MCSs (with an optional limit) at each Pareto point
     ParetoMCS,
+}
+
+impl fmt::Display for EnumOptionsArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EnumOptionsArg::NoEnum => write!(f, "no-enum"),
+            EnumOptionsArg::Solutions => write!(f, "solutions"),
+            EnumOptionsArg::ParetoMCS => write!(f, "pareto-mcs"),
+        }
+    }
 }
 
 pub struct Cli {
