@@ -47,6 +47,16 @@ where
     pub fn n_pps(&self) -> usize {
         self.pps.len()
     }
+
+    /// Gets the number of Pareto points
+    pub fn len(&self) -> usize {
+        self.pps.len()
+    }
+
+    /// Checks if the Pareto front is empty
+    pub fn is_empty(&self) -> bool {
+        self.pps.is_empty()
+    }
 }
 
 impl<'a, S> IntoIterator for &'a ParetoFront<S>

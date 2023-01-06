@@ -16,7 +16,6 @@ use rustsat::{
         Terminate,
     },
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, RsHashSet, TernaryVal, Var, WLitIter},
-    var,
 };
 
 /// The solver type. Generics the pseudo-boolean encoding to use for weighted
@@ -46,7 +45,7 @@ where
     obj_lit_data: RsHashMap<Lit, ObjLitData>,
     /// The maximum variable of the original encoding after introducing blocking
     /// variables
-    max_orig_var: Var,
+    max_orig_var: Option<Var>,
     /// Generator of blocking clauses
     block_clause_gen: BCG,
     /// The Pareto front discovered so far
@@ -104,7 +103,7 @@ where
             obj_clauses: vec![],
             blits: RsHashMap::default(),
             obj_lit_data: RsHashMap::default(),
-            max_orig_var: var![0],
+            max_orig_var: None,
             block_clause_gen,
             pareto_front: ParetoFront::new(),
             opts,
@@ -143,7 +142,7 @@ where
             obj_clauses: vec![],
             blits: RsHashMap::default(),
             obj_lit_data: RsHashMap::default(),
-            max_orig_var: var![0],
+            max_orig_var: None,
             block_clause_gen,
             pareto_front: ParetoFront::new(),
             opts,
@@ -175,7 +174,7 @@ where
             obj_clauses: vec![],
             blits: RsHashMap::default(),
             obj_lit_data: RsHashMap::default(),
-            max_orig_var: var![0],
+            max_orig_var: None,
             block_clause_gen,
             pareto_front: ParetoFront::new(),
             opts,
@@ -317,11 +316,10 @@ where
         });
         // Add hard clauses and relaxed soft clauses to oracle
         cnf.extend(obj_cnf);
-        self.max_orig_var = self
-            .var_manager
-            .max_var()
-            .expect("No variables in instance");
-        self.oracle.reserve(self.max_orig_var).unwrap();
+        self.max_orig_var = self.var_manager.max_var();
+        if let Some(max_var) = self.max_orig_var {
+            self.oracle.reserve(max_var).unwrap();
+        }
         self.oracle.add_cnf(cnf).unwrap();
     }
 
@@ -330,6 +328,15 @@ where
     /// termination from subroutines.
     fn alg_main(&mut self) -> Result<(), Termination> {
         debug_assert_eq!(self.obj_encs.len(), self.stats.n_objs);
+        // Edge case of empty encoding
+        if self.max_orig_var.is_none() {
+            if self.pareto_front.is_empty() {
+                let mut pp = ParetoPoint::new(self.obj_encs.iter().map(|oe| oe.offset()).collect());
+                pp.add_sol(Assignment::from(vec![]));
+                self.pareto_front.add_pp(pp);
+            }
+            return Ok(());
+        }
         loop {
             // Find minimization starting point
             let res = self.oracle.solve()?;
@@ -473,7 +480,10 @@ where
                 return pp_term;
             }
             self.check_terminator()?;
-            solution = self.oracle.solution(self.max_orig_var)?;
+            solution = self.oracle.solution(
+                self.max_orig_var
+                    .expect("Should never be here with empty encoding"),
+            )?;
         }
     }
 
@@ -486,7 +496,10 @@ where
     ) -> Result<(Vec<usize>, Assignment), Termination> {
         let mut costs = Vec::new();
         costs.resize(self.stats.n_objs, 0);
-        let mut sol = self.oracle.solution(self.max_orig_var)?;
+        let mut sol = self.oracle.solution(
+            self.max_orig_var
+                .expect("Should never be here with empty encoding"),
+        )?;
         let tightening = self
             .opts
             .heuristic_improvements
@@ -1050,6 +1063,15 @@ where
             offset,
             unit_weight,
             encoding,
+        }
+    }
+
+    /// Gets the offset of the encoding
+    fn offset(&self) -> isize {
+        match self {
+            ObjEncoding::Weighted { offset, .. } => *offset,
+            ObjEncoding::Unweighted { offset, .. } => *offset,
+            ObjEncoding::Constant { offset } => *offset,
         }
     }
 
