@@ -83,7 +83,9 @@ impl HeurImprOptions {
 impl Default for HeurImprOptions {
     fn default() -> Self {
         Self {
-            solution_tightening: HeurImprWhen::OuterLoop,
+            // Note: solution tightening apparently broken when negated literal
+            // in other objective 
+            solution_tightening: HeurImprWhen::Never,
             tightening_clauses: HeurImprWhen::Never,
         }
     }

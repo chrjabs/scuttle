@@ -36,7 +36,7 @@ where
     /// A cardinality or pseudo-boolean encoding for each objective
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
     /// All clauses that contain objective literals. Only populated when using
-    /// model tightening. If blocking literals were added by the solver, the
+    /// solution tightening. If blocking literals were added by the solver, the
     /// blocking literal is _not_ in the clause kept here.
     obj_clauses: Vec<Clause>,
     /// Maps soft clauses to blocking literals
@@ -537,6 +537,7 @@ where
             let val = sol.lit_value(l);
             if val == TernaryVal::True {
                 if (tightening || learning) && !self.obj_lit_data.contains_key(&!l) {
+                    // TODO: fix tightening with negated literal in other objective
                     // If tightening or learning and the negated literal
                     // does not appear in any objective
                     if let Some(witness) = self.find_flip_witness(l, sol) {
