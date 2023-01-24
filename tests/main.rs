@@ -1,5 +1,8 @@
 use pminimal::{
-    self, options::HeurImprOptions, types::ParetoFront, Limits, Options, PMinimal, Solve,
+    self,
+    options::{EnumOptions, HeurImprOptions},
+    types::ParetoFront,
+    Limits, Options, PMinimal, Solve,
 };
 use rustsat::{
     encodings::{card, pb},
@@ -200,7 +203,7 @@ fn medium_single_default() {
 #[test]
 fn medium_all_default() {
     let mut opts = Options::default();
-    opts.max_sols_per_pp = None;
+    opts.enumeration = EnumOptions::Solutions(None);
     medium_all(opts)
 }
 
@@ -247,7 +250,7 @@ fn medium_single_no_heur() {
 #[test]
 fn medium_all_no_heur() {
     let mut opts = Options::default();
-    opts.max_sols_per_pp = None;
+    opts.enumeration = EnumOptions::Solutions(None);
     opts.heuristic_improvements = HeurImprOptions::none();
     medium_all(opts)
 }
@@ -306,7 +309,7 @@ fn medium_single_all_heur() {
 #[test]
 fn medium_all_all_heur() {
     let mut opts = Options::default();
-    opts.max_sols_per_pp = None;
+    opts.enumeration = EnumOptions::Solutions(None);
     opts.heuristic_improvements = HeurImprOptions::all();
     medium_all(opts)
 }
@@ -364,7 +367,7 @@ fn medium_single_other_reserve() {
 #[test]
 fn medium_all_other_reserve() {
     let mut opts = Options::default();
-    opts.max_sols_per_pp = None;
+    opts.enumeration = EnumOptions::Solutions(None);
     opts.reserve_enc_vars = !opts.reserve_enc_vars;
     medium_all(opts)
 }
