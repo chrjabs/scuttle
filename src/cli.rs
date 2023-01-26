@@ -16,7 +16,10 @@ use crate::{
 use crate::{LoggerError, Phase};
 use clap::{crate_authors, crate_name, crate_version, Parser, ValueEnum};
 use cpu_time::ProcessTime;
-use rustsat::solvers::{self, SolverResult, SolverStats};
+use rustsat::{
+    instances::fio,
+    solvers::{self, SolverResult, SolverStats},
+};
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 
 #[derive(Parser)]
@@ -98,6 +101,9 @@ struct CliArgs {
     /// Log heuristic objective improvement
     #[arg(long)]
     log_heuristic_obj_improvement: bool,
+    /// The index in the OPB file to treat as the lowest variable
+    #[arg(long, default_value_t = 0)]
+    first_var_idx: usize,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -225,6 +231,7 @@ pub struct Cli {
     pub cadical_config: solvers::cadical::Config,
     pub reindexing: bool,
     pub maxpre_reindexing: bool,
+    pub opb_options: fio::opb::Options,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,
@@ -277,6 +284,10 @@ impl Cli {
             cadical_config: args.cadical_config.into(),
             reindexing: args.reindexing.is_true(),
             maxpre_reindexing: args.maxpre_reindexing.is_true(),
+            opb_options: fio::opb::Options {
+                first_var_idx: args.first_var_idx,
+                ..fio::opb::Options::default()
+            },
             stdout: BufferWriter::stdout(match args.color.color {
                 concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
                 concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,

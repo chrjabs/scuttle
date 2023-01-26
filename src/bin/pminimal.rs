@@ -19,8 +19,8 @@ use pminimal::{
 use rustsat::{
     encodings::{card, pb},
     instances::{
-        BasicVarManager, ManageVars, MultiOptInstance, ParsingError, ReindexVars,
-        ReindexingVarManager,
+        fio::{self, ParsingError},
+        BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager,
     },
     solvers::{self, ControlSignal},
 };
@@ -35,7 +35,7 @@ fn main() -> Result<(), MainError> {
 
     cli.info(&format!("solving instance {:?}", cli.inst_path))?;
 
-    let inst = parse_instance(cli.inst_path.clone(), cli.file_format)?;
+    let inst = parse_instance(cli.inst_path.clone(), cli.file_format, cli.opb_options)?;
 
     // MaxPre Preprocessing
     let (mut prepro, inst) = if cli.preprocessing {
@@ -176,6 +176,7 @@ macro_rules! is_one_of {
 fn parse_instance(
     inst_path: PathBuf,
     file_format: FileFormat,
+    opb_opts: fio::opb::Options,
 ) -> Result<MultiOptInstance, MainError> {
     match file_format {
         FileFormat::Infer => {
@@ -193,7 +194,7 @@ fn parse_instance(
                 if is_one_of!(ext, "mcnf", "bicnf", "wcnf", "cnf", "dimacs") {
                     MainError::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path))
                 } else if is_one_of!(ext, "opb") {
-                    MainError::wrap_parser(MultiOptInstance::from_opb_path(inst_path))
+                    MainError::wrap_parser(MultiOptInstance::from_opb_path(inst_path, opb_opts))
                 } else {
                     Err(MainError::UnknownFileExtension(OsString::from(ext)))
                 }
@@ -202,7 +203,9 @@ fn parse_instance(
             }
         }
         FileFormat::Dimacs => MainError::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path)),
-        FileFormat::Opb => MainError::wrap_parser(MultiOptInstance::from_opb_path(inst_path)),
+        FileFormat::Opb => {
+            MainError::wrap_parser(MultiOptInstance::from_opb_path(inst_path, opb_opts))
+        }
     }
 }
 
