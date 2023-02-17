@@ -297,23 +297,30 @@ where
         let mut obj_cnf = CNF::new();
         objs.into_iter()
             .for_each(|obj| obj_cnf.extend(self.add_objective(obj)));
-        // Store objective clauses
-        cnf.iter().for_each(|cl| {
-            let is_obj_cl =
-                cl.iter()
-                    .fold(false, |is_obj_cl, l| match self.obj_lit_data.get_mut(l) {
-                        Some(lit_data) => {
-                            // Track occurrences of objective literals
-                            lit_data.clauses.push(self.obj_clauses.len());
-                            true
-                        }
-                        None => is_obj_cl,
-                    });
-            if is_obj_cl {
-                // Save copy of clause that contains objective literal
-                self.obj_clauses.push(cl.clone());
+        if self.opts.heuristic_improvements.must_store_clauses() {
+            // Check soft clauses, in case they contain other objective literals
+            for (idx, cl) in self.obj_clauses.iter().enumerate() {
+                for lit in cl {
+                    if let Some(lit_data) = self.obj_lit_data.get_mut(lit) {
+                        lit_data.clauses.push(idx)
+                    }
+                }
             }
-        });
+            // Store original clauses that contain objective variables
+            for cl in cnf.iter() {
+                let mut is_obj_cl = false;
+                for lit in cl {
+                    if let Some(lit_data) = self.obj_lit_data.get_mut(lit) {
+                        lit_data.clauses.push(self.obj_clauses.len());
+                        is_obj_cl = true;
+                    }
+                }
+                if is_obj_cl {
+                    // Save copy of clause that contains objective literal
+                    self.obj_clauses.push(cl.clone());
+                }
+            }
+        }
         // Add hard clauses and relaxed soft clauses to oracle
         cnf.extend(obj_cnf);
         self.max_orig_var = self.var_manager.max_var();
@@ -537,7 +544,6 @@ where
             let val = sol.lit_value(l);
             if val == TernaryVal::True {
                 if (tightening || learning) && !self.obj_lit_data.contains_key(&!l) {
-                    // TODO: fix tightening with negated literal in other objective
                     // If tightening or learning and the negated literal
                     // does not appear in any objective
                     if let Some(witness) = self.find_flip_witness(l, sol) {
@@ -574,9 +580,10 @@ where
         Ok(cost)
     }
 
-    /// Finds witness that allows flipping a given literal. A witness here is a
-    /// subset of the solution that satisfies all clauses in which lit appears.
-    /// This assumes that flipping the literal will not make the solution worse.
+    /// Finds a witness that allows flipping a given literal. A witness here is
+    /// a subset of the solution that satisfies all clauses in which lit
+    /// appears. This assumes that flipping the literal will not make the
+    /// solution worse.
     fn find_flip_witness(&self, lit: Lit, sol: &Assignment) -> Option<RsHashSet<Lit>> {
         debug_assert!(self.obj_lit_data.contains_key(&lit));
         let lit_data = self.obj_lit_data.get(&lit).unwrap();
@@ -914,7 +921,7 @@ where
                                 .get_mut(&olit)
                                 .unwrap()
                                 .clauses
-                                .push(cls_idx);
+                                .push(cls_idx.unwrap());
                         }
                     };
                     (olit, w)
@@ -955,7 +962,7 @@ where
                                 .get_mut(&olit)
                                 .unwrap()
                                 .clauses
-                                .push(cls_idx);
+                                .push(cls_idx.unwrap());
                         }
                     };
                     olit
@@ -977,7 +984,7 @@ where
     /// clause has been newly relaxed, also returns the index of the clause in
     /// [`PMinimal::obj_clauses`] as well as the relaxed clause to be added to
     /// the oracle.
-    fn add_soft_clause(&mut self, mut cls: Clause) -> (Lit, Option<(usize, Clause)>) {
+    fn add_soft_clause(&mut self, mut cls: Clause) -> (Lit, Option<(Option<usize>, Clause)>) {
         if cls.len() == 1 {
             // No blit needed
             return (!cls[0], None);
@@ -992,13 +999,16 @@ where
         // Save blit in case same soft clause reappears
         // TODO: find way to not have to clone the clause here
         self.blits.insert(cls.clone(), blit);
-        if self.opts.heuristic_improvements.must_store_clauses() {
+        let cls_id = if self.opts.heuristic_improvements.must_store_clauses() {
             // Add clause to the saved objective clauses
             self.obj_clauses.push(cls.clone());
-        }
+            Some(self.obj_clauses.len() - 1)
+        } else {
+            None
+        };
         // Relax clause and return so that it is added to the oracle
         cls.add(blit);
-        (blit, Some((self.obj_clauses.len() - 1, cls)))
+        (blit, Some((cls_id, cls)))
     }
 }
 
