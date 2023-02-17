@@ -4,7 +4,7 @@ use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
 use pminimal::{self, types::ParetoFront, Limits, Options, PMinimal, Solve};
 use rustsat::{
     encodings::{card, pb},
-    instances::MultiOptInstance,
+    instances::{fio, MultiOptInstance},
     solvers,
     types::RsHashSet,
 };
@@ -130,7 +130,8 @@ fn mushroom(opts: Options) {
 }
 
 pub fn dal(opts: Options) {
-    let inst: MultiOptInstance = MultiOptInstance::from_opb_path("./data/dal.opb").unwrap();
+    let inst: MultiOptInstance =
+        MultiOptInstance::from_opb_path("./data/dal.opb", fio::opb::Options::default()).unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);

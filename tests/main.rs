@@ -6,7 +6,7 @@ use pminimal::{
 };
 use rustsat::{
     encodings::{card, pb},
-    instances::MultiOptInstance,
+    instances::{fio, MultiOptInstance},
     solvers,
     types::RsHashSet,
 };
@@ -128,7 +128,8 @@ pub fn mushroom(opts: Options) {
 }
 
 pub fn dal(opts: Options) {
-    let inst: MultiOptInstance = MultiOptInstance::from_opb_path("./data/dal.opb").unwrap();
+    let inst: MultiOptInstance =
+        MultiOptInstance::from_opb_path("./data/dal.opb", fio::opb::Options::default()).unwrap();
     let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();

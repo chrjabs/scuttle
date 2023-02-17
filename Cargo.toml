@@ -7,7 +7,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rustsat = { path = "../rustsat", default-features = false, features = ["multiopt"] }
+rustsat = { path = "../rustsat", default-features = false, features = ["default-but-solvers", "multiopt"] }
 maxpre = { path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 cpu-time = { optional = true, version = "1.0" }
 clap = { optional = true, version = "4.0", features = ["derive", "cargo"] }
@@ -19,6 +19,8 @@ signal-hook = { optional = true, version = "0.3" }
 [features]
 default = ["cadical", "build-binary"]
 cadical = ["rustsat/cadical"]
+glucose = ["rustsat/glucose4"]
+minisat = ["rustsat/minisat"]
 build-binary = [
   "dep:clap",
   "dep:concolor-clap",
