@@ -43,6 +43,9 @@ struct CliArgs {
     /// Reserve variables for the encodings in advance
     #[arg(long, default_value_t = Bool::from(Options::default().reserve_enc_vars))]
     reserve_encoding_vars: Bool,
+    /// Use solution-guided search, aka phasing literals according to found solutions
+    #[arg(long, default_value_t = Bool::from(Options::default().solution_guided_search))]
+    solution_guided_search: Bool,
     /// Reindex the variables in the instance before solving
     #[arg(long, default_value_t = Bool::from(false))]
     reindexing: Bool,
@@ -270,6 +273,7 @@ impl Cli {
                     tightening_clauses: args.tightening_clauses,
                 },
                 reserve_enc_vars: args.reserve_encoding_vars.is_true(),
+                solution_guided_search: args.solution_guided_search.is_true(),
             },
             limits: Limits {
                 pps: none_if_zero!(args.pp_limit),

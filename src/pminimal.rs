@@ -12,10 +12,11 @@ use rustsat::{
     encodings::{card, pb},
     instances::{ManageVars, MultiOptInstance, Objective, CNF},
     solvers::{
-        ControlSignal, DefIncSolver, IncrementalSolve, SolveStats, SolverResult, SolverStats,
-        Terminate,
+        ControlSignal, DefIncSolver, IncrementalSolve, PhaseLit, SolveStats, SolverResult,
+        SolverStats, Terminate,
     },
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, RsHashSet, TernaryVal, Var, WLitIter},
+    var,
 };
 
 /// The solver type. Generics the pseudo-boolean encoding to use for weighted
@@ -27,7 +28,7 @@ where
     CE: card::IncUB + 'static,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + Default + Terminate<'static>,
+    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
 {
     /// The SAT solver backend
     oracle: O,
@@ -84,7 +85,7 @@ where
     PBE: pb::IncUB,
     CE: card::IncUB,
     VM: ManageVars,
-    O: IncrementalSolve + Default + Terminate<'static>,
+    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
 {
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
@@ -123,7 +124,7 @@ where
     CE: card::IncUB,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + Default + Terminate<'static>,
+    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
 {
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
@@ -162,7 +163,7 @@ where
     CE: card::IncUB,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + Default + Terminate<'static>,
+    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
 {
     fn init_with_options(inst: MultiOptInstance<VM>, opts: Options, block_clause_gen: BCG) -> Self {
         let (constr, objs) = inst.decompose();
@@ -241,7 +242,7 @@ where
     CE: card::IncUB + encodings::EncodeStats,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + SolveStats + Default + Terminate<'static>,
+    O: IncrementalSolve + PhaseLit + SolveStats + Default + Terminate<'static>,
 {
     fn oracle_stats(&self) -> SolverStats {
         self.oracle.stats()
@@ -286,7 +287,7 @@ where
     CE: card::IncUB,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + Default + Terminate<'static>,
+    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
 {
     /// Initializes the solver
     fn init(&mut self, mut cnf: CNF, objs: Vec<Objective>) {
@@ -361,6 +362,7 @@ where
             let (costs, solution) = self.get_solution_and_internal_costs(Phase::OuterLoop)?;
             self.log_candidate(&costs, Phase::OuterLoop)?;
             self.check_terminator()?;
+            self.phase_solution(solution.clone())?;
             let (costs, solution, block_switch) = self.p_minimization(costs, solution)?;
 
             self.enumerate_at_pareto_point(costs, solution)?;
@@ -414,6 +416,7 @@ where
             (costs, solution) = self.get_solution_and_internal_costs(Phase::Minimization)?;
             self.log_candidate(&costs, Phase::Minimization)?;
             self.check_terminator()?;
+            self.phase_solution(solution.clone())?;
         }
     }
 
@@ -424,12 +427,16 @@ where
         mut solution: Assignment,
     ) -> Result<(), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
+        self.unphase_solution()?;
 
         // Assumptions to enforce staying at the Pareto point
         let assumps = self.enforce_dominating(&costs);
 
         // Create Pareto point
         let mut pareto_point = ParetoPoint::new(self.externalize_internal_costs(costs));
+
+        // Truncate internal solution to only include original variables
+        solution = solution.truncate(self.max_orig_var.unwrap());
 
         loop {
             // TODO: add debug assert checking solution cost
@@ -505,10 +512,7 @@ where
     ) -> Result<(Vec<usize>, Assignment), Termination> {
         let mut costs = Vec::new();
         costs.resize(self.stats.n_objs, 0);
-        let mut sol = self.oracle.solution(
-            self.max_orig_var
-                .expect("Should never be here with empty encoding"),
-        )?;
+        let mut sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
         let tightening = self
             .opts
             .heuristic_improvements
@@ -752,6 +756,30 @@ where
             }
         });
         clause
+    }
+
+    /// If solution-guided search is turned on, phases the entire solution in
+    /// the oracle
+    fn phase_solution(&mut self, solution: Assignment) -> Result<(), Termination> {
+        if !self.opts.solution_guided_search {
+            return Ok(());
+        }
+        for lit in solution.into_iter() {
+            self.oracle.phase_lit(lit)?;
+        }
+        Ok(())
+    }
+
+    /// If solution-guided search is turned on, unphases every variable in the
+    /// solver
+    fn unphase_solution(&mut self) -> Result<(), Termination> {
+        if !self.opts.solution_guided_search {
+            return Ok(());
+        }
+        for idx in 0..self.var_manager.max_var().unwrap().idx() + 1 {
+            self.oracle.unphase_var(var![idx])?;
+        }
+        Ok(())
     }
 
     /// Blocks the current Pareto-MCS by blocking all blocking variables that are set

@@ -18,6 +18,8 @@ pub struct Options {
     pub heuristic_improvements: HeurImprOptions,
     /// Reserve encoding variables in advance
     pub reserve_enc_vars: bool,
+    /// Solution-guided search (aka phasing solutions)
+    pub solution_guided_search: bool
 }
 
 impl Default for Options {
@@ -27,6 +29,7 @@ impl Default for Options {
             enumeration: Default::default(),
             heuristic_improvements: Default::default(),
             reserve_enc_vars: false,
+            solution_guided_search: false,
         }
     }
 }

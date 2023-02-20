@@ -408,3 +408,61 @@ fn set_cover_other_reserve() {
     opts.reserve_enc_vars = !opts.reserve_enc_vars;
     set_cover(opts)
 }
+
+#[test]
+fn small_other_sol_guided() {
+    let mut opts = Options::default();
+    opts.solution_guided_search = !opts.solution_guided_search;
+    small(opts)
+}
+
+#[test]
+fn medium_single_other_sol_guided() {
+    let mut opts = Options::default();
+    opts.solution_guided_search = !opts.solution_guided_search;
+    medium_single(opts)
+}
+
+#[test]
+fn medium_all_other_sol_guided() {
+    let mut opts = Options::default();
+    opts.enumeration = EnumOptions::Solutions(None);
+    opts.solution_guided_search = !opts.solution_guided_search;
+    medium_all(opts)
+}
+
+#[test]
+fn four_other_sol_guided() {
+    let mut opts = Options::default();
+    opts.solution_guided_search = !opts.solution_guided_search;
+    four(opts)
+}
+
+#[test]
+fn parkinsons_other_sol_guided() {
+    let mut opts = Options::default();
+    opts.solution_guided_search = !opts.solution_guided_search;
+    parkinsons(opts)
+}
+
+#[test]
+#[ignore]
+fn mushroom_other_sol_guided() {
+    let mut opts = Options::default();
+    opts.solution_guided_search = !opts.solution_guided_search;
+    mushroom(opts)
+}
+
+#[test]
+fn dal_other_sol_guided() {
+    let mut opts = Options::default();
+    opts.solution_guided_search = !opts.solution_guided_search;
+    dal(opts)
+}
+
+#[test]
+fn set_cover_other_sol_guided() {
+    let mut opts = Options::default();
+    opts.solution_guided_search = !opts.solution_guided_search;
+    set_cover(opts)
+}

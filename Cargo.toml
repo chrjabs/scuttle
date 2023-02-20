@@ -19,8 +19,6 @@ signal-hook = { optional = true, version = "0.3" }
 [features]
 default = ["cadical", "build-binary"]
 cadical = ["rustsat/cadical"]
-glucose = ["rustsat/glucose4"]
-minisat = ["rustsat/minisat"]
 build-binary = [
   "dep:clap",
   "dep:concolor-clap",
