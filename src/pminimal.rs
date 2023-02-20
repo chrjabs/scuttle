@@ -661,11 +661,7 @@ where
                 ObjEncoding::Weighted { encoding, .. } => {
                     // Encode and add to solver
                     self.oracle
-                        .add_cnf(
-                            encoding
-                                .encode_ub_change(cst, cst, &mut self.var_manager)
-                                .unwrap(),
-                        )
+                        .add_cnf(encoding.encode_ub_change(cst..cst + 1, &mut self.var_manager))
                         .unwrap();
                     // Extend assumptions
                     assumps.extend(encoding.enforce_ub(cst).unwrap());
@@ -673,11 +669,7 @@ where
                 ObjEncoding::Unweighted { encoding, .. } => {
                     // Encode and add to solver
                     self.oracle
-                        .add_cnf(
-                            encoding
-                                .encode_ub_change(cst, cst, &mut self.var_manager)
-                                .unwrap(),
-                        )
+                        .add_cnf(encoding.encode_ub_change(cst..cst + 1, &mut self.var_manager))
                         .unwrap();
                     // Extend assumptions
                     assumps.extend(encoding.enforce_ub(cst).unwrap());
@@ -713,11 +705,7 @@ where
                 ObjEncoding::Weighted { encoding, .. } => {
                     // Encode and add to solver
                     self.oracle
-                        .add_cnf(
-                            encoding
-                                .encode_ub_change(cst - 1, cst - 1, &mut self.var_manager)
-                                .unwrap(),
-                        )
+                        .add_cnf(encoding.encode_ub_change(cst - 1..cst, &mut self.var_manager))
                         .unwrap();
                     // Add one enforcing assumption to clause
                     let assumps = encoding.enforce_ub(cst - 1).unwrap();
@@ -734,11 +722,7 @@ where
                 ObjEncoding::Unweighted { encoding, .. } => {
                     // Encode and add to solver
                     self.oracle
-                        .add_cnf(
-                            encoding
-                                .encode_ub_change(cst - 1, cst - 1, &mut self.var_manager)
-                                .unwrap(),
-                        )
+                        .add_cnf(encoding.encode_ub_change(cst - 1..cst, &mut self.var_manager))
                         .unwrap();
                     // Add one enforcing assumption to clause
                     let assumps = encoding.enforce_ub(cst - 1).unwrap();
