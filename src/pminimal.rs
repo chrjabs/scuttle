@@ -10,9 +10,9 @@ use crate::{
 use rustsat::{
     encodings,
     encodings::{card, pb},
-    instances::{ManageVars, MultiOptInstance, Objective, CNF},
+    instances::{ManageVars, MultiOptInstance, Objective, Cnf},
     solvers::{
-        ControlSignal, DefIncSolver, IncrementalSolve, PhaseLit, SolveStats, SolverResult,
+        ControlSignal, DefIncSolver, SolveIncremental, PhaseLit, SolveStats, SolverResult,
         SolverStats, Terminate,
     },
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, RsHashSet, TernaryVal, Var, WLitIter},
@@ -24,11 +24,11 @@ use rustsat::{
 /// variable manager to use and the SAT backend.
 pub struct PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUB + 'static,
-    CE: card::IncUB + 'static,
+    PBE: pb::BoundUpperIncremental + 'static,
+    CE: card::BoundUpperIncremental + 'static,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
+    O: SolveIncremental + PhaseLit + Default + Terminate<'static>,
 {
     /// The SAT solver backend
     oracle: O,
@@ -65,8 +65,8 @@ where
 
 impl<PBE, CE, VM> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, DefIncSolver<'static, '_>>
 where
-    PBE: pb::IncUB,
-    CE: card::IncUB,
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
     VM: ManageVars,
 {
     /// Initializes a default solver
@@ -82,10 +82,10 @@ where
 
 impl<PBE, CE, VM, O> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, O>
 where
-    PBE: pb::IncUB,
-    CE: card::IncUB,
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
     VM: ManageVars,
-    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
+    O: SolveIncremental + PhaseLit + Default + Terminate<'static>,
 {
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
@@ -120,11 +120,11 @@ where
 
 impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUB,
-    CE: card::IncUB,
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
+    O: SolveIncremental + PhaseLit + Default + Terminate<'static>,
 {
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
@@ -159,11 +159,11 @@ where
 
 impl<PBE, CE, VM, BCG, O> Solve<VM, BCG> for PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUB,
-    CE: card::IncUB,
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
+    O: SolveIncremental + PhaseLit + Default + Terminate<'static>,
 {
     fn init_with_options(inst: MultiOptInstance<VM>, opts: Options, block_clause_gen: BCG) -> Self {
         let (constr, objs) = inst.decompose();
@@ -238,11 +238,11 @@ where
 
 impl<PBE, CE, VM, BCG, O> ExtendedSolveStats for PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUB + encodings::EncodeStats,
-    CE: card::IncUB + encodings::EncodeStats,
+    PBE: pb::BoundUpperIncremental + encodings::EncodeStats,
+    CE: card::BoundUpperIncremental + encodings::EncodeStats,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + PhaseLit + SolveStats + Default + Terminate<'static>,
+    O: SolveIncremental + PhaseLit + SolveStats + Default + Terminate<'static>,
 {
     fn oracle_stats(&self) -> SolverStats {
         self.oracle.stats()
@@ -283,19 +283,19 @@ where
 
 impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::IncUB,
-    CE: card::IncUB,
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: IncrementalSolve + PhaseLit + Default + Terminate<'static>,
+    O: SolveIncremental + PhaseLit + Default + Terminate<'static>,
 {
     /// Initializes the solver
-    fn init(&mut self, mut cnf: CNF, objs: Vec<Objective>) {
+    fn init(&mut self, mut cnf: Cnf, objs: Vec<Objective>) {
         self.stats.n_objs = objs.len();
         self.stats.n_orig_clauses = cnf.n_clauses();
         self.obj_encs.reserve_exact(objs.len());
         // Add objectives to solver
-        let mut obj_cnf = CNF::new();
+        let mut obj_cnf = Cnf::new();
         objs.into_iter()
             .for_each(|obj| obj_cnf.extend(self.add_objective(obj)));
         if self.opts.heuristic_improvements.must_store_clauses() {
@@ -351,7 +351,7 @@ where
             // Find minimization starting point
             let res = self.oracle.solve()?;
             self.log_oracle_call(res, Phase::OuterLoop)?;
-            if res == SolverResult::UNSAT {
+            if res == SolverResult::Unsat {
                 return Ok(());
             } else if res == SolverResult::Interrupted {
                 return Err(Termination::Callback);
@@ -407,7 +407,7 @@ where
                 return Err(Termination::Callback);
             }
             self.log_oracle_call(res, Phase::Minimization)?;
-            if res == SolverResult::UNSAT {
+            if res == SolverResult::Unsat {
                 // Termination criteria, return last solution and costs
                 return Ok((costs, solution, block_switch));
             }
@@ -477,7 +477,7 @@ where
                 return Err(Termination::Callback);
             }
             self.log_oracle_call(res, Phase::Enumeration)?;
-            if res == SolverResult::UNSAT {
+            if res == SolverResult::Unsat {
                 let pp_term = self.log_pareto_point(&pareto_point);
                 // All solutions enumerated
                 self.pareto_front.add_pp(pareto_point);
@@ -531,7 +531,7 @@ where
     ) -> Result<usize, Termination> {
         debug_assert!(obj_idx < self.stats.n_objs);
         let mut reduction = 0;
-        let mut learned_cnf = CNF::new();
+        let mut learned_cnf = Cnf::new();
         let cost = self.obj_encs[obj_idx].iter().fold(0, |cst, (l, w)| {
             let val = sol.lit_value(l);
             if val == TernaryVal::True {
@@ -700,7 +700,7 @@ where
                     if assumps.len() == 1 {
                         clause.add(assumps[0]);
                     } else {
-                        let mut and_impl = CNF::new();
+                        let mut and_impl = Cnf::new();
                         let and_lit = self.var_manager.new_var().pos_lit();
                         and_impl.add_lit_impl_cube(and_lit, assumps);
                         self.oracle.add_cnf(and_impl).unwrap();
@@ -717,7 +717,7 @@ where
                     if assumps.len() == 1 {
                         clause.add(assumps[0]);
                     } else {
-                        let mut and_impl = CNF::new();
+                        let mut and_impl = Cnf::new();
                         let and_lit = self.var_manager.new_var().pos_lit();
                         and_impl.add_lit_impl_cube(and_lit, assumps);
                         self.oracle.add_cnf(and_impl).unwrap();
@@ -885,8 +885,8 @@ where
 
     /// Adds a new objective to the solver. This shall only be called during
     /// initialization.
-    fn add_objective(&mut self, obj: Objective) -> CNF {
-        let mut cnf = CNF::new();
+    fn add_objective(&mut self, obj: Objective) -> Cnf {
+        let mut cnf = Cnf::new();
         if obj.is_empty() {
             self.obj_encs.push(ObjEncoding::Constant {
                 offset: obj.offset(),
@@ -1024,8 +1024,8 @@ struct ObjLitData {
 /// Internal data associated with an objective
 enum ObjEncoding<PBE, CE>
 where
-    PBE: pb::IncUB,
-    CE: card::IncUB,
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
 {
     Weighted {
         offset: isize,
@@ -1043,8 +1043,8 @@ where
 
 impl<PBE, CE> ObjEncoding<PBE, CE>
 where
-    PBE: pb::IncUB,
-    CE: card::IncUB,
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
 {
     /// Initializes a new objective encoding for a weighted objective
     fn new_weighted<VM: ManageVars, LI: WLitIter>(
@@ -1100,8 +1100,8 @@ where
 
 enum ObjEncIter<'a, PBE, CE>
 where
-    PBE: pb::IncUB + 'static,
-    CE: card::IncUB + 'static,
+    PBE: pb::BoundUpperIncremental + 'static,
+    CE: card::BoundUpperIncremental + 'static,
 {
     Weighted(PBE::Iter<'a>),
     Unweighted(CE::Iter<'a>),
@@ -1110,8 +1110,8 @@ where
 
 impl<PBE, CE> Iterator for ObjEncIter<'_, PBE, CE>
 where
-    PBE: pb::IncUB,
-    CE: card::IncUB,
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
 {
     type Item = (Lit, usize);
 

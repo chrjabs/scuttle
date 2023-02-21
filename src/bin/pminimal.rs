@@ -71,7 +71,7 @@ fn main() -> Result<(), MainError> {
         }
     };
 
-    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, _> =
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, _> =
         PMinimal::default_init_with_oracle_and_options(inst, oracle, cli.options);
 
     // Set up signal handling

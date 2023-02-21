@@ -28,7 +28,7 @@ fn preprocess_inst(inst: MultiOptInstance, techniques: &str) -> (MultiOptInstanc
 fn small(opts: Options) {
     let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/small.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver
@@ -42,7 +42,7 @@ fn small(opts: Options) {
 fn medium_single(opts: Options) {
     let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/medium.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver
@@ -63,7 +63,7 @@ fn medium_single(opts: Options) {
 fn four(opts: Options) {
     let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/four.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver
@@ -83,7 +83,7 @@ fn parkinsons(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path("./data/parkinsons_mlic.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver
@@ -107,7 +107,7 @@ fn mushroom(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path("./data/mushroom_mlic.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver
@@ -133,7 +133,7 @@ pub fn dal(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_opb_path("./data/dal.opb", fio::opb::Options::default()).unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver
@@ -170,7 +170,7 @@ pub fn set_cover(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path("./data/set-cover.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<pb::DefIncUB, card::DefIncUB, _, _, solvers::DefIncSolver> =
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, solvers::DefIncSolver> =
         PMinimal::default_init_with_options(inst, opts);
     solver.solve(Limits::none()).unwrap();
     let pf = solver
