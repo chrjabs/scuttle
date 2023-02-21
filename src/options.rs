@@ -19,7 +19,7 @@ pub struct Options {
     /// Reserve encoding variables in advance
     pub reserve_enc_vars: bool,
     /// Solution-guided search (aka phasing solutions)
-    pub solution_guided_search: bool
+    pub solution_guided_search: bool,
 }
 
 impl Default for Options {

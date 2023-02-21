@@ -452,20 +452,8 @@ where
             }
             if match self.opts.enumeration {
                 EnumOptions::NoEnum => true,
-                EnumOptions::Solutions(Some(limit)) => {
-                    if pareto_point.n_sols() >= limit {
-                        true
-                    } else {
-                        false
-                    }
-                }
-                EnumOptions::PMCSs(Some(limit)) => {
-                    if pareto_point.n_sols() >= limit {
-                        true
-                    } else {
-                        false
-                    }
-                }
+                EnumOptions::Solutions(Some(limit)) => pareto_point.n_sols() >= limit,
+                EnumOptions::PMCSs(Some(limit)) => pareto_point.n_sols() >= limit,
                 _unlimited => false,
             } {
                 let pp_term = self.log_pareto_point(&pareto_point);

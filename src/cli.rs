@@ -173,9 +173,9 @@ enum CadicalConfig {
     /// Disable all internal preprocessing options
     Plain,
     /// Set internal options to target satisfiable instances
-    SAT,
+    Sat,
     /// Set internal options to target unsatisfiable instances
-    UNSAT,
+    Unsat,
 }
 
 #[cfg(feature = "cadical")]
@@ -184,20 +184,20 @@ impl fmt::Display for CadicalConfig {
         match self {
             CadicalConfig::Default => write!(f, "default"),
             CadicalConfig::Plain => write!(f, "plain"),
-            CadicalConfig::SAT => write!(f, "sat"),
-            CadicalConfig::UNSAT => write!(f, "unsat"),
+            CadicalConfig::Sat => write!(f, "sat"),
+            CadicalConfig::Unsat => write!(f, "unsat"),
         }
     }
 }
 
 #[cfg(feature = "cadical")]
-impl Into<solvers::cadical::Config> for CadicalConfig {
-    fn into(self) -> solvers::cadical::Config {
-        match self {
+impl From<CadicalConfig> for solvers::cadical::Config {
+    fn from(cfg: CadicalConfig) -> Self {
+        match cfg {
             CadicalConfig::Default => solvers::cadical::Config::Default,
             CadicalConfig::Plain => solvers::cadical::Config::Plain,
-            CadicalConfig::SAT => solvers::cadical::Config::SAT,
-            CadicalConfig::UNSAT => solvers::cadical::Config::UNSAT,
+            CadicalConfig::Sat => solvers::cadical::Config::SAT,
+            CadicalConfig::Unsat => solvers::cadical::Config::UNSAT,
         }
     }
 }
