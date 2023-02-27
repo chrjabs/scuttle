@@ -10,9 +10,9 @@ use crate::{
 use rustsat::{
     encodings,
     encodings::{card, pb},
-    instances::{ManageVars, MultiOptInstance, Objective, Cnf},
+    instances::{Cnf, ManageVars, MultiOptInstance, Objective},
     solvers::{
-        ControlSignal, DefIncSolver, SolveIncremental, PhaseLit, SolveStats, SolverResult,
+        ControlSignal, DefIncSolver, PhaseLit, SolveIncremental, SolveStats, SolverResult,
         SolverStats, Terminate,
     },
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, RsHashSet, TernaryVal, Var, WLitIter},
