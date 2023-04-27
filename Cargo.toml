@@ -9,12 +9,12 @@ edition = "2021"
 [dependencies]
 rustsat = { path = "../rustsat", default-features = false, features = ["default-but-solvers", "multiopt"] }
 maxpre = { path = "../maxpre-rs", optional = true, features = ["multiopt"] }
-cpu-time = { optional = true, version = "1.0" }
-clap = { optional = true, version = "4.0", features = ["derive", "cargo"] }
-concolor-clap = { optional = true, version = "0.0.13" }
-termcolor = { optional = true, version = "1.1" }
-atty = { optional = true, version = "0.2" }
-signal-hook = { optional = true, version = "0.3" }
+cpu-time = { optional = true, version = "1.0.0" }
+clap = { optional = true, version = "4.2.4", features = ["derive", "cargo"] }
+concolor-clap = { optional = true, version = "0.1.0" }
+termcolor = { optional = true, version = "1.2.0" }
+atty = { optional = true, version = "0.2.14" }
+signal-hook = { optional = true, version = "0.3.15" }
 
 [features]
 default = ["cadical", "build-binary"]
