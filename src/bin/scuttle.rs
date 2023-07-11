@@ -11,7 +11,7 @@ use std::{
 };
 
 use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
-use pminimal::{
+use scuttle::{
     self,
     cli::{Cli, FileFormat},
     ExtendedSolveStats, PMinimal, Solve,
@@ -107,26 +107,26 @@ fn main() -> Result<(), MainError> {
 
     if let Err(term) = solver.solve(cli.limits) {
         match term {
-            pminimal::Termination::PPLimit => {
+            scuttle::Termination::PPLimit => {
                 cli.info("Solver terminated early because of Pareto point limit")
             }
-            pminimal::Termination::SolsLimit => {
+            scuttle::Termination::SolsLimit => {
                 cli.info("Solver terminated early because of solution limit")
             }
-            pminimal::Termination::CandidatesLimit => {
+            scuttle::Termination::CandidatesLimit => {
                 cli.info("Solver terminated early because of candidate limit")
             }
-            pminimal::Termination::OracleCallsLimit => {
+            scuttle::Termination::OracleCallsLimit => {
                 cli.info("Solver terminated early because of oracle call limit")
             }
-            pminimal::Termination::LoggerError(log_error) => cli.error(&format!(
+            scuttle::Termination::LoggerError(log_error) => cli.error(&format!(
                 "Solver terminated because logger failed: {}",
                 log_error
             )),
-            pminimal::Termination::Callback => {
+            scuttle::Termination::Callback => {
                 cli.warning("Solver terminated early because of interrupt signal")
             }
-            pminimal::Termination::OracleError(oe) => {
+            scuttle::Termination::OracleError(oe) => {
                 cli.error(&format!("The SAT oracle returned an error: {}", oe))
             }
         }?
