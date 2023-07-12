@@ -1,7 +1,7 @@
 #![cfg(feature = "build-binary")]
 
 use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
-use pminimal::{self, types::ParetoFront, Limits, Options, PMinimal, Solve};
+use scuttle::{self, types::ParetoFront, Limits, Options, PMinimal, Solve};
 use rustsat::{
     encodings::{card, pb},
     instances::{fio, MultiOptInstance},

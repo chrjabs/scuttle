@@ -6,14 +6,14 @@ edition = "2021"
 license = "MIT"
 description = "A multi-objective MaxSAT solver."
 keyworks = ["solver", "multi-objective optimization", "maxsat"]
-repository = "https://github.com/chrjabs/pminimal-rs"
+repository = "https://github.com/chrjabs/scuttle"
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rustsat = { path = "../rustsat", default-features = false, features = ["default-but-solvers", "multiopt"] }
-maxpre = { path = "../maxpre-rs", optional = true, features = ["multiopt"] }
+rustsat = { version = "0.1.0", default-features = false, features = ["default-but-solvers", "multiopt"] }
+maxpre = { version = "0.1.0", optional = true, features = ["multiopt"] }
 cpu-time = { optional = true, version = "1.0.0" }
 clap = { optional = true, version = "4.2.4", features = ["derive", "cargo"] }
 concolor-clap = { optional = true, version = "0.1.0" }

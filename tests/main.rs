@@ -1,4 +1,4 @@
-use pminimal::{
+use scuttle::{
     self,
     options::{EnumOptions, HeurImprOptions},
     types::ParetoFront,
