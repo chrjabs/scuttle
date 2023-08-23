@@ -1,14 +1,14 @@
-use scuttle::{
-    self,
-    options::{EnumOptions, HeurImprOptions},
-    types::ParetoFront,
-    Limits, Options, PMinimal, Solve,
-};
 use rustsat::{
     encodings::{card, pb},
     instances::{fio, MultiOptInstance},
     solvers,
     types::RsHashSet,
+};
+use scuttle::{
+    self,
+    options::{EnumOptions, HeurImprOptions},
+    types::ParetoFront,
+    Limits, Options, PMinimal, Solve,
 };
 
 pub fn check_pf_shape(pf: ParetoFront, shape: Vec<(Vec<isize>, usize)>) {

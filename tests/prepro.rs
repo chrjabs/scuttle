@@ -1,13 +1,13 @@
 #![cfg(feature = "build-binary")]
 
 use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
-use scuttle::{self, types::ParetoFront, Limits, Options, PMinimal, Solve};
 use rustsat::{
     encodings::{card, pb},
     instances::{fio, MultiOptInstance},
     solvers,
     types::RsHashSet,
 };
+use scuttle::{self, types::ParetoFront, Limits, Options, PMinimal, Solve};
 
 fn check_pf_shape(pf: ParetoFront, shape: Vec<(Vec<isize>, usize)>) {
     let pps_set: RsHashSet<(Vec<isize>, usize)> = pf

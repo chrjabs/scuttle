@@ -12,8 +12,7 @@ use rustsat::{
     encodings::{card, pb},
     instances::{Cnf, ManageVars, MultiOptInstance, Objective},
     solvers::{
-        ControlSignal, DefIncSolver, PhaseLit, SolveIncremental, SolveStats, SolverResult,
-        SolverStats, Terminate,
+        ControlSignal, PhaseLit, SolveIncremental, SolveStats, SolverResult, SolverStats, Terminate,
     },
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, RsHashSet, TernaryVal, Var, WLitIter},
     var,
@@ -61,23 +60,6 @@ where
     loggers: Vec<Option<Box<dyn WriteSolverLog>>>,
     /// Termination callback
     term_cb: Option<fn() -> ControlSignal>,
-}
-
-impl<PBE, CE, VM> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, DefIncSolver<'static, '_>>
-where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
-    VM: ManageVars,
-{
-    /// Initializes a default solver
-    pub fn default_init(inst: MultiOptInstance<VM>) -> Self {
-        Self::init_with_options(inst, Options::default(), default_blocking_clause)
-    }
-
-    /// Initializes a default solver with options
-    pub fn default_init_with_options(inst: MultiOptInstance<VM>, opts: Options) -> Self {
-        Self::init_with_options(inst, opts, default_blocking_clause)
-    }
 }
 
 impl<PBE, CE, VM, O> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, O>

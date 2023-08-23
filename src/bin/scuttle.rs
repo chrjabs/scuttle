@@ -11,18 +11,19 @@ use std::{
 };
 
 use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
-use scuttle::{
-    self,
-    cli::{Cli, FileFormat},
-    ExtendedSolveStats, PMinimal, Solve,
-};
 use rustsat::{
     encodings::{card, pb},
     instances::{
         fio::{self, ParsingError},
         BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager,
     },
-    solvers::{self, ControlSignal},
+    solvers::ControlSignal,
+};
+use rustsat_cadical::CaDiCaL;
+use scuttle::{
+    self,
+    cli::{Cli, FileFormat},
+    PMinimal, Solve,
 };
 
 static mut SIG_TERM_FLAG: Option<Arc<AtomicBool>> = None;
@@ -59,16 +60,9 @@ fn main() -> Result<(), MainError> {
     };
 
     let oracle = {
-        #[cfg(feature = "cadical")]
-        {
-            let mut o = solvers::CaDiCaL::default();
-            o.set_configuration(cli.cadical_config).unwrap();
-            o
-        }
-        #[cfg(not(feature = "cadical"))]
-        {
-            DefIncSolver::default()
-        }
+        let mut o = CaDiCaL::default();
+        o.set_configuration(cli.cadical_config).unwrap();
+        o
     };
 
     let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, _> =

@@ -18,7 +18,7 @@ use clap::{crate_authors, crate_name, crate_version, Parser, ValueEnum};
 use cpu_time::ProcessTime;
 use rustsat::{
     instances::fio,
-    solvers::{self, SolverResult, SolverStats},
+    solvers::{SolverResult, SolverStats},
 };
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 
@@ -58,7 +58,6 @@ struct CliArgs {
     /// Reindex the variables in MaxPre
     #[arg(long, default_value_t = Bool::from(false))]
     maxpre_reindexing: Bool,
-    #[cfg(feature = "cadical")]
     /// The CaDiCaL profile to use
     #[arg(long, default_value_t = CadicalConfig::Default)]
     cadical_config: CadicalConfig,
@@ -165,7 +164,6 @@ impl fmt::Display for FileFormat {
     }
 }
 
-#[cfg(feature = "cadical")]
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 enum CadicalConfig {
     /// Set default advanced internal options
@@ -178,7 +176,6 @@ enum CadicalConfig {
     Unsat,
 }
 
-#[cfg(feature = "cadical")]
 impl fmt::Display for CadicalConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -190,14 +187,13 @@ impl fmt::Display for CadicalConfig {
     }
 }
 
-#[cfg(feature = "cadical")]
-impl From<CadicalConfig> for solvers::cadical::Config {
+impl From<CadicalConfig> for rustsat_cadical::Config {
     fn from(cfg: CadicalConfig) -> Self {
         match cfg {
-            CadicalConfig::Default => solvers::cadical::Config::Default,
-            CadicalConfig::Plain => solvers::cadical::Config::Plain,
-            CadicalConfig::Sat => solvers::cadical::Config::SAT,
-            CadicalConfig::Unsat => solvers::cadical::Config::UNSAT,
+            CadicalConfig::Default => rustsat_cadical::Config::Default,
+            CadicalConfig::Plain => rustsat_cadical::Config::Plain,
+            CadicalConfig::Sat => rustsat_cadical::Config::SAT,
+            CadicalConfig::Unsat => rustsat_cadical::Config::UNSAT,
         }
     }
 }
@@ -231,7 +227,7 @@ pub struct Cli {
     pub inst_path: PathBuf,
     pub preprocessing: bool,
     pub maxpre_techniques: String,
-    pub cadical_config: solvers::cadical::Config,
+    pub cadical_config: rustsat_cadical::Config,
     pub reindexing: bool,
     pub maxpre_reindexing: bool,
     pub opb_options: fio::opb::Options,
