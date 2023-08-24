@@ -176,7 +176,7 @@ fn parse_instance(
         FileFormat::Infer => {
             if let Some(ext) = inst_path.extension() {
                 let path_without_compr = inst_path.with_extension("");
-                let ext = if is_one_of!(ext, "gz", "bz2") {
+                let ext = if is_one_of!(ext, "gz", "bz2", "xz") {
                     // Strip compression extension
                     match path_without_compr.extension() {
                         Some(ext) => ext,
