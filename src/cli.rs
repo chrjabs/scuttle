@@ -13,7 +13,7 @@ use crate::{
     types::{ParetoFront, ParetoPoint},
     EncodingStats, Limits, Options, Stats, WriteSolverLog,
 };
-use crate::{LoggerError, Phase};
+use crate::{LoggerError, Phase, Termination};
 use clap::{crate_authors, crate_name, crate_version, Parser, ValueEnum};
 use cpu_time::ProcessTime;
 use rustsat::{
@@ -378,6 +378,15 @@ impl Cli {
         writeln!(&mut buffer, "{}", msg)?;
         self.stdout.print(&buffer)?;
         Ok(())
+    }
+
+    pub fn log_termination(&self, term: &Termination) -> Result<(), IOError> {
+        let msg = &format!("{}", term);
+        if term.is_error() {
+            self.error(msg)
+        } else {
+            self.warning(msg)
+        }
     }
 
     pub fn print_header(&self) -> Result<(), IOError> {
@@ -765,7 +774,6 @@ impl CliLogger {
         obj_idx: usize,
         apparent_cost: usize,
         improved_cost: usize,
-        learned_clauses: usize,
     ) -> Result<(), IOError> {
         if self.config.log_heuristic_obj_improvement {
             let mut buffer = self.stdout.buffer();
@@ -774,8 +782,10 @@ impl CliLogger {
             buffer.reset()?;
             writeln!(
                 &mut buffer,
-                ": obj-idx: {}; apparent-cost: {}; improved-cost: {}; learned-clauses: {}; cpu-time: {}",
-                obj_idx, apparent_cost, improved_cost, learned_clauses,
+                ": obj-idx: {}; apparent-cost: {}; improved-cost: {}; cpu-time: {}",
+                obj_idx,
+                apparent_cost,
+                improved_cost,
                 DurPrinter::new(ProcessTime::now().as_duration()),
             )?;
             self.stdout.print(&buffer)?;
@@ -806,14 +816,8 @@ impl WriteSolverLog for CliLogger {
         obj_idx: usize,
         apparent_cost: usize,
         improved_cost: usize,
-        learned_clauses: usize,
     ) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_heuristic_obj_improvement(
-            obj_idx,
-            apparent_cost,
-            improved_cost,
-            learned_clauses,
-        ))
+        Self::wrap_error(self.ilog_heuristic_obj_improvement(obj_idx, apparent_cost, improved_cost))
     }
 }
 

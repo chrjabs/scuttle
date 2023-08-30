@@ -16,12 +16,12 @@
 //!   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
 //!   2009.
 
-use std::{fmt, ops::Not};
+use std::fmt;
 
 use rustsat::{
-    instances::{ManageVars, MultiOptInstance},
+    instances::ManageVars,
     solvers::{ControlSignal, SolverError, SolverResult, SolverStats},
-    types::{Assignment, Clause, Lit},
+    types::{Assignment, Clause},
 };
 
 pub mod options;
@@ -30,8 +30,8 @@ pub use options::{Limits, Options};
 pub mod types;
 use types::{ParetoFront, ParetoPoint};
 
-mod pminimal;
-pub use crate::pminimal::PMinimal;
+pub mod solver;
+pub use solver::pminimal::PMinimal;
 
 #[cfg(feature = "build-binary")]
 pub mod cli;
@@ -42,16 +42,6 @@ where
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
 {
-    /// Initializes a new solver from a multi-objective optimization instance
-    fn init(inst: MultiOptInstance<VM>, block_clause_gen: BCG) -> Self
-    where
-        Self: Sized,
-    {
-        Self::init_with_options(inst, Options::default(), block_clause_gen)
-    }
-    /// Initializes a new solver with given options from a multi-objective
-    /// optimization instance
-    fn init_with_options(inst: MultiOptInstance<VM>, opts: Options, block_clause_gen: BCG) -> Self;
     /// Solves the instance under given limits. If not fully solved, errors an
     /// early termination reason.
     fn solve(&mut self, limits: Limits) -> Result<(), Termination>;
@@ -59,12 +49,10 @@ where
     fn pareto_front(&self) -> ParetoFront;
     /// Gets tracked statistics from the solver
     fn stats(&self) -> Stats;
-    /// A type to identify a logger
-    type LoggerId;
     /// Attaches a logger to the solver
-    fn attach_logger(&mut self, boxed_logger: Box<dyn WriteSolverLog>) -> Self::LoggerId;
+    fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L);
     /// Detaches a logger from the solver
-    fn detach_logger(&mut self, id: Self::LoggerId) -> Option<Box<dyn WriteSolverLog>>;
+    fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>>;
     /// Attaches a terminator callback. Only one callback can be attached at a time.
     fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal);
     /// Detaches the termination callback
@@ -82,6 +70,8 @@ pub trait ExtendedSolveStats {
 /// Early termination reasons for [`Solve::solve`]
 #[derive(Debug)]
 pub enum Termination {
+    /// The instance does not contain any variables
+    NoVars,
     /// Terminated because of maximum number of Pareto points reached
     PPLimit,
     /// Terminated because of maximum number of solutions reached
@@ -96,6 +86,45 @@ pub enum Termination {
     Callback,
     /// An error occured in the oracle
     OracleError(SolverError),
+}
+
+impl Termination {
+    pub fn is_error(&self) -> bool {
+        match self {
+            Termination::LoggerError(_) => true,
+            Termination::OracleError(_) => true,
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Display for Termination {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Termination::NoVars => write!(f, "Instance does not contain any variables"),
+            Termination::PPLimit => {
+                write!(f, "Solver terminated early because of Pareto point limit")
+            }
+            Termination::SolsLimit => {
+                write!(f, "Solver terminated early because of solution limit")
+            }
+            Termination::CandidatesLimit => {
+                write!(f, "Solver terminated early because of candidate limit")
+            }
+            Termination::OracleCallsLimit => {
+                write!(f, "Solver terminated early because of oracle call limit")
+            }
+            Termination::LoggerError(log_error) => {
+                write!(f, "Solver terminated because logger failed: {}", log_error)
+            }
+            Termination::Callback => {
+                write!(f, "Solver terminated early because of interrupt signal")
+            }
+            Termination::OracleError(oe) => {
+                write!(f, "The SAT oracle returned an error: {}", oe)
+            }
+        }
+    }
 }
 
 impl From<SolverError> for Termination {
@@ -179,7 +208,6 @@ pub trait WriteSolverLog {
         obj_idx: usize,
         apparent_cost: usize,
         improved_cost: usize,
-        learned_clauses: usize,
     ) -> Result<(), LoggerError>;
 }
 
@@ -206,9 +234,4 @@ impl fmt::Debug for LoggerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "LoggerError: {}", self.ierror)
     }
-}
-
-/// The default blocking clause generator
-pub fn default_blocking_clause(sol: Assignment) -> Clause {
-    Clause::from_iter(sol.into_iter().map(Lit::not))
 }

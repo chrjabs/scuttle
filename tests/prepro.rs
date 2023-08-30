@@ -7,7 +7,10 @@ use rustsat::{
     solvers,
     types::RsHashSet,
 };
+use rustsat_cadical::CaDiCaL;
 use scuttle::{self, types::ParetoFront, Limits, Options, PMinimal, Solve};
+
+type Oracle<'term, 'learn> = CaDiCaL<'term, 'learn>;
 
 fn check_pf_shape(pf: ParetoFront, shape: Vec<(Vec<isize>, usize)>) {
     let pps_set: RsHashSet<(Vec<isize>, usize)> = pf
@@ -28,13 +31,8 @@ fn preprocess_inst(inst: MultiOptInstance, techniques: &str) -> (MultiOptInstanc
 fn small(opts: Options) {
     let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/small.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<
-        pb::DefIncUpperBounding,
-        card::DefIncUpperBounding,
-        _,
-        _,
-        solvers::DefIncSolver,
-    > = PMinimal::default_init_with_options(inst, opts);
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, Oracle> =
+        PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver
         .pareto_front()
@@ -47,13 +45,8 @@ fn small(opts: Options) {
 fn medium_single(opts: Options) {
     let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/medium.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<
-        pb::DefIncUpperBounding,
-        card::DefIncUpperBounding,
-        _,
-        _,
-        solvers::DefIncSolver,
-    > = PMinimal::default_init_with_options(inst, opts);
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, Oracle> =
+        PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver
         .pareto_front()
@@ -73,13 +66,8 @@ fn medium_single(opts: Options) {
 fn four(opts: Options) {
     let inst: MultiOptInstance = MultiOptInstance::from_dimacs_path("./data/four.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<
-        pb::DefIncUpperBounding,
-        card::DefIncUpperBounding,
-        _,
-        _,
-        solvers::DefIncSolver,
-    > = PMinimal::default_init_with_options(inst, opts);
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, Oracle> =
+        PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver
         .pareto_front()
@@ -98,13 +86,8 @@ fn parkinsons(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path("./data/parkinsons_mlic.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<
-        pb::DefIncUpperBounding,
-        card::DefIncUpperBounding,
-        _,
-        _,
-        solvers::DefIncSolver,
-    > = PMinimal::default_init_with_options(inst, opts);
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, Oracle> =
+        PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver
         .pareto_front()
@@ -127,13 +110,8 @@ fn mushroom(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path("./data/mushroom_mlic.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<
-        pb::DefIncUpperBounding,
-        card::DefIncUpperBounding,
-        _,
-        _,
-        solvers::DefIncSolver,
-    > = PMinimal::default_init_with_options(inst, opts);
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, Oracle> =
+        PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver
         .pareto_front()
@@ -158,13 +136,8 @@ pub fn dal(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_opb_path("./data/dal.opb", fio::opb::Options::default()).unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<
-        pb::DefIncUpperBounding,
-        card::DefIncUpperBounding,
-        _,
-        _,
-        solvers::DefIncSolver,
-    > = PMinimal::default_init_with_options(inst, opts);
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, Oracle> =
+        PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver
         .pareto_front()
@@ -200,13 +173,8 @@ pub fn set_cover(opts: Options) {
     let inst: MultiOptInstance =
         MultiOptInstance::from_dimacs_path("./data/set-cover.mcnf").unwrap();
     let (inst, mut prepro) = preprocess_inst(inst, "[[uvsrgc]VRTG]");
-    let mut solver: PMinimal<
-        pb::DefIncUpperBounding,
-        card::DefIncUpperBounding,
-        _,
-        _,
-        solvers::DefIncSolver,
-    > = PMinimal::default_init_with_options(inst, opts);
+    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, Oracle> =
+        PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver
         .pareto_front()

@@ -17,18 +17,18 @@ use rustsat::{
         fio::{self, ParsingError},
         BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager,
     },
-    solvers::ControlSignal,
+    solvers::{ControlSignal, SolverError},
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle::{
     self,
     cli::{Cli, FileFormat},
-    PMinimal, Solve,
+    LoggerError, PMinimal, Solve,
 };
 
 static mut SIG_TERM_FLAG: Option<Arc<AtomicBool>> = None;
 
-fn main() -> Result<(), MainError> {
+fn main() -> Result<(), Error> {
     let cli = Cli::init();
 
     cli.print_header()?;
@@ -66,7 +66,17 @@ fn main() -> Result<(), MainError> {
     };
 
     let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, _> =
-        PMinimal::default_init_with_oracle_and_options(inst, oracle, cli.options);
+        match PMinimal::new_default_blocking(inst, oracle, cli.options) {
+            Ok(solver) => solver,
+            Err(term) => {
+                cli.log_termination(&term)?;
+                if term.is_error() {
+                    return Err(Error::from(term));
+                } else {
+                    return Ok(());
+                }
+            }
+        };
 
     // Set up signal handling
     unsafe { SIG_TERM_FLAG = Some(Arc::new(AtomicBool::new(false))) };
@@ -97,33 +107,13 @@ fn main() -> Result<(), MainError> {
         ControlSignal::Continue
     });
 
-    solver.attach_logger(Box::new(cli.new_cli_logger()));
+    solver.attach_logger(cli.new_cli_logger());
 
     if let Err(term) = solver.solve(cli.limits) {
-        match term {
-            scuttle::Termination::PPLimit => {
-                cli.info("Solver terminated early because of Pareto point limit")
-            }
-            scuttle::Termination::SolsLimit => {
-                cli.info("Solver terminated early because of solution limit")
-            }
-            scuttle::Termination::CandidatesLimit => {
-                cli.info("Solver terminated early because of candidate limit")
-            }
-            scuttle::Termination::OracleCallsLimit => {
-                cli.info("Solver terminated early because of oracle call limit")
-            }
-            scuttle::Termination::LoggerError(log_error) => cli.error(&format!(
-                "Solver terminated because logger failed: {}",
-                log_error
-            )),
-            scuttle::Termination::Callback => {
-                cli.warning("Solver terminated early because of interrupt signal")
-            }
-            scuttle::Termination::OracleError(oe) => {
-                cli.error(&format!("The SAT oracle returned an error: {}", oe))
-            }
-        }?
+        cli.log_termination(&term)?;
+        if term.is_error() {
+            return Err(Error::from(term));
+        }
     };
 
     cli.info("finished solving the instance")?;
@@ -171,7 +161,7 @@ fn parse_instance(
     inst_path: PathBuf,
     file_format: FileFormat,
     opb_opts: fio::opb::Options,
-) -> Result<MultiOptInstance, MainError> {
+) -> Result<MultiOptInstance, Error> {
     match file_format {
         FileFormat::Infer => {
             if let Some(ext) = inst_path.extension() {
@@ -180,54 +170,64 @@ fn parse_instance(
                     // Strip compression extension
                     match path_without_compr.extension() {
                         Some(ext) => ext,
-                        None => return Err(MainError::NoFileExtension),
+                        None => return Err(Error::NoFileExtension),
                     }
                 } else {
                     ext
                 };
                 if is_one_of!(ext, "mcnf", "bicnf", "wcnf", "cnf", "dimacs") {
-                    MainError::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path))
+                    Error::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path))
                 } else if is_one_of!(ext, "opb") {
-                    MainError::wrap_parser(MultiOptInstance::from_opb_path(inst_path, opb_opts))
+                    Error::wrap_parser(MultiOptInstance::from_opb_path(inst_path, opb_opts))
                 } else {
-                    Err(MainError::UnknownFileExtension(OsString::from(ext)))
+                    Err(Error::UnknownFileExtension(OsString::from(ext)))
                 }
             } else {
-                Err(MainError::NoFileExtension)
+                Err(Error::NoFileExtension)
             }
         }
-        FileFormat::Dimacs => MainError::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path)),
-        FileFormat::Opb => {
-            MainError::wrap_parser(MultiOptInstance::from_opb_path(inst_path, opb_opts))
-        }
+        FileFormat::Dimacs => Error::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path)),
+        FileFormat::Opb => Error::wrap_parser(MultiOptInstance::from_opb_path(inst_path, opb_opts)),
     }
 }
 
-enum MainError {
+enum Error {
     UnknownFileExtension(OsString),
     NoFileExtension,
     Parsing(ParsingError),
     IO(std::io::Error),
+    Logger(LoggerError),
+    Oracle(SolverError),
 }
 
-impl From<std::io::Error> for MainError {
+impl From<std::io::Error> for Error {
     fn from(ioe: std::io::Error) -> Self {
-        MainError::IO(ioe)
+        Error::IO(ioe)
     }
 }
 
-impl MainError {
-    fn wrap_parser(
-        parser_result: Result<MultiOptInstance, ParsingError>,
-    ) -> Result<MultiOptInstance, MainError> {
-        match parser_result {
-            Ok(inst) => Ok(inst),
-            Err(err) => Err(MainError::Parsing(err)),
+impl From<scuttle::Termination> for Error {
+    fn from(value: scuttle::Termination) -> Self {
+        match value {
+            scuttle::Termination::LoggerError(err) => Error::Logger(err),
+            scuttle::Termination::OracleError(err) => Error::Oracle(err),
+            _ => panic!("Termination is not an error!"),
         }
     }
 }
 
-impl fmt::Debug for MainError {
+impl Error {
+    fn wrap_parser(
+        parser_result: Result<MultiOptInstance, ParsingError>,
+    ) -> Result<MultiOptInstance, Error> {
+        match parser_result {
+            Ok(inst) => Ok(inst),
+            Err(err) => Err(Error::Parsing(err)),
+        }
+    }
+}
+
+impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownFileExtension(ext) => {
@@ -239,6 +239,8 @@ impl fmt::Debug for MainError {
             ),
             Self::Parsing(err) => write!(f, "Error while parsing the input file: {}", err),
             Self::IO(err) => write!(f, "IO Error: {}", err),
+            Self::Logger(err) => write!(f, "Logger Error: {}", err),
+            Self::Oracle(err) => write!(f, "Oracle Error: {}", err),
         }
     }
 }
