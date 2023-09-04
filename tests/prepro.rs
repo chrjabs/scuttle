@@ -4,7 +4,6 @@ use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
 use rustsat::{
     encodings::{card, pb},
     instances::{fio, MultiOptInstance},
-    solvers,
     types::RsHashSet,
 };
 use rustsat_cadical::CaDiCaL;

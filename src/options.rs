@@ -59,13 +59,6 @@ pub struct HeurImprOptions {
 }
 
 impl HeurImprOptions {
-    /// Checks whether the solver needs to store objective clauses for solution
-    /// improvement
-    pub(crate) fn must_store_clauses(&self) -> bool {
-        self.solution_tightening != HeurImprWhen::Never
-            || self.tightening_clauses != HeurImprWhen::Never
-    }
-
     /// No heuristic improvements
     pub fn none() -> Self {
         Self {

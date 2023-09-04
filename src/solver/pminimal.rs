@@ -1,4 +1,4 @@
-//! This the main module of the solver containing the implementation of the algorithm.
+//! The P-Minimal model enumeration algorithm
 
 use crate::{
     options::EnumOptions, types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits, Options,
@@ -15,7 +15,7 @@ use rustsat::{
     types::{Assignment, Clause, Lit, LitIter, WLitIter},
 };
 
-use super::{default_blocking_clause, SolverKernel};
+use super::{default_blocking_clause, Objective, SolverKernel};
 
 /// The solver type. Generics the pseudo-boolean encoding to use for weighted
 /// objectives, the cardinality encoding to use for unweighted objectives, the
@@ -155,31 +155,30 @@ where
     }
 
     fn encoding_stats(&self) -> Vec<EncodingStats> {
-        self.obj_encs
+        self.kernel
+            .objs
             .iter()
-            .map(|obj_enc| match obj_enc {
-                ObjEncoding::Weighted { encoding, offset } => EncodingStats {
-                    n_clauses: encoding.n_clauses(),
-                    n_vars: encoding.n_vars(),
-                    offset: *offset,
-                    unit_weight: None,
-                },
-                ObjEncoding::Unweighted {
-                    encoding,
-                    offset,
-                    unit_weight,
-                } => EncodingStats {
-                    n_clauses: encoding.n_clauses(),
-                    n_vars: encoding.n_vars(),
-                    offset: *offset,
-                    unit_weight: Some(*unit_weight),
-                },
-                ObjEncoding::Constant { offset } => EncodingStats {
-                    n_clauses: 0,
-                    n_vars: 0,
-                    offset: *offset,
-                    unit_weight: None,
-                },
+            .zip(self.obj_encs.iter())
+            .map(|(obj, enc)| {
+                let mut s = EncodingStats {
+                    offset: obj.offset(),
+                    ..Default::default()
+                };
+                if let Objective::Unweighted { unit_weight, .. } = obj {
+                    s.unit_weight = Some(*unit_weight);
+                };
+                match enc {
+                    ObjEncoding::Weighted(enc) => {
+                        s.n_vars = enc.n_vars();
+                        s.n_clauses = enc.n_clauses()
+                    }
+                    ObjEncoding::Unweighted(enc) => {
+                        s.n_vars = enc.n_vars();
+                        s.n_clauses = enc.n_clauses()
+                    }
+                    ObjEncoding::Constant => (),
+                };
+                s
             })
             .collect()
     }
@@ -198,24 +197,17 @@ where
             .objs
             .iter()
             .map(|obj| match obj {
-                super::Objective::Weighted { offset, lits } => ObjEncoding::new_weighted(
+                Objective::Weighted { lits, .. } => ObjEncoding::new_weighted(
                     lits.iter().map(|(&l, &w)| (l, w)),
-                    *offset,
                     kernel.opts.reserve_enc_vars,
                     &mut kernel.var_manager,
                 ),
-                super::Objective::Unweighted {
-                    offset,
-                    unit_weight,
-                    lits,
-                } => ObjEncoding::new_unweighted(
+                Objective::Unweighted { lits, .. } => ObjEncoding::new_unweighted(
                     lits.iter().map(|&l| l),
-                    *offset,
-                    *unit_weight,
                     kernel.opts.reserve_enc_vars,
                     &mut kernel.var_manager,
                 ),
-                super::Objective::Constant { offset } => ObjEncoding::Constant { offset: *offset },
+                Objective::Constant { .. } => ObjEncoding::Constant,
             })
             .collect();
         Self { kernel, obj_encs }
@@ -400,7 +392,7 @@ where
         let mut assumps = vec![];
         costs.iter().enumerate().for_each(|(idx, &cst)| {
             match &mut self.obj_encs[idx] {
-                ObjEncoding::Weighted { encoding, .. } => {
+                ObjEncoding::Weighted(encoding) => {
                     // Encode and add to solver
                     self.kernel
                         .oracle
@@ -411,7 +403,7 @@ where
                     // Extend assumptions
                     assumps.extend(encoding.enforce_ub(cst).unwrap());
                 }
-                ObjEncoding::Unweighted { encoding, .. } => {
+                ObjEncoding::Unweighted(encoding) => {
                     // Encode and add to solver
                     self.kernel
                         .oracle
@@ -422,7 +414,7 @@ where
                     // Extend assumptions
                     assumps.extend(encoding.enforce_ub(cst).unwrap());
                 }
-                ObjEncoding::Constant { .. } => (),
+                ObjEncoding::Constant => (),
             }
         });
         assumps
@@ -450,7 +442,7 @@ where
                 return;
             }
             match &mut self.obj_encs[idx] {
-                ObjEncoding::Weighted { encoding, .. } => {
+                ObjEncoding::Weighted(encoding) => {
                     // Encode and add to solver
                     self.kernel
                         .oracle
@@ -470,7 +462,7 @@ where
                         clause.add(and_lit);
                     }
                 }
-                ObjEncoding::Unweighted { encoding, .. } => {
+                ObjEncoding::Unweighted(encoding) => {
                     // Encode and add to solver
                     self.kernel
                         .oracle
@@ -490,36 +482,18 @@ where
                         clause.add(and_lit);
                     }
                 }
-                ObjEncoding::Constant { .. } => (),
+                ObjEncoding::Constant => (),
             }
         });
         clause
     }
 }
 
-/// Data regarding an objective literal
-struct ObjLitData {
-    /// Objectives that the literal appears in
-    objs: Vec<usize>,
-    /// Clauses that the literal appears in. The entries are indices in
-    /// [`PMinimal::obj_clauses`]. Only populated when using model tightening.
-    clauses: Vec<usize>,
-}
-
 /// Internal data associated with an objective
 enum ObjEncoding<PBE, CE> {
-    Weighted {
-        offset: isize,
-        encoding: PBE,
-    },
-    Unweighted {
-        offset: isize,
-        unit_weight: usize,
-        encoding: CE,
-    },
-    Constant {
-        offset: isize,
-    },
+    Weighted(PBE),
+    Unweighted(CE),
+    Constant,
 }
 
 impl<PBE, CE> ObjEncoding<PBE, CE>
@@ -530,7 +504,6 @@ where
     /// Initializes a new objective encoding for a weighted objective
     fn new_weighted<VM: ManageVars, LI: WLitIter>(
         lits: LI,
-        offset: isize,
         reserve: bool,
         var_manager: &mut VM,
     ) -> Self {
@@ -538,14 +511,12 @@ where
         if reserve {
             encoding.reserve(var_manager);
         }
-        ObjEncoding::Weighted { offset, encoding }
+        ObjEncoding::Weighted(encoding)
     }
 
     /// Initializes a new objective encoding for a weighted objective
     fn new_unweighted<VM: ManageVars, LI: LitIter>(
         lits: LI,
-        offset: isize,
-        unit_weight: usize,
         reserve: bool,
         var_manager: &mut VM,
     ) -> Self {
@@ -553,54 +524,6 @@ where
         if reserve {
             encoding.reserve(var_manager);
         }
-        ObjEncoding::Unweighted {
-            offset,
-            unit_weight,
-            encoding,
-        }
-    }
-
-    /// Gets the offset of the encoding
-    fn offset(&self) -> isize {
-        match self {
-            ObjEncoding::Weighted { offset, .. } => *offset,
-            ObjEncoding::Unweighted { offset, .. } => *offset,
-            ObjEncoding::Constant { offset } => *offset,
-        }
-    }
-
-    /// Unified iterator over encodings
-    fn iter(&self) -> ObjEncIter<'_, PBE, CE> {
-        match self {
-            ObjEncoding::Weighted { encoding, .. } => ObjEncIter::Weighted(encoding.iter()),
-            ObjEncoding::Unweighted { encoding, .. } => ObjEncIter::Unweighted(encoding.iter()),
-            ObjEncoding::Constant { .. } => ObjEncIter::Constant,
-        }
-    }
-}
-
-enum ObjEncIter<'a, PBE, CE>
-where
-    PBE: pb::BoundUpperIncremental + 'static,
-    CE: card::BoundUpperIncremental + 'static,
-{
-    Weighted(PBE::Iter<'a>),
-    Unweighted(CE::Iter<'a>),
-    Constant,
-}
-
-impl<PBE, CE> Iterator for ObjEncIter<'_, PBE, CE>
-where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
-{
-    type Item = (Lit, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            ObjEncIter::Weighted(iter) => iter.next(),
-            ObjEncIter::Unweighted(iter) => iter.next().map(|l| (l, 1)),
-            ObjEncIter::Constant => None,
-        }
+        ObjEncoding::Unweighted(encoding)
     }
 }

@@ -22,8 +22,6 @@ struct SolverKernel<VM, O, BCG> {
     oracle: O,
     /// The variable manager keeping track of variables
     var_manager: VM,
-    /// Maps soft clauses to blocking literals
-    blits: RsHashMap<Clause, Lit>,
     /// Objective literal data
     obj_lit_data: RsHashMap<Lit, ObjLitData>,
     /// The maximum variable of the original encoding after introducing blocking
@@ -112,7 +110,6 @@ where
         Ok(Self {
             oracle,
             var_manager,
-            blits,
             obj_lit_data,
             max_orig_var,
             objs,
