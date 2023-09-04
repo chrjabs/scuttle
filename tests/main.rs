@@ -28,7 +28,7 @@ pub fn small(opts: Options) {
         PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
-    assert_eq!(pf.n_pps(), 3);
+    assert_eq!(pf.len(), 3);
     let shape = vec![(vec![0, 4], 1), (vec![2, 2], 1), (vec![4, 0], 1)];
     check_pf_shape(pf, shape);
 }
@@ -39,7 +39,7 @@ pub fn medium_single(opts: Options) {
         PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
-    assert_eq!(pf.n_pps(), 6);
+    assert_eq!(pf.len(), 6);
     let shape = vec![
         (vec![0, 10], 1),
         (vec![2, 8], 1),
@@ -57,7 +57,7 @@ pub fn medium_all(opts: Options) {
         PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
-    assert_eq!(pf.n_pps(), 6);
+    assert_eq!(pf.len(), 6);
     let shape = vec![
         (vec![0, 10], 1),
         (vec![2, 8], 5),
@@ -75,7 +75,7 @@ pub fn four(opts: Options) {
         PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
-    assert_eq!(pf.n_pps(), 4);
+    assert_eq!(pf.len(), 4);
     let shape = vec![
         (vec![0, 0, 0, 1], 1),
         (vec![0, 0, 1, 0], 1),
@@ -92,7 +92,7 @@ pub fn parkinsons(opts: Options) {
         PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
-    assert_eq!(pf.n_pps(), 8);
+    assert_eq!(pf.len(), 8);
     let shape = vec![
         (vec![0, 147], 1),
         (vec![2, 31], 1),
@@ -113,7 +113,7 @@ pub fn mushroom(opts: Options) {
         PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
-    assert_eq!(pf.n_pps(), 10);
+    assert_eq!(pf.len(), 10);
     let shape = vec![
         (vec![0, 505], 1),
         (vec![2, 144], 1),
@@ -136,7 +136,7 @@ pub fn dal(opts: Options) {
         PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
-    assert_eq!(pf.n_pps(), 21);
+    assert_eq!(pf.len(), 21);
     let shape = vec![
         (vec![8, 0, 0, 0, 0, 7, 2], 1),
         (vec![7, 1, 0, 0, 0, 7, 2], 1),
@@ -170,7 +170,7 @@ pub fn set_cover(opts: Options) {
         PMinimal::new_defaults(inst, opts).unwrap();
     solver.solve(Limits::none()).unwrap();
     let pf = solver.pareto_front();
-    assert_eq!(pf.n_pps(), 17);
+    assert_eq!(pf.len(), 17);
     let shape = vec![
         (vec![302, 133], 1),
         (vec![195, 228], 1),

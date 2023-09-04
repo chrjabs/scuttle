@@ -1,18 +1,34 @@
-//! The P-Minimal model enumeration algorithm
+//! # $P$-Minimal Model Enumeration for Multi-Objective Optimization
+//!
+//! This module implements $P$-minimal model enumeration as an algorithm for
+//! solving multi-objective optimization problems expressed as boolean logic.
+//! Instead of using the order encoding as in \[1\], any cardinality (for
+//! unweighted objectives) or pseudo-boolean encoding from
+//! [RustSAT](https://github.com/chrjabs/rustsat) can be used. The actual
+//! enumeration algorithm follows \[2\].
+//!
+//! ## References
+//!
+//! - \[1\] Takehide Soh and Mutsunori Banbara and Naoyuki Tamura and Daniel Le
+//!   Berre: _Solving Multiobjective Discrete Optimization Problems with
+//!   Propositional Minimal Model Generation_, CP 2017.
+//! - \[2\] Miyuki Koshimura and Hidetomo Nabeshima and Hiroshi Fujita and Ryuzo
+//!   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
+//!   2009.
 
 use crate::{
-    options::EnumOptions, types::ParetoPoint, EncodingStats, ExtendedSolveStats, Limits, Options,
+    options::EnumOptions, solver::ObjEncoding, EncodingStats, ExtendedSolveStats, Limits, Options,
     ParetoFront, Phase, Solve, Stats, Termination, WriteSolverLog,
 };
 use rustsat::{
     encodings,
     encodings::{card, pb},
-    instances::{Cnf, ManageVars, MultiOptInstance},
+    instances::{ManageVars, MultiOptInstance},
     solvers::{
         ControlSignal, FlipLit, PhaseLit, SolveIncremental, SolveStats, SolverResult, SolverStats,
         Terminate,
     },
-    types::{Assignment, Clause, Lit, LitIter, WLitIter},
+    types::{Assignment, Clause, Lit},
 };
 
 use super::{default_blocking_clause, Objective, SolverKernel};
@@ -146,9 +162,9 @@ where
 
 impl<PBE, CE, VM, BCG, O> ExtendedSolveStats for PMinimal<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::BoundUpperIncremental + encodings::EncodeStats,
-    CE: card::BoundUpperIncremental + encodings::EncodeStats,
-    O: SolveIncremental + SolveStats,
+    PBE: encodings::EncodeStats,
+    CE: encodings::EncodeStats,
+    O: SolveStats,
 {
     fn oracle_stats(&self) -> SolverStats {
         self.kernel.oracle.stats()
@@ -251,7 +267,8 @@ where
             self.kernel.phase_solution(solution.clone())?;
             let (costs, solution, block_switch) = self.p_minimization(costs, solution)?;
 
-            self.enumerate_at_pareto_point(costs, solution)?;
+            let assumps = self.enforce_dominating(&costs);
+            self.kernel.yield_solutions(costs, assumps, solution)?;
 
             // Block last Pareto point, if temporarily blocked
             if let Some(block_lit) = block_switch {
@@ -274,7 +291,9 @@ where
             // Block solutions dominated by the current one
             if self.kernel.opts.enumeration == EnumOptions::NoEnum {
                 // Block permanently since no enumeration at Pareto point
-                let block_clause = self.dominated_block_clause(&costs);
+                let block_clause = self
+                    .kernel
+                    .dominated_block_clause(&costs, &mut self.obj_encs);
                 self.kernel.oracle.add_clause(block_clause)?;
             } else {
                 // Permanently block last candidate
@@ -309,79 +328,6 @@ where
             self.kernel.log_candidate(&costs, Phase::Minimization)?;
             self.kernel.check_terminator()?;
             self.kernel.phase_solution(solution.clone())?;
-        }
-    }
-
-    /// Enumerates solutions at a Pareto point
-    fn enumerate_at_pareto_point(
-        &mut self,
-        costs: Vec<usize>,
-        mut solution: Assignment,
-    ) -> Result<(), Termination> {
-        debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
-        self.kernel.unphase_solution()?;
-
-        // Assumptions to enforce staying at the Pareto point
-        let assumps = self.enforce_dominating(&costs);
-
-        // Create Pareto point
-        let mut pareto_point = ParetoPoint::new(self.kernel.externalize_internal_costs(costs));
-
-        // Truncate internal solution to only include original variables
-        solution = solution.truncate(self.kernel.max_orig_var);
-
-        loop {
-            // TODO: add debug assert checking solution cost
-            pareto_point.add_sol(solution.clone());
-            match self.kernel.log_solution() {
-                Ok(_) => (),
-                Err(term) => {
-                    let pp_term = self.kernel.log_pareto_point(&pareto_point);
-                    self.kernel.pareto_front.add_pp(pareto_point);
-                    pp_term?;
-                    return Err(term);
-                }
-            }
-            if match self.kernel.opts.enumeration {
-                EnumOptions::NoEnum => true,
-                EnumOptions::Solutions(Some(limit)) => pareto_point.n_sols() >= limit,
-                EnumOptions::PMCSs(Some(limit)) => pareto_point.n_sols() >= limit,
-                _unlimited => false,
-            } {
-                let pp_term = self.kernel.log_pareto_point(&pareto_point);
-                self.kernel.pareto_front.add_pp(pareto_point);
-                return pp_term;
-            }
-            self.kernel.check_terminator()?;
-
-            // Block last solution
-            match self.kernel.opts.enumeration {
-                EnumOptions::Solutions(_) => {
-                    self.kernel
-                        .oracle
-                        .add_clause((self.kernel.block_clause_gen)(solution))?
-                }
-                EnumOptions::PMCSs(_) => self
-                    .kernel
-                    .oracle
-                    .add_clause(self.kernel.block_pareto_mcs(solution))?,
-                EnumOptions::NoEnum => panic!("Should never reach this"),
-            }
-
-            // Find next solution
-            let res = self.kernel.oracle.solve_assumps(assumps.clone())?;
-            if res == SolverResult::Interrupted {
-                return Err(Termination::Callback);
-            }
-            self.kernel.log_oracle_call(res, Phase::Enumeration)?;
-            if res == SolverResult::Unsat {
-                let pp_term = self.kernel.log_pareto_point(&pareto_point);
-                // All solutions enumerated
-                self.kernel.pareto_front.add_pp(pareto_point);
-                return pp_term;
-            }
-            self.kernel.check_terminator()?;
-            solution = self.kernel.oracle.solution(self.kernel.max_orig_var)?;
         }
     }
 
@@ -425,105 +371,12 @@ where
     /// enforced.
     fn tmp_block_dominated(&mut self, costs: &Vec<usize>) -> Lit {
         debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
-        let mut clause = self.dominated_block_clause(costs);
+        let mut clause = self
+            .kernel
+            .dominated_block_clause(costs, &mut self.obj_encs);
         let block_lit = self.kernel.var_manager.new_var().pos_lit();
         clause.add(block_lit);
         self.kernel.oracle.add_clause(clause).unwrap();
         !block_lit
-    }
-
-    /// Gets a clause blocking solutions dominated by the given cost point.
-    fn dominated_block_clause(&mut self, costs: &Vec<usize>) -> Clause {
-        debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
-        let mut clause = Clause::new();
-        costs.iter().enumerate().for_each(|(idx, &cst)| {
-            // Don't block
-            if cst == 0 {
-                return;
-            }
-            match &mut self.obj_encs[idx] {
-                ObjEncoding::Weighted(encoding) => {
-                    // Encode and add to solver
-                    self.kernel
-                        .oracle
-                        .add_cnf(
-                            encoding.encode_ub_change(cst - 1..cst, &mut self.kernel.var_manager),
-                        )
-                        .unwrap();
-                    // Add one enforcing assumption to clause
-                    let assumps = encoding.enforce_ub(cst - 1).unwrap();
-                    if assumps.len() == 1 {
-                        clause.add(assumps[0]);
-                    } else {
-                        let mut and_impl = Cnf::new();
-                        let and_lit = self.kernel.var_manager.new_var().pos_lit();
-                        and_impl.add_lit_impl_cube(and_lit, assumps);
-                        self.kernel.oracle.add_cnf(and_impl).unwrap();
-                        clause.add(and_lit);
-                    }
-                }
-                ObjEncoding::Unweighted(encoding) => {
-                    // Encode and add to solver
-                    self.kernel
-                        .oracle
-                        .add_cnf(
-                            encoding.encode_ub_change(cst - 1..cst, &mut self.kernel.var_manager),
-                        )
-                        .unwrap();
-                    // Add one enforcing assumption to clause
-                    let assumps = encoding.enforce_ub(cst - 1).unwrap();
-                    if assumps.len() == 1 {
-                        clause.add(assumps[0]);
-                    } else {
-                        let mut and_impl = Cnf::new();
-                        let and_lit = self.kernel.var_manager.new_var().pos_lit();
-                        and_impl.add_lit_impl_cube(and_lit, assumps);
-                        self.kernel.oracle.add_cnf(and_impl).unwrap();
-                        clause.add(and_lit);
-                    }
-                }
-                ObjEncoding::Constant => (),
-            }
-        });
-        clause
-    }
-}
-
-/// Internal data associated with an objective
-enum ObjEncoding<PBE, CE> {
-    Weighted(PBE),
-    Unweighted(CE),
-    Constant,
-}
-
-impl<PBE, CE> ObjEncoding<PBE, CE>
-where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
-{
-    /// Initializes a new objective encoding for a weighted objective
-    fn new_weighted<VM: ManageVars, LI: WLitIter>(
-        lits: LI,
-        reserve: bool,
-        var_manager: &mut VM,
-    ) -> Self {
-        let mut encoding = PBE::from_iter(lits);
-        if reserve {
-            encoding.reserve(var_manager);
-        }
-        ObjEncoding::Weighted(encoding)
-    }
-
-    /// Initializes a new objective encoding for a weighted objective
-    fn new_unweighted<VM: ManageVars, LI: LitIter>(
-        lits: LI,
-        reserve: bool,
-        var_manager: &mut VM,
-    ) -> Self {
-        let mut encoding = CE::from_iter(lits);
-        if reserve {
-            encoding.reserve(var_manager);
-        }
-        ObjEncoding::Unweighted(encoding)
     }
 }

@@ -10,7 +10,7 @@ pub struct ParetoFront<S = Assignment>
 where
     S: Clone + Eq,
 {
-    pps: Vec<ParetoPoint<S>>,
+    pps: Vec<NonDomPoint<S>>,
 }
 
 impl<S> ParetoFront<S>
@@ -22,9 +22,8 @@ where
         ParetoFront { pps: vec![] }
     }
 
-    /// Adds a Pareto point to the Pareto front. Returns a mutable reference to
-    /// the Pareto point in the Pareto front.
-    pub(crate) fn add_pp(&mut self, pp: ParetoPoint<S>) {
+    /// Adds a non-dominated point to the Pareto front
+    pub(crate) fn add_pp(&mut self, pp: NonDomPoint<S>) {
         self.pps.push(pp)
     }
 
@@ -43,12 +42,7 @@ where
         }
     }
 
-    /// Gets the number of Pareto points
-    pub fn n_pps(&self) -> usize {
-        self.pps.len()
-    }
-
-    /// Gets the number of Pareto points
+    /// Gets the number of non-dominated points
     pub fn len(&self) -> usize {
         self.pps.len()
     }
@@ -63,9 +57,9 @@ impl<'a, S> IntoIterator for &'a ParetoFront<S>
 where
     S: Clone + Eq,
 {
-    type Item = &'a ParetoPoint<S>;
+    type Item = &'a NonDomPoint<S>;
 
-    type IntoIter = std::slice::Iter<'a, ParetoPoint<S>>;
+    type IntoIter = std::slice::Iter<'a, NonDomPoint<S>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.pps.iter()
@@ -76,7 +70,7 @@ impl<S> IntoIterator for ParetoFront<S>
 where
     S: Clone + Eq,
 {
-    type Item = ParetoPoint<S>;
+    type Item = NonDomPoint<S>;
 
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
@@ -87,9 +81,9 @@ where
 
 /// A point on the Pareto front. This is a point in _objective_ space, i.e., a
 /// tuple of costs. Multiple Pareto-optimal solutions can be associated with one
-/// Pareto point.
+/// non-dominated point.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParetoPoint<S = Assignment>
+pub struct NonDomPoint<S = Assignment>
 where
     S: Clone + Eq,
 {
@@ -97,47 +91,47 @@ where
     sols: Vec<S>,
 }
 
-impl<S> ParetoPoint<S>
+impl<S> NonDomPoint<S>
 where
     S: Clone + Eq,
 {
-    /// Constructs a new Pareto point
+    /// Constructs a new non-dominated point
     pub(crate) fn new(costs: Vec<isize>) -> Self {
-        ParetoPoint {
+        NonDomPoint {
             costs,
             sols: vec![],
         }
     }
 
-    /// Adds a solution to the Pareto point
+    /// Adds a solution to the non-dominated point
     pub(crate) fn add_sol(&mut self, sol: S) {
         self.sols.push(sol)
     }
 
-    /// Gets the number of solutions in the Pareto point
+    /// Gets the number of solutions in the non-dominated point
     pub fn n_sols(&self) -> usize {
         self.sols.len()
     }
 
     /// Converts all solutions to another type
-    pub fn convert_solutions<C, S2>(self, conv: &mut C) -> ParetoPoint<S2>
+    pub fn convert_solutions<C, S2>(self, conv: &mut C) -> NonDomPoint<S2>
     where
         S2: Clone + Eq,
         C: FnMut(S) -> S2,
     {
-        ParetoPoint {
+        NonDomPoint {
             costs: self.costs,
             sols: self.sols.into_iter().map(conv).collect(),
         }
     }
 
-    /// Gets the costs of the Pareto point
+    /// Gets the costs of the non-dominated point
     pub fn costs(&self) -> &Vec<isize> {
         &self.costs
     }
 }
 
-impl<'a, S> IntoIterator for &'a ParetoPoint<S>
+impl<'a, S> IntoIterator for &'a NonDomPoint<S>
 where
     S: Clone + Eq,
 {
@@ -150,7 +144,7 @@ where
     }
 }
 
-impl<S> IntoIterator for ParetoPoint<S>
+impl<S> IntoIterator for NonDomPoint<S>
 where
     S: Clone + Eq,
 {

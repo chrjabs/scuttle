@@ -3,17 +3,20 @@
 use std::ops::Not;
 
 use rustsat::{
+    encodings::{card, pb},
     instances::{Cnf, ManageVars, MultiOptInstance},
     solvers::{ControlSignal, FlipLit, PhaseLit, SolveIncremental, SolverResult, Terminate},
-    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var},
+    types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
     var,
 };
 
 use crate::{
-    types::{ParetoFront, ParetoPoint},
+    options::EnumOptions,
+    types::{NonDomPoint, ParetoFront},
     Limits, Options, Phase, Stats, Termination, WriteSolverLog,
 };
 
+//pub mod lowerbounding;
 pub mod pminimal;
 
 /// Kernel struct shared between all solvers
@@ -251,7 +254,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     }
 
     /// Logs a Pareto point. Can return a termination if the Pareto point limit is reached.
-    fn log_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), Termination> {
+    fn log_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), Termination> {
         self.stats.n_pareto_points += 1;
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
@@ -375,6 +378,148 @@ where
     }
 }
 
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    VM: ManageVars,
+    O: SolveIncremental + PhaseLit,
+    BCG: FnMut(Assignment) -> Clause,
+{
+    /// Yields Pareto-optimal solutions. The given assumptions must only allow
+    /// for solutions at the non-dominated point with given cost. If the options
+    /// ask for enumeration, will enumerate all solutions at this point.
+    fn yield_solutions(
+        &mut self,
+        costs: Vec<usize>,
+        assumps: Vec<Lit>,
+        mut solution: Assignment,
+    ) -> Result<(), Termination> {
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        self.unphase_solution()?;
+
+        // Create Pareto point
+        let mut pareto_point = NonDomPoint::new(self.externalize_internal_costs(costs));
+
+        // Truncate internal solution to only include original variables
+        solution = solution.truncate(self.max_orig_var);
+
+        loop {
+            // TODO: add debug assert checking solution cost
+            pareto_point.add_sol(solution.clone());
+            match self.log_solution() {
+                Ok(_) => (),
+                Err(term) => {
+                    let pp_term = self.log_pareto_point(&pareto_point);
+                    self.pareto_front.add_pp(pareto_point);
+                    pp_term?;
+                    return Err(term);
+                }
+            }
+            if match self.opts.enumeration {
+                EnumOptions::NoEnum => true,
+                EnumOptions::Solutions(Some(limit)) => pareto_point.n_sols() >= limit,
+                EnumOptions::PMCSs(Some(limit)) => pareto_point.n_sols() >= limit,
+                _unlimited => false,
+            } {
+                let pp_term = self.log_pareto_point(&pareto_point);
+                self.pareto_front.add_pp(pareto_point);
+                return pp_term;
+            }
+            self.check_terminator()?;
+
+            // Block last solution
+            match self.opts.enumeration {
+                EnumOptions::Solutions(_) => {
+                    self.oracle.add_clause((self.block_clause_gen)(solution))?
+                }
+                EnumOptions::PMCSs(_) => self.oracle.add_clause(self.block_pareto_mcs(solution))?,
+                EnumOptions::NoEnum => panic!("Should never reach this"),
+            }
+
+            // Find next solution
+            let res = self.oracle.solve_assumps(assumps.clone())?;
+            if res == SolverResult::Interrupted {
+                return Err(Termination::Callback);
+            }
+            self.log_oracle_call(res, Phase::Enumeration)?;
+            if res == SolverResult::Unsat {
+                let pp_term = self.log_pareto_point(&pareto_point);
+                // All solutions enumerated
+                self.pareto_front.add_pp(pareto_point);
+                return pp_term;
+            }
+            self.check_terminator()?;
+            solution = self.oracle.solution(self.max_orig_var)?;
+        }
+    }
+}
+
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    VM: ManageVars,
+    O: SolveIncremental,
+{
+    /// Gets a clause blocking solutions (weakly) dominated by the given cost point,
+    /// given objective encodings.
+    fn dominated_block_clause<PBE, CE>(
+        &mut self,
+        costs: &Vec<usize>,
+        obj_encs: &mut Vec<ObjEncoding<PBE, CE>>,
+    ) -> Clause
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        debug_assert_eq!(costs.len(), obj_encs.len());
+        costs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, &cst)| {
+                // Don't block
+                if cst == 0 {
+                    return None;
+                }
+                match &mut obj_encs[idx] {
+                    ObjEncoding::Weighted(enc) => {
+                        // Encode and add to solver
+                        self.oracle
+                            .add_cnf(enc.encode_ub_change(cst - 1..cst, &mut self.var_manager))
+                            .unwrap();
+                        // Add one enforcing assumption to clause
+                        let assumps = enc.enforce_ub(cst - 1).unwrap();
+                        if assumps.len() == 1 {
+                            Some(assumps[0])
+                        } else {
+                            let mut and_impl = Cnf::new();
+                            let and_lit = self.var_manager.new_var().pos_lit();
+                            and_impl.add_lit_impl_cube(and_lit, assumps);
+                            self.oracle.add_cnf(and_impl).unwrap();
+                            Some(and_lit)
+                        }
+                    }
+                    ObjEncoding::Unweighted(encoding) => {
+                        // Encode and add to solver
+                        self.oracle
+                            .add_cnf(encoding.encode_ub_change(cst - 1..cst, &mut self.var_manager))
+                            .unwrap();
+                        // Add one enforcing assumption to clause
+                        let assumps = encoding.enforce_ub(cst - 1).unwrap();
+                        if assumps.len() == 1 {
+                            Some(assumps[0])
+                        } else {
+                            let mut and_impl = Cnf::new();
+                            let and_lit = self.var_manager.new_var().pos_lit();
+                            and_impl.add_lit_impl_cube(and_lit, assumps);
+                            self.oracle.add_cnf(and_impl).unwrap();
+                            Some(and_lit)
+                        }
+                    }
+                    ObjEncoding::Constant => None,
+                }
+            })
+            .collect()
+    }
+}
+
 fn absorb_objective<VM: ManageVars>(
     obj: rustsat::instances::Objective,
     cnf: &mut Cnf,
@@ -484,6 +629,45 @@ impl Iterator for ObjIter<'_> {
             ObjIter::Unweighted(iter) => iter.next().map(|&l| (l, 1)),
             ObjIter::Constant => None,
         }
+    }
+}
+
+/// An objective encoding for either a weighted or an unweighted objective
+enum ObjEncoding<PBE, CE> {
+    Weighted(PBE),
+    Unweighted(CE),
+    Constant,
+}
+
+impl<PBE, CE> ObjEncoding<PBE, CE>
+where
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
+{
+    /// Initializes a new objective encoding for a weighted objective
+    fn new_weighted<VM: ManageVars, LI: WLitIter>(
+        lits: LI,
+        reserve: bool,
+        var_manager: &mut VM,
+    ) -> Self {
+        let mut encoding = PBE::from_iter(lits);
+        if reserve {
+            encoding.reserve(var_manager);
+        }
+        ObjEncoding::Weighted(encoding)
+    }
+
+    /// Initializes a new objective encoding for a weighted objective
+    fn new_unweighted<VM: ManageVars, LI: LitIter>(
+        lits: LI,
+        reserve: bool,
+        var_manager: &mut VM,
+    ) -> Self {
+        let mut encoding = CE::from_iter(lits);
+        if reserve {
+            encoding.reserve(var_manager);
+        }
+        ObjEncoding::Unweighted(encoding)
     }
 }
 

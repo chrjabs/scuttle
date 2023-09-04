@@ -1,20 +1,6 @@
-//! # $P$-Minimal Model Enumeration for Multi-Objective Optimization
-//!
-//! This library implements $P$-minimal model enumeration as an algorithm for
-//! solving multi-objective optimization problems expressed as boolean logic.
-//! Instead of using the order encoding as in \[1\], any cardinality (for
-//! unweighted objectives) or pseudo-boolean encoding from
-//! [RustSAT](https://github.com/chrjabs/rustsat) can be used. The actual
-//! enumeration algorithm follows \[2\].
-//!
-//! ## References
-//!
-//! - \[1\] Takehide Soh and Mutsunori Banbara and Naoyuki Tamura and Daniel Le
-//!   Berre: _Solving Multiobjective Discrete Optimization Problems with
-//!   Propositional Minimal Model Generation_, CP 2017.
-//! - \[2\] Miyuki Koshimura and Hidetomo Nabeshima and Hiroshi Fujita and Ryuzo
-//!   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
-//!   2009.
+//! # Scuttle
+//! 
+//! A multi-objective MaxSAT solver with multiple algorithms implemented.
 
 use std::fmt;
 
@@ -28,7 +14,7 @@ pub mod options;
 pub use options::{Limits, Options};
 
 pub mod types;
-use types::{ParetoFront, ParetoPoint};
+use types::{ParetoFront, NonDomPoint};
 
 pub mod solver;
 pub use solver::pminimal::PMinimal;
@@ -201,7 +187,7 @@ pub trait WriteSolverLog {
     /// Adds a solution to the log
     fn log_solution(&mut self) -> Result<(), LoggerError>;
     /// Adds a Pareto point to the log
-    fn log_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), LoggerError>;
+    fn log_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), LoggerError>;
     /// Adds a heuristic objective improvement to the log
     fn log_heuristic_obj_improvement(
         &mut self,

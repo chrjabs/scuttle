@@ -10,7 +10,7 @@ use std::{
 
 use crate::options::{EnumOptions, HeurImprOptions, HeurImprWhen};
 use crate::{
-    types::{ParetoFront, ParetoPoint},
+    types::{ParetoFront, NonDomPoint},
     EncodingStats, Limits, Options, Stats, WriteSolverLog,
 };
 use crate::{LoggerError, Phase, Termination};
@@ -605,7 +605,7 @@ impl Cli {
     fn print_pareto_point(
         &self,
         buffer: &mut Buffer,
-        pareto_point: ParetoPoint,
+        pareto_point: NonDomPoint,
     ) -> Result<(), IOError> {
         Self::start_block(buffer)?;
         buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -751,7 +751,7 @@ impl CliLogger {
         Ok(())
     }
 
-    fn ilog_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), IOError> {
+    fn ilog_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), IOError> {
         if self.config.log_pareto_points {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -807,7 +807,7 @@ impl WriteSolverLog for CliLogger {
         Self::wrap_error(self.ilog_solution())
     }
 
-    fn log_pareto_point(&mut self, pareto_point: &ParetoPoint) -> Result<(), LoggerError> {
+    fn log_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), LoggerError> {
         Self::wrap_error(self.ilog_pareto_point(pareto_point))
     }
 
