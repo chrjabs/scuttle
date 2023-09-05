@@ -208,6 +208,7 @@ where
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> Result<(), Termination> {
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
+        self.kernel.log_routine_start("p-minimal")?;
         loop {
             // Find minimization starting point
             let res = self.kernel.solve()?;

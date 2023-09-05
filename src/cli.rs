@@ -106,6 +106,9 @@ struct CliArgs {
     /// Log fence updates in the lower-bounding algorithm
     #[arg(long)]
     log_fence: bool,
+    /// Log routine starts and ends
+    #[arg(long)]
+    log_routines: bool,
     /// The index in the OPB file to treat as the lowest variable
     #[arg(long, default_value_t = 0)]
     first_var_idx: usize,
@@ -343,6 +346,7 @@ impl Cli {
                 log_oracle_calls: args.log_oracle_calls,
                 log_heuristic_obj_improvement: args.log_heuristic_obj_improvement,
                 log_fence: args.log_fence,
+                log_routines: args.log_routines,
             },
         };
         #[cfg(not(feature = "sol-tightening"))]
@@ -374,18 +378,19 @@ impl Cli {
                 }
             }),
             config: self.logger_config.clone(),
+            routine_stack: vec![],
         }
     }
 
     pub fn warning(&self, msg: &str) -> Result<(), IOError> {
         let mut buffer = self.stderr.buffer();
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Yellow)))?;
-        write!(&mut buffer, "warning")?;
+        write!(buffer, "warning")?;
         buffer.reset()?;
         buffer.set_color(ColorSpec::new().set_bold(true))?;
-        write!(&mut buffer, ": ")?;
+        write!(buffer, ": ")?;
         buffer.reset()?;
-        writeln!(&mut buffer, "{}", msg)?;
+        writeln!(buffer, "{}", msg)?;
         self.stdout.print(&buffer)?;
         Ok(())
     }
@@ -393,12 +398,12 @@ impl Cli {
     pub fn error(&self, msg: &str) -> Result<(), IOError> {
         let mut buffer = self.stderr.buffer();
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Red)))?;
-        write!(&mut buffer, "error")?;
+        write!(buffer, "error")?;
         buffer.reset()?;
         buffer.set_color(ColorSpec::new().set_bold(true))?;
-        write!(&mut buffer, ": ")?;
+        write!(buffer, ": ")?;
         buffer.reset()?;
-        writeln!(&mut buffer, "{}", msg)?;
+        writeln!(buffer, "{}", msg)?;
         self.stdout.print(&buffer)?;
         Ok(())
     }
@@ -406,12 +411,12 @@ impl Cli {
     pub fn info(&self, msg: &str) -> Result<(), IOError> {
         let mut buffer = self.stdout.buffer();
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-        write!(&mut buffer, "info")?;
+        write!(buffer, "info")?;
         buffer.reset()?;
         buffer.set_color(ColorSpec::new().set_bold(true))?;
-        write!(&mut buffer, ": ")?;
+        write!(buffer, ": ")?;
         buffer.reset()?;
-        writeln!(&mut buffer, "{}", msg)?;
+        writeln!(buffer, "{}", msg)?;
         self.stdout.print(&buffer)?;
         Ok(())
     }
@@ -428,15 +433,15 @@ impl Cli {
     pub fn print_header(&self) -> Result<(), IOError> {
         let mut buffer = self.stdout.buffer();
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Green)))?;
-        write!(&mut buffer, "{}", crate_name!())?;
+        write!(buffer, "{}", crate_name!())?;
         buffer.reset()?;
         buffer.set_color(ColorSpec::new().set_bold(true))?;
-        writeln!(&mut buffer, " ({})", crate_version!())?;
+        writeln!(buffer, " ({})", crate_version!())?;
         buffer.reset()?;
-        writeln!(&mut buffer, "{}", crate_authors!("\n"))?;
-        write!(&mut buffer, "algorithm: ")?;
+        writeln!(buffer, "{}", crate_authors!("\n"))?;
+        write!(buffer, "algorithm: ")?;
         buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
-        writeln!(&mut buffer, "{}", self.alg)?;
+        writeln!(buffer, "{}", self.alg)?;
         buffer.reset()?;
         buffer.set_color(ColorSpec::new().set_bold(true))?;
         write!(buffer, "==============================")?;
@@ -451,10 +456,10 @@ impl Cli {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;
             buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(&mut buffer, "Solver Config")?;
+            write!(buffer, "Solver Config")?;
             buffer.reset()?;
             buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(&mut buffer, ": ")?;
+            writeln!(buffer, ": ")?;
             buffer.reset()?;
             Self::print_parameter(
                 &mut buffer,
@@ -488,9 +493,9 @@ impl Cli {
         let mut buffer = self.stdout.buffer();
         Self::start_block(&mut buffer)?;
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-        write!(&mut buffer, "Discovered Pareto Front")?;
+        write!(buffer, "Discovered Pareto Front")?;
         buffer.set_color(ColorSpec::new().set_bold(true))?;
-        writeln!(&mut buffer, ": ")?;
+        writeln!(buffer, ": ")?;
         buffer.reset()?;
         pareto_front.into_iter().fold(Ok(()), |res, pp| {
             if res.is_ok() {
@@ -509,10 +514,10 @@ impl Cli {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;
             buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(&mut buffer, "Solver Stats")?;
+            write!(buffer, "Solver Stats")?;
             buffer.reset()?;
             buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(&mut buffer, ": ")?;
+            writeln!(buffer, ": ")?;
             buffer.reset()?;
             Self::print_parameter(&mut buffer, "n-solve-calls", stats.n_solve_calls)?;
             Self::print_parameter(&mut buffer, "n-solutions", stats.n_solutions)?;
@@ -531,10 +536,10 @@ impl Cli {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;
             buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(&mut buffer, "Oracle Stats")?;
+            write!(buffer, "Oracle Stats")?;
             buffer.reset()?;
             buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(&mut buffer, ": ")?;
+            writeln!(buffer, ": ")?;
             buffer.reset()?;
             Self::print_parameter(&mut buffer, "n-sat-solves", stats.n_sat)?;
             Self::print_parameter(&mut buffer, "n-unsat-solves", stats.n_unsat)?;
@@ -557,10 +562,10 @@ impl Cli {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;
             buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(&mut buffer, "Encoding Stats")?;
+            write!(buffer, "Encoding Stats")?;
             buffer.reset()?;
             buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(&mut buffer, ": ")?;
+            writeln!(buffer, ": ")?;
             buffer.reset()?;
             stats
                 .into_iter()
@@ -583,10 +588,10 @@ impl Cli {
             let mut buffer = self.stdout.buffer();
             Self::start_block(&mut buffer)?;
             buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(&mut buffer, "MaxPre Stats")?;
+            write!(buffer, "MaxPre Stats")?;
             buffer.reset()?;
             buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(&mut buffer, ": ")?;
+            writeln!(buffer, ": ")?;
             buffer.reset()?;
             Self::print_parameter(&mut buffer, "n-objs", stats.n_objs)?;
             Self::print_parameter(
@@ -719,29 +724,24 @@ struct LoggerConfig {
     log_oracle_calls: bool,
     log_heuristic_obj_improvement: bool,
     log_fence: bool,
+    log_routines: bool,
 }
 
 pub struct CliLogger {
     stdout: BufferWriter,
     config: LoggerConfig,
+    routine_stack: Vec<(&'static str, ProcessTime)>,
 }
 
-impl CliLogger {
-    fn wrap_error<T>(ires: Result<T, IOError>) -> Result<T, LoggerError> {
-        match ires {
-            Ok(t) => Ok(t),
-            Err(ierror) => Err(LoggerError::new(ierror)),
-        }
-    }
-
-    fn ilog_candidate(&self, costs: &[usize], phase: Phase) -> Result<(), IOError> {
+impl WriteSolverLog for CliLogger {
+    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> Result<(), LoggerError> {
         if self.config.log_candidates {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(&mut buffer, "candidate")?;
+            write!(buffer, "candidate")?;
             buffer.reset()?;
             writeln!(
-                &mut buffer,
+                buffer,
                 ": costs: {}; phase: {}; cpu-time: {}",
                 VecPrinter::new(costs),
                 phase,
@@ -752,14 +752,14 @@ impl CliLogger {
         Ok(())
     }
 
-    fn ilog_oracle_call(&mut self, result: SolverResult) -> Result<(), IOError> {
+    fn log_oracle_call(&mut self, result: SolverResult) -> Result<(), LoggerError> {
         if self.config.log_oracle_calls {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(&mut buffer, "oracle call")?;
+            write!(buffer, "oracle call")?;
             buffer.reset()?;
             writeln!(
-                &mut buffer,
+                buffer,
                 ": result: {}; cpu-time: {}",
                 result,
                 DurPrinter::new(ProcessTime::now().as_duration()),
@@ -769,14 +769,14 @@ impl CliLogger {
         Ok(())
     }
 
-    fn ilog_solution(&mut self) -> Result<(), IOError> {
+    fn log_solution(&mut self) -> Result<(), LoggerError> {
         if self.config.log_solutions {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(&mut buffer, "solution")?;
+            write!(buffer, "solution")?;
             buffer.reset()?;
             writeln!(
-                &mut buffer,
+                buffer,
                 ": cpu-time: {}",
                 DurPrinter::new(ProcessTime::now().as_duration()),
             )?;
@@ -785,14 +785,14 @@ impl CliLogger {
         Ok(())
     }
 
-    fn ilog_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), IOError> {
+    fn log_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), LoggerError> {
         if self.config.log_pareto_points {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(&mut buffer, "pareto point")?;
+            write!(buffer, "pareto point")?;
             buffer.reset()?;
             writeln!(
-                &mut buffer,
+                buffer,
                 ": costs: {}; n-sols: {}; cpu-time: {}",
                 VecPrinter::new(pareto_point.costs()),
                 pareto_point.n_sols(),
@@ -803,19 +803,19 @@ impl CliLogger {
         Ok(())
     }
 
-    fn ilog_heuristic_obj_improvement(
+    fn log_heuristic_obj_improvement(
         &mut self,
         obj_idx: usize,
         apparent_cost: usize,
         improved_cost: usize,
-    ) -> Result<(), IOError> {
+    ) -> Result<(), LoggerError> {
         if self.config.log_heuristic_obj_improvement {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(&mut buffer, "heuristic objective improvement")?;
+            write!(buffer, "heuristic objective improvement")?;
             buffer.reset()?;
             writeln!(
-                &mut buffer,
+                buffer,
                 ": obj-idx: {}; apparent-cost: {}; improved-cost: {}; cpu-time: {}",
                 obj_idx,
                 apparent_cost,
@@ -827,47 +827,57 @@ impl CliLogger {
         Ok(())
     }
 
-    fn ilog_fence(&mut self, fence: Vec<usize>) -> Result<(), IOError> {
+    fn log_fence(&mut self, fence: Vec<usize>) -> Result<(), LoggerError> {
         if self.config.log_fence {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(&mut buffer, "fence update")?;
+            write!(buffer, "fence update")?;
             buffer.reset()?;
-            writeln!(&mut buffer, ": {}", VecPrinter::new(&fence))?;
+            writeln!(buffer, ": {}", VecPrinter::new(&fence))?;
             self.stdout.print(&buffer)?;
         }
         Ok(())
     }
-}
 
-impl WriteSolverLog for CliLogger {
-    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_candidate(costs, phase))
+    fn log_routine_start(&mut self, desc: &'static str) -> Result<(), LoggerError> {
+        if self.config.log_routines {
+            self.routine_stack.push((desc, ProcessTime::now()));
+
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
+            write!(buffer, ">>> routine start")?;
+            buffer.reset()?;
+            writeln!(buffer, ": {}", desc)?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
     }
 
-    fn log_oracle_call(&mut self, result: SolverResult) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_oracle_call(result))
+    fn log_routine_end(&mut self) -> Result<(), LoggerError> {
+        if self.config.log_routines {
+            let (desc, start) = self.routine_stack.pop().expect("routine stack out of sync");
+            let duration = ProcessTime::now().duration_since(start);
+
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
+            write!(buffer, "<<< routine end")?;
+            buffer.reset()?;
+            writeln!(
+                buffer,
+                ": {}; duration: {}",
+                desc,
+                DurPrinter::new(duration)
+            )?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
     }
 
-    fn log_solution(&mut self) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_solution())
-    }
-
-    fn log_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_pareto_point(pareto_point))
-    }
-
-    fn log_heuristic_obj_improvement(
-        &mut self,
-        obj_idx: usize,
-        apparent_cost: usize,
-        improved_cost: usize,
-    ) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_heuristic_obj_improvement(obj_idx, apparent_cost, improved_cost))
-    }
-
-    fn log_fence(&mut self, fence: Vec<usize>) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_fence(fence))
+    fn log_end_solve(&mut self) -> Result<(), LoggerError> {
+        while !self.routine_stack.is_empty() {
+            self.log_routine_end()?;
+        }
+        Ok(())
     }
 }
 

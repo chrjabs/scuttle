@@ -175,6 +175,12 @@ pub trait WriteSolverLog {
     ) -> Result<(), LoggerError>;
     /// Adds a fence change in the lower-bounding algorithm to the log
     fn log_fence(&mut self, fence: Vec<usize>) -> Result<(), LoggerError>;
+    /// Adds a new routine starting to the log
+    fn log_routine_start(&mut self, desc: &'static str) -> Result<(), LoggerError>;
+    /// Adds a new routine ending to the log
+    fn log_routine_end(&mut self) -> Result<(), LoggerError>;
+    /// Adds end of solving to the log
+    fn log_end_solve(&mut self) -> Result<(), LoggerError>;
 }
 
 /// Error type for loggers
@@ -183,9 +189,18 @@ pub struct LoggerError {
 }
 
 impl LoggerError {
-    fn new<IE: fmt::Display + 'static>(ierror: IE) -> Self {
+    pub fn new<IE: fmt::Display + 'static>(ierror: IE) -> Self {
         LoggerError {
             ierror: Box::new(ierror),
+        }
+    }
+}
+
+#[cfg(feature = "build-binary")]
+impl From<std::io::Error> for LoggerError {
+    fn from(value: std::io::Error) -> Self {
+        Self {
+            ierror: Box::new(value),
         }
     }
 }

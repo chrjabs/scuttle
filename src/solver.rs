@@ -305,6 +305,24 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
         }
         Ok(())
     }
+
+    /// Logs a routine start
+    fn log_routine_start(&mut self, desc: &'static str) -> Result<(), Termination> {
+        // Dispatch to logger
+        if let Some(logger) = &mut self.logger {
+            logger.log_routine_start(desc)?;
+        }
+        Ok(())
+    }
+
+    /// Logs a routine end
+    fn log_routine_end(&mut self) -> Result<(), Termination> {
+        // Dispatch to logger
+        if let Some(logger) = &mut self.logger {
+            logger.log_routine_end()?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(feature = "oracle-term")]
@@ -451,6 +469,7 @@ where
         mut solution: Assignment,
     ) -> Result<(), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
+        self.log_routine_start("yield solutions")?;
         self.unphase_solution()?;
 
         // Create Pareto point
@@ -479,6 +498,7 @@ where
             } {
                 let pp_term = self.log_pareto_point(&pareto_point);
                 self.pareto_front.add_pp(pareto_point);
+                self.log_routine_end()?;
                 return pp_term;
             }
             self.check_terminator()?;
@@ -502,6 +522,7 @@ where
                 let pp_term = self.log_pareto_point(&pareto_point);
                 // All solutions enumerated
                 self.pareto_front.add_pp(pareto_point);
+                self.log_routine_end()?;
                 return pp_term;
             }
             self.check_terminator()?;
@@ -545,6 +566,7 @@ where
         CE: card::BoundUpperIncremental,
     {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
+        self.log_routine_start("p minimization")?;
         let mut block_switch = None;
         loop {
             // Force next solution to dominate the current one
@@ -568,6 +590,7 @@ where
             // Check if dominating solution exists
             let res = self.solve_assumps(assumps)?;
             if res == SolverResult::Unsat {
+                self.log_routine_end()?;
                 // Termination criteria, return last solution and costs
                 return Ok((costs, solution, block_switch));
             }
@@ -678,7 +701,9 @@ where
     /// Wrapper around the oracle with call logging and interrupt detection.
     /// Assumes that the oracle is unlimited.
     fn solve(&mut self) -> Result<SolverResult, Termination> {
+        self.log_routine_start("oracle call")?;
         let res = self.oracle.solve()?;
+        self.log_routine_end()?;
         if res == SolverResult::Interrupted {
             return Err(Termination::Callback);
         }
@@ -689,7 +714,9 @@ where
     /// Wrapper around the oracle with call logging and interrupt detection.
     /// Assumes that the oracle is unlimited.
     fn solve_assumps(&mut self, assumps: Vec<Lit>) -> Result<SolverResult, Termination> {
+        self.log_routine_start("oracle call")?;
         let res = self.oracle.solve_assumps(assumps)?;
+        self.log_routine_end()?;
         if res == SolverResult::Interrupted {
             return Err(Termination::Callback);
         }

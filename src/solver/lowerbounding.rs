@@ -223,6 +223,7 @@ where
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> Result<(), Termination> {
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
+        self.kernel.log_routine_start("lower-bounding")?;
         loop {
             let res = self.kernel.solve_assumps(self.fence.assumps())?;
             match res {
@@ -277,10 +278,12 @@ where
     /// Runs the P-Minimal algorithm within the fence to harvest solutions
     fn harvest(&mut self) -> Result<(), Termination> {
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
+        self.kernel.log_routine_start("harvest")?;
         loop {
             // Find minimization starting point
             let res = self.kernel.solve_assumps(self.fence.assumps())?;
             if SolverResult::Unsat == res {
+                self.kernel.log_routine_end()?;
                 return Ok(());
             }
             self.kernel.check_terminator()?;
