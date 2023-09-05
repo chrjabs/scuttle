@@ -15,18 +15,55 @@ use rustsat::{
     encodings::{card, pb},
     instances::{
         fio::{self, ParsingError},
-        BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager,
+        BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReinducingVarManager,
     },
     solvers::{ControlSignal, SolverError},
+    types::{Assignment, Clause},
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle::{
     self,
-    cli::{Cli, FileFormat},
-    LoggerError, PMinimal, Solve,
+    cli::{Algorithm, Cli, FileFormat},
+    LoggerError, LowerBounding, PMinimal, Solve,
 };
 
 static mut SIG_TERM_FLAG: Option<Arc<AtomicBool>> = None;
+
+macro_rules! handle_term {
+    ($e:expr, $cli:expr) => {
+        match $e {
+            Ok(x) => x,
+            Err(term) => {
+                $cli.log_termination(&term)?;
+                if term.is_error() {
+                    return Err(Error::from(term));
+                } else {
+                    return Ok(());
+                }
+            }
+        }
+    };
+}
+
+/// The SAT solver used
+type Oracle = CaDiCaL<'static, 'static>;
+
+/// P-Minimal instantiation used
+type PMin<VM> = PMinimal<
+    pb::DefIncUpperBounding,
+    card::DefIncUpperBounding,
+    VM,
+    fn(Assignment) -> Clause,
+    Oracle,
+>;
+/// Lower-bounding instantiation used
+type Lb<VM> = LowerBounding<
+    pb::DefIncUpperBounding,
+    card::DefIncUpperBounding,
+    VM,
+    fn(Assignment) -> Clause,
+    Oracle,
+>;
 
 fn main() -> Result<(), Error> {
     let cli = Cli::init();
@@ -39,7 +76,7 @@ fn main() -> Result<(), Error> {
     let inst = parse_instance(cli.inst_path.clone(), cli.file_format, cli.opb_options)?;
 
     // MaxPre Preprocessing
-    let (mut prepro, inst) = if cli.preprocessing {
+    let (prepro, inst) = if cli.preprocessing {
         let mut prepro = <MaxPre as PreproMultiOpt>::new(inst, !cli.maxpre_reindexing);
         prepro.preprocess(&cli.maxpre_techniques, 0, 1e9);
         let inst = PreproMultiOpt::prepro_instance(&mut prepro);
@@ -50,7 +87,7 @@ fn main() -> Result<(), Error> {
 
     // Reindexing
     let (inst, reindexer) = if cli.reindexing {
-        let reindexer = ReindexingVarManager::default();
+        let reindexer = ReinducingVarManager::default();
         let (inst, reindexer) = inst
             .reindex(reindexer)
             .change_var_manager(|vm| BasicVarManager::from_next_free(vm.max_var().unwrap() + 1));
@@ -60,24 +97,33 @@ fn main() -> Result<(), Error> {
     };
 
     let oracle = {
-        let mut o = CaDiCaL::default();
+        let mut o = Oracle::default();
         o.set_configuration(cli.cadical_config).unwrap();
         o
     };
 
-    let mut solver: PMinimal<pb::DefIncUpperBounding, card::DefIncUpperBounding, _, _, _> =
-        match PMinimal::new_default_blocking(inst, oracle, cli.options) {
-            Ok(solver) => solver,
-            Err(term) => {
-                cli.log_termination(&term)?;
-                if term.is_error() {
-                    return Err(Error::from(term));
-                } else {
-                    return Ok(());
-                }
-            }
-        };
+    match cli.alg {
+        Algorithm::PMinimal => generic_main(
+            handle_term!(PMin::new_default_blocking(inst, oracle, cli.options), cli),
+            cli,
+            prepro,
+            reindexer,
+        ),
+        Algorithm::LowerBounding => generic_main(
+            handle_term!(Lb::new_default_blocking(inst, oracle, cli.options), cli),
+            cli,
+            prepro,
+            reindexer,
+        ),
+    }
+}
 
+fn generic_main<S: Solve>(
+    mut solver: S,
+    cli: Cli,
+    mut prepro: Option<MaxPre>,
+    reindexer: Option<ReinducingVarManager>,
+) -> Result<(), Error> {
     // Set up signal handling
     unsafe { SIG_TERM_FLAG = Some(Arc::new(AtomicBool::new(false))) };
     signal_hook::flag::register(

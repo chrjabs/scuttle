@@ -1,33 +1,26 @@
 //! # Scuttle
-//! 
+//!
 //! A multi-objective MaxSAT solver with multiple algorithms implemented.
 
 use std::fmt;
 
-use rustsat::{
-    instances::ManageVars,
-    solvers::{ControlSignal, SolverError, SolverResult, SolverStats},
-    types::{Assignment, Clause},
-};
+use rustsat::solvers::{ControlSignal, SolverError, SolverResult, SolverStats};
 
 pub mod options;
 pub use options::{Limits, Options};
 
 pub mod types;
-use types::{ParetoFront, NonDomPoint};
+use types::{NonDomPoint, ParetoFront};
 
 pub mod solver;
+pub use solver::lowerbounding::LowerBounding;
 pub use solver::pminimal::PMinimal;
 
 #[cfg(feature = "build-binary")]
 pub mod cli;
 
 /// Main interface for using this multi-objective optimization solver
-pub trait Solve<VM, BCG>
-where
-    VM: ManageVars,
-    BCG: FnMut(Assignment) -> Clause,
-{
+pub trait Solve {
     /// Solves the instance under given limits. If not fully solved, errors an
     /// early termination reason.
     fn solve(&mut self, limits: Limits) -> Result<(), Termination>;
@@ -183,7 +176,7 @@ pub trait WriteSolverLog {
     /// Adds a candidate cost point to the log
     fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> Result<(), LoggerError>;
     /// Adds an oracle call to the log
-    fn log_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), LoggerError>;
+    fn log_oracle_call(&mut self, result: SolverResult) -> Result<(), LoggerError>;
     /// Adds a solution to the log
     fn log_solution(&mut self) -> Result<(), LoggerError>;
     /// Adds a Pareto point to the log
@@ -195,6 +188,8 @@ pub trait WriteSolverLog {
         apparent_cost: usize,
         improved_cost: usize,
     ) -> Result<(), LoggerError>;
+    /// Adds a fence change in the lower-bounding algorithm to the log
+    fn log_fence(&mut self, fence: Vec<usize>) -> Result<(), LoggerError>;
 }
 
 /// Error type for loggers

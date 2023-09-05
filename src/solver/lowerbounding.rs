@@ -1,29 +1,16 @@
-//! # $P$-Minimal Model Enumeration for Multi-Objective Optimization
+//! # Multi-Objective Lower-Bounding Search
 //!
-//! This module implements $P$-minimal model enumeration as an algorithm for
-//! solving multi-objective optimization problems expressed as boolean logic.
-//! Instead of using the order encoding as in \[1\], any cardinality (for
-//! unweighted objectives) or pseudo-boolean encoding from
-//! [RustSAT](https://github.com/chrjabs/rustsat) can be used. The actual
-//! enumeration algorithm follows \[2\].
+//! Algorithm proposed in \[1\].
 //!
 //! ## References
 //!
-//! - \[1\] Takehide Soh and Mutsunori Banbara and Naoyuki Tamura and Daniel Le
-//!   Berre: _Solving Multiobjective Discrete Optimization Problems with
-//!   Propositional Minimal Model Generation_, CP 2017.
-//! - \[2\] Miyuki Koshimura and Hidetomo Nabeshima and Hiroshi Fujita and Ryuzo
-//!   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
-//!   2009.
+//! - \[1\] Joao Cortes and Ines Lynce and Vasco M. Maquinho: _New Core-Guided
+//! and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
+//! TACAS 2023.
 
-use crate::{
-    options::EnumOptions, solver::ObjEncoding, EncodingStats, ExtendedSolveStats, Limits, Options,
-    ParetoFront, Phase, Solve, Stats, Termination, WriteSolverLog,
-};
 use rustsat::{
-    encodings,
-    encodings::{card, pb},
-    instances::{ManageVars, MultiOptInstance},
+    encodings::{self, card, pb},
+    instances::{Cnf, ManageVars, MultiOptInstance},
     solvers::{
         ControlSignal, FlipLit, PhaseLit, SolveIncremental, SolveStats, SolverResult, SolverStats,
         Terminate,
@@ -31,19 +18,23 @@ use rustsat::{
     types::{Assignment, Clause, Lit},
 };
 
-use super::{default_blocking_clause, Objective, SolverKernel};
+use crate::{
+    options::EnumOptions, types::ParetoFront, EncodingStats, ExtendedSolveStats, Limits, Options,
+    Phase, Solve, Stats, Termination, WriteSolverLog,
+};
 
-/// The solver type. Generics the pseudo-boolean encoding to use for weighted
-/// objectives, the cardinality encoding to use for unweighted objectives, the
-/// variable manager to use and the SAT backend.
-pub struct PMinimal<PBE, CE, VM, BCG, O> {
+use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
+
+pub struct LowerBounding<PBE, CE, VM, BCG, O> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
+    /// The current fence
+    fence: Fence,
 }
 
-impl<PBE, CE, VM, O> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, O>
+impl<PBE, CE, VM, O> LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, O>
 where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
@@ -65,7 +56,7 @@ where
     }
 }
 
-impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
+impl<PBE, CE, VM, BCG, O> LowerBounding<PBE, CE, VM, BCG, O>
 where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
@@ -83,7 +74,7 @@ where
     }
 }
 
-impl<PBE, CE, VM, O> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, O>
+impl<PBE, CE, VM, O> LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, O>
 where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
@@ -101,7 +92,7 @@ where
     }
 }
 
-impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
+impl<PBE, CE, VM, BCG, O> LowerBounding<PBE, CE, VM, BCG, O>
 where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
@@ -122,7 +113,7 @@ where
     }
 }
 
-impl<PBE, CE, VM, BCG, O> Solve for PMinimal<PBE, CE, VM, BCG, O>
+impl<PBE, CE, VM, BCG, O> Solve for LowerBounding<PBE, CE, VM, BCG, O>
 where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
@@ -160,7 +151,7 @@ where
     }
 }
 
-impl<PBE, CE, VM, BCG, O> ExtendedSolveStats for PMinimal<PBE, CE, VM, BCG, O>
+impl<PBE, CE, VM, BCG, O> ExtendedSolveStats for LowerBounding<PBE, CE, VM, BCG, O>
 where
     PBE: encodings::EncodeStats,
     CE: encodings::EncodeStats,
@@ -200,37 +191,61 @@ where
     }
 }
 
-impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
+impl<PBE, CE, VM, BCG, O> LowerBounding<PBE, CE, VM, BCG, O>
 where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
+    O: SolveIncremental,
 {
     /// Initializes the solver
     fn init(mut kernel: SolverKernel<VM, O, BCG>) -> Self {
         // Initialize objective encodings
-        let obj_encs = kernel
+        let (obj_encs, fence_data) = kernel
             .objs
             .iter()
-            .map(|obj| match obj {
-                Objective::Weighted { lits, .. } => ObjEncoding::new_weighted(
-                    lits.iter().map(|(&l, &w)| (l, w)),
-                    kernel.opts.reserve_enc_vars,
-                    &mut kernel.var_manager,
-                ),
-                Objective::Unweighted { lits, .. } => ObjEncoding::new_unweighted(
-                    lits.iter().map(|&l| l),
-                    kernel.opts.reserve_enc_vars,
-                    &mut kernel.var_manager,
-                ),
-                Objective::Constant { .. } => ObjEncoding::Constant,
+            .map(|obj| {
+                let mut enc = match obj {
+                    Objective::Weighted { lits, .. } => ObjEncoding::<PBE, CE>::new_weighted(
+                        lits.iter().map(|(&l, &w)| (l, w)),
+                        kernel.opts.reserve_enc_vars,
+                        &mut kernel.var_manager,
+                    ),
+                    Objective::Unweighted { lits, .. } => ObjEncoding::<PBE, CE>::new_unweighted(
+                        lits.iter().map(|&l| l),
+                        kernel.opts.reserve_enc_vars,
+                        &mut kernel.var_manager,
+                    ),
+                    Objective::Constant { .. } => ObjEncoding::Constant,
+                };
+                kernel
+                    .oracle
+                    .add_cnf(enc.encode_ub_change(0..1, &mut kernel.var_manager))
+                    .expect("couldn't add cnf to oracle");
+                let assumps = enc.enforce_ub(0).unwrap();
+                let assump = if assumps.is_empty() {
+                    None
+                } else if 1 == assumps.len() {
+                    Some(assumps[0])
+                } else {
+                    let mut and_impl = Cnf::new();
+                    let and_lit = kernel.var_manager.new_var().pos_lit();
+                    and_impl.add_lit_impl_cube(and_lit, assumps);
+                    kernel.oracle.add_cnf(and_impl).unwrap();
+                    Some(and_lit)
+                };
+                (enc, (0, assump))
             })
-            .collect();
-        Self { kernel, obj_encs }
+            .unzip();
+        Self {
+            kernel,
+            obj_encs,
+            fence: Fence { data: fence_data },
+        }
     }
 }
 
-impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
+impl<PBE, CE, VM, BCG, O> LowerBounding<PBE, CE, VM, BCG, O>
 where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
@@ -242,8 +257,62 @@ where
     fn alg_main(&mut self) -> Result<(), Termination> {
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
         loop {
+            let res = self.kernel.solve_assumps(self.fence.assumps())?;
+            match res {
+                SolverResult::Sat => self.harvest()?,
+                SolverResult::Unsat => {
+                    let core = self.kernel.oracle.core()?;
+                    if core.is_empty() {
+                        return Ok(());
+                    }
+                    self.update_fence(core)?;
+                }
+                SolverResult::Interrupted => panic!("should have errored before"),
+            }
+        }
+    }
+
+    fn update_fence(&mut self, core: Vec<Lit>) -> Result<(), Termination> {
+        'core: for clit in core {
+            for (obj_idx, (bound, olit)) in self.fence.data.iter_mut().enumerate() {
+                if let Some(alit) = &olit {
+                    if !*alit == clit {
+                        // update bound
+                        let enc = &mut self.obj_encs[obj_idx];
+                        *bound = enc.next_higher(*bound);
+                        self.kernel.oracle.add_cnf(
+                            enc.encode_ub_change(*bound..*bound + 1, &mut self.kernel.var_manager),
+                        )?;
+                        let assumps = enc.enforce_ub(*bound).unwrap();
+                        *olit = if assumps.is_empty() {
+                            None
+                        } else if 1 == assumps.len() {
+                            Some(assumps[0])
+                        } else {
+                            let mut and_impl = Cnf::new();
+                            let and_lit = self.kernel.var_manager.new_var().pos_lit();
+                            and_impl.add_lit_impl_cube(and_lit, assumps);
+                            self.kernel.oracle.add_cnf(and_impl).unwrap();
+                            Some(and_lit)
+                        };
+                        continue 'core;
+                    }
+                }
+            }
+            panic!("should never encounter clit that is not in fence");
+        }
+        if let Some(logger) = &mut self.kernel.logger {
+            logger.log_fence(self.fence.bounds())?
+        }
+        Ok(())
+    }
+
+    /// Runs the P-Minimal algorithm within the fence to harvest solutions
+    fn harvest(&mut self) -> Result<(), Termination> {
+        debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
+        loop {
             // Find minimization starting point
-            let res = self.kernel.solve()?;
+            let res = self.kernel.solve_assumps(self.fence.assumps())?;
             if SolverResult::Unsat == res {
                 return Ok(());
             }
@@ -350,5 +419,24 @@ where
         clause.add(block_lit);
         self.kernel.oracle.add_clause(clause).unwrap();
         !block_lit
+    }
+}
+
+/// Data related to the current fence
+struct Fence {
+    /// The current bounds and enforcing literals
+    data: Vec<(usize, Option<Lit>)>,
+}
+
+impl Fence {
+    fn assumps(&self) -> Vec<Lit> {
+        self.data
+            .iter()
+            .filter_map(|(_, ol)| ol.to_owned())
+            .collect()
+    }
+    
+    fn bounds(&self) -> Vec<usize> {
+        self.data.iter().map(|&(b, _)| b).collect()
     }
 }

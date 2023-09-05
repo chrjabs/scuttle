@@ -1,6 +1,6 @@
 //! Core solver functionality shared between different algorithms
 
-use std::ops::Not;
+use std::ops::{Not, Range};
 
 use rustsat::{
     encodings::{card, pb},
@@ -16,7 +16,7 @@ use crate::{
     Limits, Options, Phase, Stats, Termination, WriteSolverLog,
 };
 
-//pub mod lowerbounding;
+pub mod lowerbounding;
 pub mod pminimal;
 
 /// Kernel struct shared between all solvers
@@ -220,11 +220,11 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     }
 
     /// Logs an oracle call. Can return a termination if the oracle call limit is reached.
-    fn log_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), Termination> {
+    fn log_oracle_call(&mut self, result: SolverResult) -> Result<(), Termination> {
         self.stats.n_oracle_calls += 1;
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_oracle_call(result, phase)?;
+            logger.log_oracle_call(result)?;
         }
         // Update limit and check termination
         if let Some(oracle_calls) = &mut self.lims.oracle_calls {
@@ -440,7 +440,7 @@ where
             if res == SolverResult::Interrupted {
                 return Err(Termination::Callback);
             }
-            self.log_oracle_call(res, Phase::Enumeration)?;
+            self.log_oracle_call(res)?;
             if res == SolverResult::Unsat {
                 let pp_term = self.log_pareto_point(&pareto_point);
                 // All solutions enumerated
@@ -478,45 +478,53 @@ where
                 if cst == 0 {
                     return None;
                 }
-                match &mut obj_encs[idx] {
-                    ObjEncoding::Weighted(enc) => {
-                        // Encode and add to solver
-                        self.oracle
-                            .add_cnf(enc.encode_ub_change(cst - 1..cst, &mut self.var_manager))
-                            .unwrap();
-                        // Add one enforcing assumption to clause
-                        let assumps = enc.enforce_ub(cst - 1).unwrap();
-                        if assumps.len() == 1 {
-                            Some(assumps[0])
-                        } else {
-                            let mut and_impl = Cnf::new();
-                            let and_lit = self.var_manager.new_var().pos_lit();
-                            and_impl.add_lit_impl_cube(and_lit, assumps);
-                            self.oracle.add_cnf(and_impl).unwrap();
-                            Some(and_lit)
-                        }
-                    }
-                    ObjEncoding::Unweighted(encoding) => {
-                        // Encode and add to solver
-                        self.oracle
-                            .add_cnf(encoding.encode_ub_change(cst - 1..cst, &mut self.var_manager))
-                            .unwrap();
-                        // Add one enforcing assumption to clause
-                        let assumps = encoding.enforce_ub(cst - 1).unwrap();
-                        if assumps.len() == 1 {
-                            Some(assumps[0])
-                        } else {
-                            let mut and_impl = Cnf::new();
-                            let and_lit = self.var_manager.new_var().pos_lit();
-                            and_impl.add_lit_impl_cube(and_lit, assumps);
-                            self.oracle.add_cnf(and_impl).unwrap();
-                            Some(and_lit)
-                        }
-                    }
-                    ObjEncoding::Constant => None,
+                let enc = &mut obj_encs[idx];
+                if let ObjEncoding::Constant = enc {
+                    return None;
+                }
+                // Encode and add to solver
+                self.oracle
+                    .add_cnf(enc.encode_ub_change(cst - 1..cst, &mut self.var_manager))
+                    .unwrap();
+                let assumps = enc.enforce_ub(cst - 1).unwrap();
+                if assumps.len() == 1 {
+                    Some(assumps[0])
+                } else {
+                    let mut and_impl = Cnf::new();
+                    let and_lit = self.var_manager.new_var().pos_lit();
+                    and_impl.add_lit_impl_cube(and_lit, assumps);
+                    self.oracle.add_cnf(and_impl).unwrap();
+                    Some(and_lit)
                 }
             })
             .collect()
+    }
+}
+
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    O: SolveIncremental,
+{
+    /// Wrapper around the oracle with call logging and interrupt detection.
+    /// Assumes that the oracle is unlimited.
+    fn solve(&mut self) -> Result<SolverResult, Termination> {
+        let res = self.oracle.solve()?;
+        if res == SolverResult::Interrupted {
+            return Err(Termination::Callback);
+        }
+        self.log_oracle_call(res)?;
+        Ok(res)
+    }
+
+    /// Wrapper around the oracle with call logging and interrupt detection.
+    /// Assumes that the oracle is unlimited.
+    fn solve_assumps(&mut self, assumps: Vec<Lit>) -> Result<SolverResult, Termination> {
+        let res = self.oracle.solve_assumps(assumps)?;
+        if res == SolverResult::Interrupted {
+            return Err(Termination::Callback);
+        }
+        self.log_oracle_call(res)?;
+        Ok(res)
     }
 }
 
@@ -668,6 +676,33 @@ where
             encoding.reserve(var_manager);
         }
         ObjEncoding::Unweighted(encoding)
+    }
+
+    /// Gets the next higher objective value
+    fn next_higher(&self, val: usize) -> usize {
+        match self {
+            ObjEncoding::Weighted(enc) => enc.next_higher(val),
+            ObjEncoding::Unweighted(_) => val + 1,
+            ObjEncoding::Constant => val,
+        }
+    }
+
+    /// Encodes the given range
+    fn encode_ub_change(&mut self, range: Range<usize>, var_manager: &mut dyn ManageVars) -> Cnf {
+        match self {
+            ObjEncoding::Weighted(enc) => enc.encode_ub_change(range, var_manager),
+            ObjEncoding::Unweighted(enc) => enc.encode_ub_change(range, var_manager),
+            ObjEncoding::Constant => Cnf::new(),
+        }
+    }
+
+    /// Enforces the given upper bound
+    fn enforce_ub(&mut self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::Error> {
+        match self {
+            ObjEncoding::Weighted(enc) => enc.enforce_ub(ub),
+            ObjEncoding::Unweighted(enc) => enc.enforce_ub(ub),
+            ObjEncoding::Constant => Ok(vec![]),
+        }
     }
 }
 

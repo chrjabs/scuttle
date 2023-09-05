@@ -10,7 +10,7 @@ use std::{
 
 use crate::options::{EnumOptions, HeurImprOptions, HeurImprWhen};
 use crate::{
-    types::{ParetoFront, NonDomPoint},
+    types::{NonDomPoint, ParetoFront},
     EncodingStats, Limits, Options, Stats, WriteSolverLog,
 };
 use crate::{LoggerError, Phase, Termination};
@@ -28,6 +28,9 @@ struct CliArgs {
     /// The path to the instance file to load. Compressed files with an
     /// extension like `.bz2` or `.gz` can be read.
     inst_path: PathBuf,
+    /// The algorithm to run
+    #[arg(long, default_value_t = Algorithm::default())]
+    algorithm: Algorithm,
     /// The type of enumeration to perform at each Pareto point
     #[arg(long, default_value_t = EnumOptionsArg::NoEnum)]
     enumeration: EnumOptionsArg,
@@ -103,6 +106,9 @@ struct CliArgs {
     /// Log heuristic objective improvement
     #[arg(long)]
     log_heuristic_obj_improvement: bool,
+    /// Log fence updates in the lower-bounding algorithm
+    #[arg(long)]
+    log_fence: bool,
     /// The index in the OPB file to treat as the lowest variable
     #[arg(long, default_value_t = 0)]
     first_var_idx: usize,
@@ -160,6 +166,24 @@ impl fmt::Display for FileFormat {
             FileFormat::Infer => write!(f, "infer"),
             FileFormat::Dimacs => write!(f, "dimacs"),
             FileFormat::Opb => write!(f, "opb"),
+        }
+    }
+}
+
+#[derive(Default, Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub enum Algorithm {
+    /// P-Minimal model enumeration - Soh et al. CP'17
+    #[default]
+    PMinimal,
+    /// Lower-bounding search - Cortes et al. TACAS'23
+    LowerBounding,
+}
+
+impl fmt::Display for Algorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Algorithm::PMinimal => write!(f, "p-minimal"),
+            Algorithm::LowerBounding => write!(f, "lower-bounding"),
         }
     }
 }
@@ -225,6 +249,7 @@ pub struct Cli {
     pub limits: Limits,
     pub file_format: FileFormat,
     pub inst_path: PathBuf,
+    pub alg: Algorithm,
     pub preprocessing: bool,
     pub maxpre_techniques: String,
     pub cadical_config: rustsat_cadical::Config,
@@ -279,6 +304,7 @@ impl Cli {
             },
             file_format: args.file_format,
             inst_path: args.inst_path.clone(),
+            alg: args.algorithm,
             preprocessing: args.preprocessing.is_true(),
             maxpre_techniques: args.maxpre_techniques,
             cadical_config: args.cadical_config.into(),
@@ -320,6 +346,7 @@ impl Cli {
                 log_pareto_points: args.log_pareto_points,
                 log_oracle_calls: args.log_oracle_calls,
                 log_heuristic_obj_improvement: args.log_heuristic_obj_improvement,
+                log_fence: args.log_fence,
             },
         }
     }
@@ -398,6 +425,9 @@ impl Cli {
         writeln!(&mut buffer, " ({})", crate_version!())?;
         buffer.reset()?;
         writeln!(&mut buffer, "{}", crate_authors!("\n"))?;
+        write!(&mut buffer, "algorithm: ")?;
+        buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
+        writeln!(&mut buffer, "{}", self.alg)?;
         buffer.reset()?;
         buffer.set_color(ColorSpec::new().set_bold(true))?;
         write!(buffer, "==============================")?;
@@ -684,6 +714,7 @@ struct LoggerConfig {
     log_pareto_points: bool,
     log_oracle_calls: bool,
     log_heuristic_obj_improvement: bool,
+    log_fence: bool,
 }
 
 pub struct CliLogger {
@@ -717,7 +748,7 @@ impl CliLogger {
         Ok(())
     }
 
-    fn ilog_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), IOError> {
+    fn ilog_oracle_call(&mut self, result: SolverResult) -> Result<(), IOError> {
         if self.config.log_oracle_calls {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -725,9 +756,8 @@ impl CliLogger {
             buffer.reset()?;
             writeln!(
                 &mut buffer,
-                ": result: {}; phase: {}; cpu-time: {}",
+                ": result: {}; cpu-time: {}",
                 result,
-                phase,
                 DurPrinter::new(ProcessTime::now().as_duration()),
             )?;
             self.stdout.print(&buffer)?;
@@ -792,6 +822,18 @@ impl CliLogger {
         }
         Ok(())
     }
+    
+    fn ilog_fence(&mut self, fence: Vec<usize>) -> Result<(), IOError> {
+        if self.config.log_fence {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
+            write!(&mut buffer, "fence update")?;
+            buffer.reset()?;
+            writeln!(&mut buffer, ": {}", VecPrinter::new(&fence))?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
 }
 
 impl WriteSolverLog for CliLogger {
@@ -799,8 +841,8 @@ impl WriteSolverLog for CliLogger {
         Self::wrap_error(self.ilog_candidate(costs, phase))
     }
 
-    fn log_oracle_call(&mut self, result: SolverResult, phase: Phase) -> Result<(), LoggerError> {
-        Self::wrap_error(self.ilog_oracle_call(result, phase))
+    fn log_oracle_call(&mut self, result: SolverResult) -> Result<(), LoggerError> {
+        Self::wrap_error(self.ilog_oracle_call(result))
     }
 
     fn log_solution(&mut self) -> Result<(), LoggerError> {
@@ -818,6 +860,10 @@ impl WriteSolverLog for CliLogger {
         improved_cost: usize,
     ) -> Result<(), LoggerError> {
         Self::wrap_error(self.ilog_heuristic_obj_improvement(obj_idx, apparent_cost, improved_cost))
+    }
+
+    fn log_fence(&mut self, fence: Vec<usize>) -> Result<(), LoggerError> {
+        Self::wrap_error(self.ilog_fence(fence))
     }
 }
 
