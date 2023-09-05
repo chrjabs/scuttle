@@ -21,9 +21,11 @@ concolor-clap = { optional = true, version = "0.1.0" }
 termcolor = { optional = true, version = "1.2.0" }
 atty = { optional = true, version = "0.2.14" }
 signal-hook = { optional = true, version = "0.3.15" }
+scuttle_derive = { path = "./derive" }
 
 [features]
-default = ["build-binary"]
+default = ["build-binary", "oracle-term"]
+oracle-term = ["scuttle_derive/oracle-term"]
 build-binary = [
   "dep:clap",
   "dep:concolor-clap",

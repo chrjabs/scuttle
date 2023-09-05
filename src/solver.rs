@@ -19,6 +19,29 @@ use crate::{
 pub mod lowerbounding;
 pub mod pminimal;
 
+/// Solving interface for each algorithm
+pub trait Solve: KernelFunctions {
+    /// Solves the instance under given limits. If not fully solved, errors an
+    /// early termination reason.
+    fn solve(&mut self, limits: Limits) -> Result<(), Termination>;
+}
+
+/// Shared functionality provided by the [`SolverKernel`]
+pub trait KernelFunctions {
+    /// Gets the Pareto front discovered so far
+    fn pareto_front(&self) -> ParetoFront;
+    /// Gets tracked statistics from the solver
+    fn stats(&self) -> Stats;
+    /// Attaches a logger to the solver
+    fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L);
+    /// Detaches a logger from the solver
+    fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>>;
+    /// Attaches a terminator callback. Only one callback can be attached at a time.
+    fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal);
+    /// Detaches the termination callback
+    fn detach_terminator(&mut self);
+}
+
 /// Kernel struct shared between all solvers
 struct SolverKernel<VM, O, BCG> {
     /// The SAT solver backend
@@ -285,10 +308,18 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     }
 }
 
+#[cfg(feature = "oracle-term")]
 impl<VM, O: Terminate<'static>, BCG> SolverKernel<VM, O, BCG> {
     fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal) {
         self.term_cb = Some(term_cb);
         self.oracle.attach_terminator(term_cb);
+    }
+}
+
+#[cfg(not(feature = "oracle-term"))]
+impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
+    fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal) {
+        self.term_cb = Some(term_cb);
     }
 }
 

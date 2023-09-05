@@ -17,8 +17,8 @@
 //!   2009.
 
 use crate::{
-    options::EnumOptions, solver::ObjEncoding, EncodingStats, ExtendedSolveStats, Limits, Options,
-    ParetoFront, Phase, Solve, Stats, Termination, WriteSolverLog,
+    options::EnumOptions, solver::ObjEncoding, EncodingStats, ExtendedSolveStats, KernelFunctions,
+    Limits, Options, ParetoFront, Phase, Solve, Stats, Termination, WriteSolverLog,
 };
 use rustsat::{
     encodings,
@@ -30,12 +30,19 @@ use rustsat::{
     },
     types::{Assignment, Clause, Lit},
 };
+use scuttle_derive::{KernelFunctions, Solve};
 
 use super::{default_blocking_clause, Objective, SolverKernel};
 
 /// The solver type. Generics the pseudo-boolean encoding to use for weighted
 /// objectives, the cardinality encoding to use for unweighted objectives, the
 /// variable manager to use and the SAT backend.
+#[derive(KernelFunctions, Solve)]
+#[solve(bounds = "where PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+        VM: ManageVars,
+        BCG: FnMut(Assignment) -> Clause,
+        O: SolveIncremental + PhaseLit + FlipLit")]
 pub struct PMinimal<PBE, CE, VM, BCG, O> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
@@ -119,44 +126,6 @@ where
     ) -> Result<Self, Termination> {
         let kernel = SolverKernel::new(inst, oracle, block_clause_gen, opts)?;
         Ok(Self::init(kernel))
-    }
-}
-
-impl<PBE, CE, VM, BCG, O> Solve for PMinimal<PBE, CE, VM, BCG, O>
-where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
-    VM: ManageVars,
-    BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental + PhaseLit + FlipLit + Default + Terminate<'static>,
-{
-    fn solve(&mut self, limits: Limits) -> Result<(), Termination> {
-        self.kernel.start_solving(limits);
-        self.alg_main()
-    }
-
-    fn pareto_front(&self) -> ParetoFront {
-        self.kernel.pareto_front.clone()
-    }
-
-    fn stats(&self) -> Stats {
-        self.kernel.stats
-    }
-
-    fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L) {
-        self.kernel.attach_logger(logger)
-    }
-
-    fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>> {
-        self.kernel.detach_logger()
-    }
-
-    fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal) {
-        self.kernel.attach_terminator(term_cb)
-    }
-
-    fn detach_terminator(&mut self) {
-        self.kernel.detach_terminator()
     }
 }
 

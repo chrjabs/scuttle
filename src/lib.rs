@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use rustsat::solvers::{ControlSignal, SolverError, SolverResult, SolverStats};
+use rustsat::solvers::{SolverError, SolverResult, SolverStats};
 
 pub mod options;
 pub use options::{Limits, Options};
@@ -13,30 +13,15 @@ pub mod types;
 use types::{NonDomPoint, ParetoFront};
 
 pub mod solver;
+pub use solver::KernelFunctions;
+pub use solver::Solve;
+
+// Reexport algorithms
 pub use solver::lowerbounding::LowerBounding;
 pub use solver::pminimal::PMinimal;
 
 #[cfg(feature = "build-binary")]
 pub mod cli;
-
-/// Main interface for using this multi-objective optimization solver
-pub trait Solve {
-    /// Solves the instance under given limits. If not fully solved, errors an
-    /// early termination reason.
-    fn solve(&mut self, limits: Limits) -> Result<(), Termination>;
-    /// Gets the Pareto front discovered so far
-    fn pareto_front(&self) -> ParetoFront;
-    /// Gets tracked statistics from the solver
-    fn stats(&self) -> Stats;
-    /// Attaches a logger to the solver
-    fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L);
-    /// Detaches a logger from the solver
-    fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>>;
-    /// Attaches a terminator callback. Only one callback can be attached at a time.
-    fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal);
-    /// Detaches the termination callback
-    fn detach_terminator(&mut self);
-}
 
 /// Trait for getting statistics from the solver
 pub trait ExtendedSolveStats {
