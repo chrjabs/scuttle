@@ -8,7 +8,7 @@ use scuttle::{
     self,
     options::{EnumOptions, HeurImprOptions},
     types::ParetoFront,
-    Limits, LowerBounding, Options, PMinimal, Solve,
+    KernelFunctions, Limits, LowerBounding, Options, PMinimal, Solve,
 };
 
 fn check_pf_shape(pf: ParetoFront, shape: Vec<(Vec<isize>, usize)>) {

@@ -17,20 +17,17 @@
 //!   2009.
 
 use crate::{
-    options::EnumOptions, solver::ObjEncoding, EncodingStats, ExtendedSolveStats, KernelFunctions,
-    Limits, Options, ParetoFront, Phase, Solve, Stats, Termination, WriteSolverLog,
+    solver::ObjEncoding, EncodingStats, ExtendedSolveStats, KernelFunctions, Limits, Options,
+    ParetoFront, Phase, Solve, Stats, Termination, WriteSolverLog,
 };
 use rustsat::{
     encodings,
     encodings::{card, pb},
     instances::{ManageVars, MultiOptInstance},
-    solvers::{
-        ControlSignal, FlipLit, PhaseLit, SolveIncremental, SolveStats, SolverResult, SolverStats,
-        Terminate,
-    },
-    types::{Assignment, Clause, Lit},
+    solvers::{ControlSignal, SolveIncremental, SolveStats, SolverResult, SolverStats},
+    types::{Assignment, Clause},
 };
-use scuttle_derive::{KernelFunctions, Solve};
+use scuttle_derive::{oracle_bounds, KernelFunctions, Solve};
 
 use super::{default_blocking_clause, Objective, SolverKernel};
 
@@ -42,7 +39,7 @@ use super::{default_blocking_clause, Objective, SolverKernel};
         CE: card::BoundUpperIncremental,
         VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental + PhaseLit + FlipLit")]
+        O: SolveIncremental")]
 pub struct PMinimal<PBE, CE, VM, BCG, O> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
@@ -199,13 +196,14 @@ where
     }
 }
 
+#[oracle_bounds]
 impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
 where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental + PhaseLit + FlipLit,
+    O: SolveIncremental,
 {
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> Result<(), Termination> {
@@ -229,9 +227,11 @@ where
             self.kernel.log_candidate(&costs, Phase::OuterLoop)?;
             self.kernel.check_terminator()?;
             self.kernel.phase_solution(solution.clone())?;
-            let (costs, solution, block_switch) = self.p_minimization(costs, solution)?;
+            let (costs, solution, block_switch) =
+                self.kernel
+                    .p_minimization(costs, solution, &mut self.obj_encs)?;
 
-            let assumps = self.enforce_dominating(&costs);
+            let assumps = self.kernel.enforce_dominating(&costs, &mut self.obj_encs);
             self.kernel.yield_solutions(costs, assumps, solution)?;
 
             // Block last Pareto point, if temporarily blocked
@@ -239,85 +239,5 @@ where
                 self.kernel.oracle.add_unit(block_lit)?;
             }
         }
-    }
-
-    /// Executes P-minimization from a cost and solution starting point
-    fn p_minimization(
-        &mut self,
-        mut costs: Vec<usize>,
-        mut solution: Assignment,
-    ) -> Result<(Vec<usize>, Assignment, Option<Lit>), Termination> {
-        debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
-        let mut block_switch = None;
-        loop {
-            // Force next solution to dominate the current one
-            let mut assumps = self.enforce_dominating(&costs);
-            // Block solutions dominated by the current one
-            if self.kernel.opts.enumeration == EnumOptions::NoEnum {
-                // Block permanently since no enumeration at Pareto point
-                let block_clause = self
-                    .kernel
-                    .dominated_block_clause(&costs, &mut self.obj_encs);
-                self.kernel.oracle.add_clause(block_clause)?;
-            } else {
-                // Permanently block last candidate
-                if let Some(block_lit) = block_switch {
-                    self.kernel.oracle.add_unit(block_lit)?;
-                }
-                // Temporarily block to allow for enumeration at Pareto point
-                let block_lit = self.tmp_block_dominated(&costs);
-                block_switch = Some(block_lit);
-                assumps.push(block_lit);
-            }
-
-            // Check if dominating solution exists
-            let res = self.kernel.solve_assumps(assumps)?;
-            if res == SolverResult::Unsat {
-                // Termination criteria, return last solution and costs
-                return Ok((costs, solution, block_switch));
-            }
-            self.kernel.check_terminator()?;
-
-            (costs, solution) = self.kernel.get_solution_and_internal_costs(
-                self.kernel
-                    .opts
-                    .heuristic_improvements
-                    .solution_tightening
-                    .wanted(Phase::Minimization),
-            )?;
-            self.kernel.log_candidate(&costs, Phase::Minimization)?;
-            self.kernel.check_terminator()?;
-            self.kernel.phase_solution(solution.clone())?;
-        }
-    }
-
-    /// Gets assumptions to enforce that the next solution dominates the given
-    /// cost point.
-    fn enforce_dominating(&mut self, costs: &Vec<usize>) -> Vec<Lit> {
-        debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
-        let mut assumps = vec![];
-        costs.iter().enumerate().for_each(|(idx, &cst)| {
-            let enc = &mut self.obj_encs[idx];
-            self.kernel
-                .oracle
-                .add_cnf(enc.encode_ub_change(cst..cst + 1, &mut self.kernel.var_manager))
-                .unwrap();
-            assumps.extend(enc.enforce_ub(cst).unwrap());
-        });
-        assumps
-    }
-
-    /// Temporarily blocks solutions dominated by the given cost point. Returns
-    /// and assumption that needs to be enforced in order for the blocking to be
-    /// enforced.
-    fn tmp_block_dominated(&mut self, costs: &Vec<usize>) -> Lit {
-        debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
-        let mut clause = self
-            .kernel
-            .dominated_block_clause(costs, &mut self.obj_encs);
-        let block_lit = self.kernel.var_manager.new_var().pos_lit();
-        clause.add(block_lit);
-        self.kernel.oracle.add_clause(clause).unwrap();
-        !block_lit
     }
 }

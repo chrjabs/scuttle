@@ -5,10 +5,10 @@ use std::ops::{Not, Range};
 use rustsat::{
     encodings::{card, pb},
     instances::{Cnf, ManageVars, MultiOptInstance},
-    solvers::{ControlSignal, FlipLit, PhaseLit, SolveIncremental, SolverResult, Terminate},
+    solvers::{ControlSignal, SolveIncremental, SolverResult},
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
-    var,
 };
+use scuttle_derive::oracle_bounds;
 
 use crate::{
     options::EnumOptions,
@@ -69,7 +69,6 @@ struct SolverKernel<VM, O, BCG> {
     logger: Option<Box<dyn WriteSolverLog>>,
     /// Termination callback
     term_cb: Option<fn() -> ControlSignal>,
-    // TODO: clock stack
 }
 
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
@@ -323,28 +322,12 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     }
 }
 
+#[cfg(feature = "sol-tightening")]
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     VM: ManageVars,
-    O: SolveIncremental + FlipLit,
+    O: SolveIncremental + rustsat::solvers::FlipLit,
 {
-    /// Gets the current objective costs without offset or multiplier. The phase
-    /// parameter is needed to determine if the solution should be heuristically
-    /// improved.
-    fn get_solution_and_internal_costs(
-        &mut self,
-        tightening: bool,
-    ) -> Result<(Vec<usize>, Assignment), Termination> {
-        let mut costs = Vec::new();
-        costs.resize(self.stats.n_objs, 0);
-        let mut sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
-        let costs = (0..self.objs.len())
-            .map(|idx| self.get_cost_with_heuristic_improvements(idx, &mut sol, tightening))
-            .collect::<Result<Vec<usize>, _>>()?;
-        debug_assert_eq!(costs.len(), self.stats.n_objs);
-        Ok((costs, sol))
-    }
-
     /// Performs heuristic solution improvement and computes the improved
     /// (internal) cost for one objective
     fn get_cost_with_heuristic_improvements(
@@ -379,10 +362,37 @@ where
     }
 }
 
+#[cfg(not(feature = "sol-tightening"))]
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     VM: ManageVars,
-    O: PhaseLit,
+    O: SolveIncremental,
+{
+    /// Performs heuristic solution improvement and computes the improved
+    /// (internal) cost for one objective
+    fn get_cost_with_heuristic_improvements(
+        &mut self,
+        obj_idx: usize,
+        sol: &mut Assignment,
+        _tightening: bool,
+    ) -> Result<usize, Termination> {
+        debug_assert!(obj_idx < self.stats.n_objs);
+        let mut cost = 0;
+        for (l, w) in self.objs[obj_idx].iter() {
+            let val = sol.lit_value(l);
+            if val == TernaryVal::True {
+                cost += w;
+            }
+        }
+        Ok(cost)
+    }
+}
+
+#[cfg(feature = "phasing")]
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    VM: ManageVars,
+    O: rustsat::solvers::PhaseLit,
 {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
@@ -403,16 +413,32 @@ where
             return Ok(());
         }
         for idx in 0..self.var_manager.max_var().unwrap().idx() + 1 {
-            self.oracle.unphase_var(var![idx])?;
+            self.oracle.unphase_var(rustsat::var![idx])?;
         }
         Ok(())
     }
 }
 
+#[cfg(not(feature = "phasing"))]
+impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
+    /// If solution-guided search is turned on, phases the entire solution in
+    /// the oracle
+    fn phase_solution(&mut self, _solution: Assignment) -> Result<(), Termination> {
+        Ok(())
+    }
+
+    /// If solution-guided search is turned on, unphases every variable in the
+    /// solver
+    fn unphase_solution(&mut self) -> Result<(), Termination> {
+        Ok(())
+    }
+}
+
+#[oracle_bounds]
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     VM: ManageVars,
-    O: SolveIncremental + PhaseLit,
+    O: SolveIncremental,
     BCG: FnMut(Assignment) -> Clause,
 {
     /// Yields Pareto-optimal solutions. The given assumptions must only allow
@@ -484,11 +510,104 @@ where
     }
 }
 
+#[oracle_bounds]
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     VM: ManageVars,
     O: SolveIncremental,
 {
+    /// Gets the current objective costs without offset or multiplier. The phase
+    /// parameter is needed to determine if the solution should be heuristically
+    /// improved.
+    fn get_solution_and_internal_costs(
+        &mut self,
+        tightening: bool,
+    ) -> Result<(Vec<usize>, Assignment), Termination> {
+        let mut costs = Vec::new();
+        costs.resize(self.stats.n_objs, 0);
+        let mut sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
+        let costs = (0..self.objs.len())
+            .map(|idx| self.get_cost_with_heuristic_improvements(idx, &mut sol, tightening))
+            .collect::<Result<Vec<usize>, _>>()?;
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        Ok((costs, sol))
+    }
+
+    /// Executes P-minimization from a cost and solution starting point
+    fn p_minimization<PBE, CE>(
+        &mut self,
+        mut costs: Vec<usize>,
+        mut solution: Assignment,
+        obj_encs: &mut Vec<ObjEncoding<PBE, CE>>,
+    ) -> Result<(Vec<usize>, Assignment, Option<Lit>), Termination>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        let mut block_switch = None;
+        loop {
+            // Force next solution to dominate the current one
+            let mut assumps = self.enforce_dominating(&costs, obj_encs);
+            // Block solutions dominated by the current one
+            if self.opts.enumeration == EnumOptions::NoEnum {
+                // Block permanently since no enumeration at Pareto point
+                let block_clause = self.dominated_block_clause(&costs, obj_encs);
+                self.oracle.add_clause(block_clause)?;
+            } else {
+                // Permanently block last candidate
+                if let Some(block_lit) = block_switch {
+                    self.oracle.add_unit(block_lit)?;
+                }
+                // Temporarily block to allow for enumeration at Pareto point
+                let block_lit = self.tmp_block_dominated(&costs, obj_encs);
+                block_switch = Some(block_lit);
+                assumps.push(block_lit);
+            }
+
+            // Check if dominating solution exists
+            let res = self.solve_assumps(assumps)?;
+            if res == SolverResult::Unsat {
+                // Termination criteria, return last solution and costs
+                return Ok((costs, solution, block_switch));
+            }
+            self.check_terminator()?;
+
+            (costs, solution) = self.get_solution_and_internal_costs(
+                self.opts
+                    .heuristic_improvements
+                    .solution_tightening
+                    .wanted(Phase::Minimization),
+            )?;
+            self.log_candidate(&costs, Phase::Minimization)?;
+            self.check_terminator()?;
+            self.phase_solution(solution.clone())?;
+        }
+    }
+
+    /// Gets assumptions to enforce that the next solution dominates the given
+    /// cost point.
+    fn enforce_dominating<PBE, CE>(
+        &mut self,
+        costs: &Vec<usize>,
+        obj_encs: &mut Vec<ObjEncoding<PBE, CE>>,
+    ) -> Vec<Lit>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        let mut assumps = vec![];
+        costs.iter().enumerate().for_each(|(idx, &cst)| {
+            let enc = &mut obj_encs[idx];
+            self.oracle
+                .add_cnf(enc.encode_ub_change(cst..cst + 1, &mut self.var_manager))
+                .unwrap();
+            assumps.extend(enc.enforce_ub(cst).unwrap());
+        });
+        assumps
+    }
+
     /// Gets a clause blocking solutions (weakly) dominated by the given cost point,
     /// given objective encodings.
     fn dominated_block_clause<PBE, CE>(
@@ -529,6 +648,26 @@ where
                 }
             })
             .collect()
+    }
+
+    /// Temporarily blocks solutions dominated by the given cost point. Returns
+    /// and assumption that needs to be enforced in order for the blocking to be
+    /// enforced.
+    fn tmp_block_dominated<PBE, CE>(
+        &mut self,
+        costs: &Vec<usize>,
+        obj_encs: &mut Vec<ObjEncoding<PBE, CE>>,
+    ) -> Lit
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        let mut clause = self.dominated_block_clause(costs, obj_encs);
+        let block_lit = self.var_manager.new_var().pos_lit();
+        clause.add(block_lit);
+        self.oracle.add_clause(clause).unwrap();
+        !block_lit
     }
 }
 

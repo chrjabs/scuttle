@@ -6,13 +6,13 @@ use syn::{self, parse_macro_input};
 #[proc_macro_derive(KernelFunctions)]
 pub fn kernel_functions_derive(input: TokenStream) -> TokenStream {
     // Construct a representation of the code as a syntax tree to manipulate
-    let ast = syn::parse(input).unwrap();
+    let ast = parse_macro_input!(input);
 
     // Build the trait implementation
     impl_kernel_functions_macro(ast)
 }
 
-fn impl_kernel_functions_macro(ast: syn::DeriveInput) -> TokenStream {
+fn impl_kernel_functions_macro(mut ast: syn::DeriveInput) -> TokenStream {
     let name = &ast.ident;
 
     // Check whether type has generic named O that is assumed to be the oracle
@@ -30,67 +30,22 @@ fn impl_kernel_functions_macro(ast: syn::DeriveInput) -> TokenStream {
         }
     }
 
-    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+    ast.generics.make_where_clause();
+    let obounds = "where";
     #[cfg(feature = "oracle-term")]
-    let gen = if where_clause.is_some() {
-        quote! {
-            impl #impl_generics KernelFunctions for #name #ty_generics #where_clause, O: Terminate<'static> {
-                fn pareto_front(&self) -> ParetoFront {
-                    self.kernel.pareto_front.clone()
-                }
+    let obounds = format!("{} O: rustsat::solvers::Terminate<'static>,", obounds);
+    let obounds: TokenStream = obounds.parse().unwrap();
+    let obounds: syn::WhereClause = parse_macro_input!(obounds);
+    ast.generics
+        .where_clause
+        .as_mut()
+        .unwrap()
+        .predicates
+        .extend(obounds.predicates);
 
-                fn stats(&self) -> Stats {
-                    self.kernel.stats
-                }
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-                fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L) {
-                    self.kernel.attach_logger(logger)
-                }
-
-                fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>> {
-                    self.kernel.detach_logger()
-                }
-
-                fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal) {
-                    self.kernel.attach_terminator(term_cb)
-                }
-
-                fn detach_terminator(&mut self) {
-                    self.kernel.detach_terminator()
-                }
-            }
-        }
-    } else {
-        quote! {
-            impl #impl_generics KernelFunctions for #name #ty_generics where O: Terminate<'static> {
-                fn pareto_front(&self) -> ParetoFront {
-                    self.kernel.pareto_front.clone()
-                }
-
-                fn stats(&self) -> Stats {
-                    self.kernel.stats
-                }
-
-                fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L) {
-                    self.kernel.attach_logger(logger)
-                }
-
-                fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>> {
-                    self.kernel.detach_logger()
-                }
-
-                fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal) {
-                    self.kernel.attach_terminator(term_cb)
-                }
-
-                fn detach_terminator(&mut self) {
-                    self.kernel.detach_terminator()
-                }
-            }
-        }
-    };
-    #[cfg(not(feature = "oracle-term"))]
-    let gen = quote! {
+    quote! {
         impl #impl_generics KernelFunctions for #name #ty_generics #where_clause {
             fn pareto_front(&self) -> ParetoFront {
                 self.kernel.pareto_front.clone()
@@ -116,8 +71,8 @@ fn impl_kernel_functions_macro(ast: syn::DeriveInput) -> TokenStream {
                 self.kernel.detach_terminator()
             }
         }
-    };
-    gen.into()
+    }
+    .into()
 }
 
 #[derive(FromDeriveInput, Default)]
@@ -135,7 +90,7 @@ pub fn solve_derive(input: TokenStream) -> TokenStream {
     impl_solve_macro(ast, opts)
 }
 
-fn impl_solve_macro(ast: syn::DeriveInput, opts: SolveOpts) -> TokenStream {
+fn impl_solve_macro(mut ast: syn::DeriveInput, opts: SolveOpts) -> TokenStream {
     let name = &ast.ident;
 
     // Check whether type has generic named O that is assumed to be the oracle
@@ -149,42 +104,95 @@ fn impl_solve_macro(ast: syn::DeriveInput, opts: SolveOpts) -> TokenStream {
             }
         }
         if !found_oracle {
-            panic!("KernelFunctions derive needs a generic for the oracle type called 'O'")
+            panic!("Solve derive needs a generic for the oracle type called 'O'")
         }
     }
 
-    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
-    assert!(where_clause.is_none(), "Solve derive macro does not support where clauses");
-    let add_where = opts.bounds.as_ref();
-
+    ast.generics.make_where_clause();
+    let obounds = "where";
     #[cfg(feature = "oracle-term")]
-    let gen = if add_where.is_some() {
-        quote! {
-            impl #impl_generics Solve for #name #ty_generics #add_where, O: Terminate<'static> {
-                fn solve(&mut self, limits: Limits) -> Result<(), Termination> {
-                    self.kernel.start_solving(limits);
-                    self.alg_main()
-                }
-            }
-        }
-    } else {
-        quote! {
-            impl #impl_generics Solve for #name #ty_generics where O: Terminate<'static> {
-                fn solve(&mut self, limits: Limits) -> Result<(), Termination> {
-                    self.kernel.start_solving(limits);
-                    self.alg_main()
-                }
-            }
-        }
-    };
-    #[cfg(not(feature = "oracle-term"))]
-    let gen = quote! {
-        impl #impl_generics Solve for #name #ty_generics #where_clause #add_where {
+    let obounds = format!("{} O: rustsat::solvers::Terminate<'static>,", obounds);
+    #[cfg(feature = "phasing")]
+    let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
+    #[cfg(feature = "sol-tightening")]
+    let obounds = format!("{} O: rustsat::solvers::FlipLit,", obounds);
+    let obounds: TokenStream = obounds.parse().unwrap();
+    let obounds: syn::WhereClause = parse_macro_input!(obounds);
+    ast.generics
+        .where_clause
+        .as_mut()
+        .unwrap()
+        .predicates
+        .extend(obounds.predicates);
+    if let Some(add_bounds) = opts.bounds {
+        ast.generics
+            .where_clause
+            .as_mut()
+            .unwrap()
+            .predicates
+            .extend(add_bounds.predicates)
+    }
+
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+
+    quote! {
+        impl #impl_generics Solve for #name #ty_generics #where_clause {
             fn solve(&mut self, limits: Limits) -> Result<(), Termination> {
                 self.kernel.start_solving(limits);
                 self.alg_main()
             }
         }
+    }
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn oracle_bounds(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let ast: syn::Item = parse_macro_input!(item);
+    let impl_block = match ast {
+        syn::Item::Impl(impl_block) => impl_block,
+        _ => panic!("oracle_bounds attribute can only be used on impl blocks"),
     };
-    gen.into()
+
+    insert_oracle_bounds(impl_block)
+}
+
+fn insert_oracle_bounds(mut impl_block: syn::ItemImpl) -> TokenStream {
+    //#[cfg(all(not(feature = "phasing"), not(feature = "sol-tightening")))]
+    //{
+    //    return quote! { #impl_block }.into()
+    //}
+    //#[cfg(any(feature = "phasing", feature = "sol-tightening"))]
+    //{
+    // Check whether type has generic named O that is assumed to be the oracle
+    let mut found_oracle = false;
+    for gen in impl_block.generics.type_params() {
+        if gen.ident == "O" {
+            found_oracle = true;
+            break;
+        }
+    }
+    if !found_oracle {
+        panic!("oracle_bounds attribute needs a generic for the oracle type called 'O'")
+    }
+
+    let obounds = "where";
+    #[cfg(feature = "phasing")]
+    let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
+    #[cfg(feature = "sol-tightening")]
+    let obounds = format!("{} O: rustsat::solvers::FlipLit,", obounds);
+    let obounds: TokenStream = obounds.parse().unwrap();
+    let obounds: syn::WhereClause = parse_macro_input!(obounds);
+
+    impl_block.generics.make_where_clause();
+    impl_block
+        .generics
+        .where_clause
+        .as_mut()
+        .unwrap()
+        .predicates
+        .extend(obounds.predicates);
+
+    quote! { #impl_block }.into()
+    //}
 }

@@ -53,9 +53,6 @@ pub struct HeurImprOptions {
     /// When to perform solution tightening (flipping objective literals that can
     /// be flipped without breaking satisfiability)
     pub solution_tightening: HeurImprWhen,
-    /// When to learn tightening clauses from a solution. Tightening clauses
-    /// lazily build equivalences for the objective literals.
-    pub tightening_clauses: HeurImprWhen,
 }
 
 impl HeurImprOptions {
@@ -63,7 +60,6 @@ impl HeurImprOptions {
     pub fn none() -> Self {
         Self {
             solution_tightening: HeurImprWhen::Never,
-            tightening_clauses: HeurImprWhen::Never,
         }
     }
 
@@ -71,7 +67,6 @@ impl HeurImprOptions {
     pub fn all() -> Self {
         Self {
             solution_tightening: HeurImprWhen::Always,
-            tightening_clauses: HeurImprWhen::Always,
         }
     }
 }
@@ -79,10 +74,7 @@ impl HeurImprOptions {
 impl Default for HeurImprOptions {
     fn default() -> Self {
         Self {
-            // Note: solution tightening apparently broken when negated literal
-            // in other objective
             solution_tightening: HeurImprWhen::OuterLoop,
-            tightening_clauses: HeurImprWhen::Never,
         }
     }
 }

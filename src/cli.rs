@@ -40,9 +40,6 @@ struct CliArgs {
     /// When to perform solution tightening
     #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening)]
     solution_tightening: HeurImprWhen,
-    /// When to learn tightening clauses
-    #[arg(long, default_value_t = HeurImprOptions::default().tightening_clauses)]
-    tightening_clauses: HeurImprWhen,
     /// Reserve variables for the encodings in advance
     #[arg(long, default_value_t = Bool::from(Options::default().reserve_enc_vars))]
     reserve_encoding_vars: Bool,
@@ -278,7 +275,7 @@ macro_rules! none_if_zero {
 impl Cli {
     pub fn init() -> Self {
         let args = CliArgs::parse();
-        Self {
+        let cli = Self {
             options: Options {
                 enumeration: match args.enumeration {
                     EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
@@ -291,7 +288,6 @@ impl Cli {
                 },
                 heuristic_improvements: HeurImprOptions {
                     solution_tightening: args.solution_tightening,
-                    tightening_clauses: args.tightening_clauses,
                 },
                 reserve_enc_vars: args.reserve_encoding_vars.is_true(),
                 solution_guided_search: args.solution_guided_search.is_true(),
@@ -348,7 +344,20 @@ impl Cli {
                 log_heuristic_obj_improvement: args.log_heuristic_obj_improvement,
                 log_fence: args.log_fence,
             },
+        };
+        #[cfg(not(feature = "sol-tightening"))]
+        if cli.options.heuristic_improvements.solution_tightening != HeurImprWhen::Never {
+            cli.warning("requested solution tightening but solver is built without this feature")
+                .expect("IO error during CLI initialization");
         }
+        #[cfg(not(feature = "phasing"))]
+        if cli.options.solution_guided_search {
+            cli.warning(
+                "requested solution guided search but solver is built without this feature",
+            )
+            .expect("IO error during CLI initialization");
+        }
+        cli
     }
 
     pub fn new_cli_logger(&self) -> CliLogger {
@@ -456,11 +465,6 @@ impl Cli {
                 &mut buffer,
                 "solution-tightening",
                 self.options.heuristic_improvements.solution_tightening,
-            )?;
-            Self::print_parameter(
-                &mut buffer,
-                "tightening-clauses",
-                self.options.heuristic_improvements.tightening_clauses,
             )?;
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;
             Self::print_parameter(&mut buffer, "sol-limit", OptVal::new(self.limits.sols))?;
@@ -822,7 +826,7 @@ impl CliLogger {
         }
         Ok(())
     }
-    
+
     fn ilog_fence(&mut self, fence: Vec<usize>) -> Result<(), IOError> {
         if self.config.log_fence {
             let mut buffer = self.stdout.buffer();

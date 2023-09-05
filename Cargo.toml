@@ -13,7 +13,7 @@ readme = "README.md"
 
 [dependencies]
 rustsat = { version = "0.2", path = "../rustsat/rustsat", features = ["multiopt"] }
-rustsat-cadical = { version = "0.1", path = "../rustsat/cadical", features = ["v1-7-0"] }
+rustsat-cadical = { optional = true, version = "0.1", path = "../rustsat/cadical", features = ["v1-7-1"] }
 maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 cpu-time = { optional = true, version = "1.0.0" }
 clap = { optional = true, version = "4.2.4", features = ["derive", "cargo"] }
@@ -23,9 +23,14 @@ atty = { optional = true, version = "0.2.14" }
 signal-hook = { optional = true, version = "0.3.15" }
 scuttle_derive = { path = "./derive" }
 
+[build-dependencies]
+rustsat-cadical = { version = "0.1", path = "../rustsat/cadical", features = ["v1-7-1"] }
+
 [features]
-default = ["build-binary", "oracle-term"]
+default = ["build-binary", "phasing", "sol-tightening"]
 oracle-term = ["scuttle_derive/oracle-term"]
+phasing = ["scuttle_derive/phasing"]
+sol-tightening = ["scuttle_derive/sol-tightening"]
 build-binary = [
   "dep:clap",
   "dep:concolor-clap",
@@ -34,6 +39,7 @@ build-binary = [
   "dep:cpu-time",
   "dep:maxpre",
   "dep:signal-hook",
+  "dep:rustsat-cadical",
   "rustsat/compression",
 ]
 

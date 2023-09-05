@@ -7,7 +7,7 @@ use rustsat::{
     types::{Assignment, Clause, RsHashSet},
 };
 use rustsat_cadical::CaDiCaL;
-use scuttle::{self, types::ParetoFront, Limits, Options, PMinimal, Solve};
+use scuttle::{self, types::ParetoFront, KernelFunctions, Limits, Options, PMinimal, Solve};
 
 fn check_pf_shape(pf: ParetoFront, shape: Vec<(Vec<isize>, usize)>) {
     let pps_set: RsHashSet<(Vec<isize>, usize)> = pf
