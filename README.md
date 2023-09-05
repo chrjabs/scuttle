@@ -6,9 +6,22 @@ Scuttle is a multi-objective MaxSAT solver written in Rust and based on the
 
 ## Algorithms
 
-For now the only implemented algorithm is P-minimal model enumeration.
+| `--algorithm=`   | Description                                                               |
+| ---------------- | ------------------------------------------------------------------------- |
+| `p-minimal`      | P-Minimal model enumeration as described in \[1\] and \[2\]               |
+| `lower-bounding` | Lower-bounding search as described in \[3\] (called "core-guiding" there) |
 
-> Soh, T., Banbara, M., Tamura, N., & Le Berre, D. (2017). _Solving Multiobjective Discrete Optimization Problems with Propositional Minimal Model Generation_. CP.
+### References
+
+- \[1\] Takehide Soh and Mutsunori Banbara and Naoyuki Tamura and Daniel Le
+  Berre: _Solving Multiobjective Discrete Optimization Problems with
+  Propositional Minimal Model Generation_, CP 2017.
+- \[2\] Miyuki Koshimura and Hidetomo Nabeshima and Hiroshi Fujita and Ryuzo
+  Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
+  2009.
+- \[3\] Joao Cortes and Ines Lynce and Vasco M. Maquinho: _New Core-Guided
+  and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
+  TACAS 2023.
 
 ## What's The Name
 
