@@ -14,7 +14,7 @@ use rustsat::{
     solvers::{ControlSignal, SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit},
 };
-use scuttle_derive::{oracle_bounds, KernelFunctions, Solve};
+use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
     types::ParetoFront, EncodingStats, ExtendedSolveStats, KernelFunctions, Limits, Options, Phase,

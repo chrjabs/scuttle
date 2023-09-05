@@ -5,7 +5,7 @@ version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "A multi-objective MaxSAT solver."
-keyworks = ["solver", "multi-objective optimization", "maxsat"]
+keywords = ["solver", "multi-objective", "maxsat"]
 repository = "https://github.com/chrjabs/scuttle"
 readme = "README.md"
 
@@ -21,16 +21,16 @@ concolor-clap = { optional = true, version = "0.1.0" }
 termcolor = { optional = true, version = "1.2.0" }
 atty = { optional = true, version = "0.2.14" }
 signal-hook = { optional = true, version = "0.3.15" }
-scuttle_derive = { path = "./derive" }
+scuttle-proc = { version = "0.1", path = "./proc" }
 
 [build-dependencies]
 rustsat-cadical = { version = "0.1", path = "../rustsat/cadical", features = ["v1-7-1"] }
 
 [features]
 default = ["build-binary", "phasing", "sol-tightening"]
-oracle-term = ["scuttle_derive/oracle-term"]
-phasing = ["scuttle_derive/phasing"]
-sol-tightening = ["scuttle_derive/sol-tightening"]
+oracle-term = ["scuttle-proc/oracle-term"]
+phasing = ["scuttle-proc/phasing"]
+sol-tightening = ["scuttle-proc/sol-tightening"]
 build-binary = [
   "dep:clap",
   "dep:concolor-clap",

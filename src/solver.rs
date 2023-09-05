@@ -8,7 +8,7 @@ use rustsat::{
     solvers::{ControlSignal, SolveIncremental, SolverResult},
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
 };
-use scuttle_derive::oracle_bounds;
+use scuttle_proc::oracle_bounds;
 
 use crate::{
     options::EnumOptions,

@@ -27,7 +27,7 @@ use rustsat::{
     solvers::{ControlSignal, SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause},
 };
-use scuttle_derive::{oracle_bounds, KernelFunctions, Solve};
+use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use super::{default_blocking_clause, Objective, SolverKernel};
 

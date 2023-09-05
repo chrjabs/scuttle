@@ -2,8 +2,8 @@
 name = "scuttle-proc"
 authors = ["Christoph Jabs <christoph.jabs@helsinki.fi>"]
 license = "MIT"
-description = "Procedural macros for scuttle. These macros are not intended to be used outside of scuttle."
-keywords = ["solver", "multi-objective optimization", "maxsat"]
+description = "Procedural macros for scuttle. This crate is not intended to be used outside of scuttle."
+keywords = ["solver", "multi-objective", "maxsat"]
 repository = "https://github.com/chrjabs/scuttle"
 version = "0.1.0"
 edition = "2021"
