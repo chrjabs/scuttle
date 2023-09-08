@@ -7,6 +7,7 @@ use rustsat_cadical::CaDiCaL;
 use scuttle::{
     self,
     options::{EnumOptions, HeurImprOptions},
+    solver::tricore::TriCore,
     types::ParetoFront,
     KernelFunctions, Limits, LowerBounding, Options, PMinimal, Solve,
 };
@@ -221,6 +222,8 @@ type Lb = LowerBounding<
     fn(Assignment) -> Clause,
     Oracle,
 >;
+
+type Tc = TriCore<BasicVarManager, Oracle, fn(Assignment) -> Clause>;
 
 #[test]
 fn pmin_small_default() {
@@ -540,4 +543,48 @@ fn lb_dal_default() {
 #[ignore]
 fn lb_set_cover_default() {
     set_cover!(Lb, Options::default())
+}
+
+#[test]
+fn tricore_small_default() {
+    small!(Tc, Options::default())
+}
+
+#[test]
+fn tricore_medium_single_default() {
+    medium_single!(Tc, Options::default())
+}
+
+#[test]
+fn tricore_medium_all_default() {
+    let mut opts = Options::default();
+    opts.enumeration = EnumOptions::Solutions(None);
+    medium_all!(Tc, opts)
+}
+
+#[test]
+fn tricore_four_default() {
+    four!(Tc, Options::default())
+}
+
+#[test]
+fn tricore_parkinsons_default() {
+    parkinsons!(Tc, Options::default())
+}
+
+#[test]
+#[ignore]
+fn tricore_mushroom_default() {
+    mushroom!(Tc, Options::default())
+}
+
+#[test]
+fn tricore_dal_default() {
+    dal!(Tc, Options::default())
+}
+
+#[test]
+#[ignore]
+fn tricore_set_cover_default() {
+    set_cover!(Tc, Options::default())
 }

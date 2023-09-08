@@ -149,7 +149,7 @@ pub struct EncodingStats {
     /// The number of clauses in the encoding
     pub n_clauses: usize,
     /// The number of variables in the encoding
-    pub n_vars: usize,
+    pub n_vars: u32,
     /// The objective offset
     pub offset: isize,
     /// The unit weight, if the objective is unweighted

@@ -433,7 +433,7 @@ where
         if !self.opts.solution_guided_search {
             return Ok(());
         }
-        for idx in 0..self.var_manager.max_var().unwrap().idx() + 1 {
+        for idx in 0..self.var_manager.max_var().unwrap().idx32() + 1 {
             self.oracle.unphase_var(rustsat::var![idx])?;
         }
         Ok(())
@@ -516,7 +516,7 @@ where
             }
 
             // Find next solution
-            let res = self.oracle.solve_assumps(&assumps)?;
+            let res = self.solve_assumps(&assumps)?;
             if res == SolverResult::Interrupted {
                 return Err(Termination::Callback);
             }
