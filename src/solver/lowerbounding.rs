@@ -11,14 +11,13 @@
 use rustsat::{
     encodings::{self, card, pb},
     instances::{Cnf, ManageVars, MultiOptInstance},
-    solvers::{ControlSignal, SolveIncremental, SolveStats, SolverResult, SolverStats},
+    solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
-    types::ParetoFront, EncodingStats, ExtendedSolveStats, KernelFunctions, Limits, Options, Phase,
-    Solve, Stats, Termination, WriteSolverLog,
+    EncodingStats, ExtendedSolveStats, KernelFunctions, Limits, Options, Phase, Solve, Termination,
 };
 
 use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
@@ -196,7 +195,7 @@ where
                 } else {
                     let mut and_impl = Cnf::new();
                     let and_lit = kernel.var_manager.new_var().pos_lit();
-                    and_impl.add_lit_impl_cube(and_lit, assumps);
+                    and_impl.add_lit_impl_cube(and_lit, &assumps);
                     kernel.oracle.add_cnf(and_impl).unwrap();
                     Some(and_lit)
                 };
@@ -225,7 +224,7 @@ where
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
         self.kernel.log_routine_start("lower-bounding")?;
         loop {
-            let res = self.kernel.solve_assumps(self.fence.assumps())?;
+            let res = self.kernel.solve_assumps(&self.fence.assumps())?;
             match res {
                 SolverResult::Sat => self.harvest()?,
                 SolverResult::Unsat => {
@@ -259,7 +258,7 @@ where
                         } else {
                             let mut and_impl = Cnf::new();
                             let and_lit = self.kernel.var_manager.new_var().pos_lit();
-                            and_impl.add_lit_impl_cube(and_lit, assumps);
+                            and_impl.add_lit_impl_cube(and_lit, &assumps);
                             self.kernel.oracle.add_cnf(and_impl).unwrap();
                             Some(and_lit)
                         };
@@ -281,7 +280,7 @@ where
         self.kernel.log_routine_start("harvest")?;
         loop {
             // Find minimization starting point
-            let res = self.kernel.solve_assumps(self.fence.assumps())?;
+            let res = self.kernel.solve_assumps(&self.fence.assumps())?;
             if SolverResult::Unsat == res {
                 self.kernel.log_routine_end()?;
                 return Ok(());

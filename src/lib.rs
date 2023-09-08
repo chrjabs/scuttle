@@ -10,7 +10,7 @@ pub mod options;
 pub use options::{Limits, Options};
 
 pub mod types;
-use types::{NonDomPoint, ParetoFront};
+use types::NonDomPoint;
 
 pub mod solver;
 pub use solver::KernelFunctions;

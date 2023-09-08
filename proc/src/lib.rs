@@ -47,23 +47,23 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput) -> TokenStream {
 
     quote! {
         impl #impl_generics KernelFunctions for #name #ty_generics #where_clause {
-            fn pareto_front(&self) -> ParetoFront {
+            fn pareto_front(&self) -> crate::types::ParetoFront {
                 self.kernel.pareto_front.clone()
             }
 
-            fn stats(&self) -> Stats {
+            fn stats(&self) -> crate::Stats {
                 self.kernel.stats
             }
 
-            fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L) {
+            fn attach_logger<L: crate::WriteSolverLog + 'static>(&mut self, logger: L) {
                 self.kernel.attach_logger(logger)
             }
 
-            fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>> {
+            fn detach_logger(&mut self) -> Option<Box<dyn crate::WriteSolverLog>> {
                 self.kernel.detach_logger()
             }
 
-            fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal) {
+            fn attach_terminator(&mut self, term_cb: fn() -> rustsat::solvers::ControlSignal) {
                 self.kernel.attach_terminator(term_cb)
             }
 

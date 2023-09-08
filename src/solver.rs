@@ -18,6 +18,9 @@ use crate::{
 
 pub mod lowerbounding;
 pub mod pminimal;
+pub mod tricore;
+
+mod coreguided;
 
 /// Solving interface for each algorithm
 pub trait Solve: KernelFunctions {
@@ -513,7 +516,7 @@ where
             }
 
             // Find next solution
-            let res = self.oracle.solve_assumps(assumps.clone())?;
+            let res = self.oracle.solve_assumps(&assumps)?;
             if res == SolverResult::Interrupted {
                 return Err(Termination::Callback);
             }
@@ -588,7 +591,7 @@ where
             }
 
             // Check if dominating solution exists
-            let res = self.solve_assumps(assumps)?;
+            let res = self.solve_assumps(&assumps)?;
             if res == SolverResult::Unsat {
                 self.log_routine_end()?;
                 // Termination criteria, return last solution and costs
@@ -665,7 +668,7 @@ where
                 } else {
                     let mut and_impl = Cnf::new();
                     let and_lit = self.var_manager.new_var().pos_lit();
-                    and_impl.add_lit_impl_cube(and_lit, assumps);
+                    and_impl.add_lit_impl_cube(and_lit, &assumps);
                     self.oracle.add_cnf(and_impl).unwrap();
                     Some(and_lit)
                 }
@@ -713,7 +716,7 @@ where
 
     /// Wrapper around the oracle with call logging and interrupt detection.
     /// Assumes that the oracle is unlimited.
-    fn solve_assumps(&mut self, assumps: Vec<Lit>) -> Result<SolverResult, Termination> {
+    fn solve_assumps(&mut self, assumps: &[Lit]) -> Result<SolverResult, Termination> {
         self.log_routine_start("oracle call")?;
         let res = self.oracle.solve_assumps(assumps)?;
         self.log_routine_end()?;

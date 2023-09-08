@@ -12,7 +12,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rustsat = { version = "0.2", path = "../rustsat/rustsat", features = ["multiopt"] }
+rustsat = { version = "0.2", path = "../rustsat/rustsat", features = ["multiopt", "internals"] }
 rustsat-cadical = { optional = true, version = "0.1", path = "../rustsat/cadical", features = ["v1-7-1"] }
 maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 cpu-time = { optional = true, version = "1.0.0" }

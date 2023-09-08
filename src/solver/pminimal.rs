@@ -18,13 +18,13 @@
 
 use crate::{
     solver::ObjEncoding, EncodingStats, ExtendedSolveStats, KernelFunctions, Limits, Options,
-    ParetoFront, Phase, Solve, Stats, Termination, WriteSolverLog,
+    Phase, Solve, Termination,
 };
 use rustsat::{
     encodings,
     encodings::{card, pb},
     instances::{ManageVars, MultiOptInstance},
-    solvers::{ControlSignal, SolveIncremental, SolveStats, SolverResult, SolverStats},
+    solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
