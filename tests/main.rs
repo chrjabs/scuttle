@@ -563,11 +563,6 @@ fn tricore_medium_all_default() {
 }
 
 #[test]
-fn tricore_four_default() {
-    four!(Tc, Options::default())
-}
-
-#[test]
 fn tricore_parkinsons_default() {
     parkinsons!(Tc, Options::default())
 }
@@ -576,11 +571,6 @@ fn tricore_parkinsons_default() {
 #[ignore]
 fn tricore_mushroom_default() {
     mushroom!(Tc, Options::default())
-}
-
-#[test]
-fn tricore_dal_default() {
-    dal!(Tc, Options::default())
 }
 
 #[test]

@@ -164,8 +164,8 @@ pub trait WriteSolverLog {
     fn log_oracle_call(&mut self, result: SolverResult) -> Result<(), LoggerError>;
     /// Adds a solution to the log
     fn log_solution(&mut self) -> Result<(), LoggerError>;
-    /// Adds a Pareto point to the log
-    fn log_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), LoggerError>;
+    /// Adds a non-dominated point to the log
+    fn log_non_dominated(&mut self, pareto_point: &NonDomPoint) -> Result<(), LoggerError>;
     /// Adds a heuristic objective improvement to the log
     fn log_heuristic_obj_improvement(
         &mut self,
@@ -174,13 +174,17 @@ pub trait WriteSolverLog {
         improved_cost: usize,
     ) -> Result<(), LoggerError>;
     /// Adds a fence change in the lower-bounding algorithm to the log
-    fn log_fence(&mut self, fence: Vec<usize>) -> Result<(), LoggerError>;
+    fn log_fence(&mut self, fence: &[usize]) -> Result<(), LoggerError>;
     /// Adds a new routine starting to the log
     fn log_routine_start(&mut self, desc: &'static str) -> Result<(), LoggerError>;
     /// Adds a new routine ending to the log
     fn log_routine_end(&mut self) -> Result<(), LoggerError>;
     /// Adds end of solving to the log
     fn log_end_solve(&mut self) -> Result<(), LoggerError>;
+    /// Adds an updated ideal point to the log
+    fn log_ideal(&mut self, ideal: &[usize]) -> Result<(), LoggerError>;
+    /// Adds an updated nadir point to the log
+    fn log_nadir(&mut self, nadir: &[usize]) -> Result<(), LoggerError>;
 }
 
 /// Error type for loggers

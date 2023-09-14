@@ -2,6 +2,8 @@
 //!
 //! Shared types for the $P$-minimal solver.
 
+use std::ops::Index;
+
 use rustsat::types::Assignment;
 
 /// The Pareto front of an instance. This is the return type of the solver.
@@ -10,7 +12,7 @@ pub struct ParetoFront<S = Assignment>
 where
     S: Clone + Eq,
 {
-    pps: Vec<NonDomPoint<S>>,
+    ndoms: Vec<NonDomPoint<S>>,
 }
 
 impl<S> ParetoFront<S>
@@ -19,12 +21,12 @@ where
 {
     /// Initializes a new Pareto front
     pub(crate) fn new() -> Self {
-        ParetoFront { pps: vec![] }
+        ParetoFront { ndoms: vec![] }
     }
 
     /// Adds a non-dominated point to the Pareto front
-    pub(crate) fn add_pp(&mut self, pp: NonDomPoint<S>) {
-        self.pps.push(pp)
+    pub(crate) fn add_non_dom(&mut self, pp: NonDomPoint<S>) {
+        self.ndoms.push(pp)
     }
 
     /// Converts all solutions to another type
@@ -34,8 +36,8 @@ where
         C: FnMut(S) -> S2,
     {
         ParetoFront {
-            pps: self
-                .pps
+            ndoms: self
+                .ndoms
                 .into_iter()
                 .map(|pp| pp.convert_solutions(conv))
                 .collect(),
@@ -44,12 +46,20 @@ where
 
     /// Gets the number of non-dominated points
     pub fn len(&self) -> usize {
-        self.pps.len()
+        self.ndoms.len()
     }
 
     /// Checks if the Pareto front is empty
     pub fn is_empty(&self) -> bool {
-        self.pps.is_empty()
+        self.ndoms.is_empty()
+    }
+}
+
+impl<S: Clone + Eq> Index<usize> for ParetoFront<S> {
+    type Output = NonDomPoint<S>;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.ndoms[index]
     }
 }
 
@@ -62,7 +72,7 @@ where
     type IntoIter = std::slice::Iter<'a, NonDomPoint<S>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.pps.iter()
+        self.ndoms.iter()
     }
 }
 
@@ -75,7 +85,7 @@ where
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.pps.into_iter()
+        self.ndoms.into_iter()
     }
 }
 
@@ -96,7 +106,8 @@ where
     S: Clone + Eq,
 {
     /// Constructs a new non-dominated point
-    pub(crate) fn new(costs: Vec<isize>) -> Self {
+    pub(crate) fn new(mut costs: Vec<isize>) -> Self {
+        costs.shrink_to_fit();
         NonDomPoint {
             costs,
             sols: vec![],

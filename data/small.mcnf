@@ -1,4 +1,10 @@
 c A Small MCNF example
+c 
+c non-dominated points:
+c (0, 4)
+c (2, 2)
+c (4, 0)
+c 
 h 1 2 0
 h 2 3 0
 h 3 4 0

@@ -269,7 +269,7 @@ where
             panic!("should never encounter clit that is not in fence");
         }
         if let Some(logger) = &mut self.kernel.logger {
-            logger.log_fence(self.fence.bounds())?
+            logger.log_fence(&self.fence.bounds())?
         }
         Ok(())
     }
@@ -303,7 +303,7 @@ where
                     .p_minimization(costs, solution, &mut self.obj_encs)?;
 
             let assumps = self.kernel.enforce_dominating(&costs, &mut self.obj_encs);
-            self.kernel.yield_solutions(costs, assumps, solution)?;
+            self.kernel.yield_solutions(costs, &assumps, solution)?;
 
             // Block last Pareto point, if temporarily blocked
             if let Some(block_lit) = block_switch {

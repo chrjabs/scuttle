@@ -31,10 +31,10 @@ struct CliArgs {
     /// The algorithm to run
     #[arg(long, default_value_t = Algorithm::default())]
     algorithm: Algorithm,
-    /// The type of enumeration to perform at each Pareto point
+    /// The type of enumeration to perform at each non-dominated point
     #[arg(long, default_value_t = EnumOptionsArg::NoEnum)]
     enumeration: EnumOptionsArg,
-    /// The limit for enumeration at each Pareto point (0 for no limit)
+    /// The limit for enumeration at each non-dominated point (0 for no limit)
     #[arg(long, default_value_t = 0)]
     enumeration_limit: usize,
     /// When to perform solution tightening
@@ -61,7 +61,7 @@ struct CliArgs {
     /// The CaDiCaL profile to use
     #[arg(long, default_value_t = CadicalConfig::Default)]
     cadical_config: CadicalConfig,
-    /// Limit the number of Pareto points to enumerate (0 is no limit)
+    /// Limit the number of non-dominated points to enumerate (0 is no limit)
     #[arg(long, default_value_t = 0)]
     pp_limit: usize,
     /// Limit the number of solutions to enumerate (0 is no limit)
@@ -94,9 +94,9 @@ struct CliArgs {
     /// Log found solutions as they are discovered
     #[arg(long)]
     log_solutions: bool,
-    /// Log Pareto points as they are discovered
+    /// Log non-dominated points as they are discovered
     #[arg(long)]
-    log_pareto_points: bool,
+    log_non_dom: bool,
     /// Log SAT oracle calls
     #[arg(long)]
     log_oracle_calls: bool,
@@ -106,9 +106,12 @@ struct CliArgs {
     /// Log fence updates in the lower-bounding algorithm
     #[arg(long)]
     log_fence: bool,
-    /// Log routine starts and ends
+    /// Log routine starts and ends till a given depth
+    #[arg(long, default_value_t = 0)]
+    log_routines: usize,
+    /// Log ideal and nadir points
     #[arg(long)]
-    log_routines: bool,
+    log_bound_points: bool,
     /// The index in the OPB file to treat as the lowest variable
     #[arg(long, default_value_t = 0)]
     first_var_idx: u32,
@@ -177,6 +180,8 @@ pub enum Algorithm {
     PMinimal,
     /// Lower-bounding search - Cortes et al. TACAS'23
     LowerBounding,
+    /// Tri core prototype
+    TriCore,
 }
 
 impl fmt::Display for Algorithm {
@@ -184,6 +189,7 @@ impl fmt::Display for Algorithm {
         match self {
             Algorithm::PMinimal => write!(f, "p-minimal"),
             Algorithm::LowerBounding => write!(f, "lower-bounding"),
+            Algorithm::TriCore => write!(f, "tri-core"),
         }
     }
 }
@@ -225,12 +231,12 @@ impl From<CadicalConfig> for rustsat_cadical::Config {
 #[derive(Default, Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum EnumOptionsArg {
     #[default]
-    /// Don't enumerate at each Pareto point
+    /// Don't enumerate at each non-dominated point
     NoEnum,
     /// Enumerate Pareto-optimal solutions (with an optional limit) at each
-    /// Pareto point using the provided blocking clause generator
+    /// non-dominated point using the provided blocking clause generator
     Solutions,
-    /// Enumerate Pareto-MCSs (with an optional limit) at each Pareto point
+    /// Enumerate Pareto-MCSs (with an optional limit) at each non-dominated point
     ParetoMCS,
 }
 
@@ -342,11 +348,12 @@ impl Cli {
             logger_config: LoggerConfig {
                 log_candidates: args.log_candidates,
                 log_solutions: args.log_solutions,
-                log_pareto_points: args.log_pareto_points,
+                log_non_dom: args.log_non_dom,
                 log_oracle_calls: args.log_oracle_calls,
                 log_heuristic_obj_improvement: args.log_heuristic_obj_improvement,
                 log_fence: args.log_fence,
                 log_routines: args.log_routines,
+                log_bound_points: args.log_bound_points,
             },
         };
         #[cfg(not(feature = "sol-tightening"))]
@@ -648,7 +655,7 @@ impl Cli {
     ) -> Result<(), IOError> {
         Self::start_block(buffer)?;
         buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-        write!(buffer, "Pareto Point")?;
+        write!(buffer, "Non-dominated Point")?;
         buffer.reset()?;
         writeln!(
             buffer,
@@ -720,11 +727,12 @@ impl Cli {
 struct LoggerConfig {
     log_candidates: bool,
     log_solutions: bool,
-    log_pareto_points: bool,
+    log_non_dom: bool,
     log_oracle_calls: bool,
     log_heuristic_obj_improvement: bool,
     log_fence: bool,
-    log_routines: bool,
+    log_routines: usize,
+    log_bound_points: bool,
 }
 
 pub struct CliLogger {
@@ -785,8 +793,8 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), LoggerError> {
-        if self.config.log_pareto_points {
+    fn log_non_dominated(&mut self, pareto_point: &NonDomPoint) -> Result<(), LoggerError> {
+        if self.config.log_non_dom {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
             write!(buffer, "pareto point")?;
@@ -827,7 +835,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_fence(&mut self, fence: Vec<usize>) -> Result<(), LoggerError> {
+    fn log_fence(&mut self, fence: &[usize]) -> Result<(), LoggerError> {
         if self.config.log_fence {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -840,9 +848,9 @@ impl WriteSolverLog for CliLogger {
     }
 
     fn log_routine_start(&mut self, desc: &'static str) -> Result<(), LoggerError> {
-        if self.config.log_routines {
-            self.routine_stack.push((desc, ProcessTime::now()));
+        self.routine_stack.push((desc, ProcessTime::now()));
 
+        if self.config.log_routines >= self.routine_stack.len() {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
             write!(buffer, ">>> routine start")?;
@@ -854,12 +862,13 @@ impl WriteSolverLog for CliLogger {
     }
 
     fn log_routine_end(&mut self) -> Result<(), LoggerError> {
-        if self.config.log_routines {
-            let (desc, start) = self.routine_stack.pop().expect("routine stack out of sync");
+        let (desc, start) = self.routine_stack.pop().expect("routine stack out of sync");
+
+        if self.config.log_routines > self.routine_stack.len() {
             let duration = ProcessTime::now().duration_since(start);
 
             let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Red)))?;
             write!(buffer, "<<< routine end")?;
             buffer.reset()?;
             writeln!(
@@ -876,6 +885,40 @@ impl WriteSolverLog for CliLogger {
     fn log_end_solve(&mut self) -> Result<(), LoggerError> {
         while !self.routine_stack.is_empty() {
             self.log_routine_end()?;
+        }
+        Ok(())
+    }
+
+    fn log_ideal(&mut self, ideal: &[usize]) -> Result<(), LoggerError> {
+        if self.config.log_bound_points {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
+            write!(buffer, "ideal point")?;
+            buffer.reset()?;
+            writeln!(
+                buffer,
+                ": costs: {}; cpu-time: {}",
+                VecPrinter::new(ideal),
+                DurPrinter::new(ProcessTime::now().as_duration()),
+            )?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
+
+    fn log_nadir(&mut self, nadir: &[usize]) -> Result<(), LoggerError> {
+        if self.config.log_bound_points {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
+            write!(buffer, "nadir point")?;
+            buffer.reset()?;
+            writeln!(
+                buffer,
+                ": costs: {}; cpu-time: {}",
+                VecPrinter::new(nadir),
+                DurPrinter::new(ProcessTime::now().as_duration()),
+            )?;
+            self.stdout.print(&buffer)?;
         }
         Ok(())
     }

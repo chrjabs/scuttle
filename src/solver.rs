@@ -16,6 +16,7 @@ use crate::{
     Limits, Options, Phase, Stats, Termination, WriteSolverLog,
 };
 
+pub mod divcon;
 pub mod lowerbounding;
 pub mod pminimal;
 pub mod tricore;
@@ -173,12 +174,12 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     /// Converts an internal cost vector to an external one. Internal cost is
     /// purely the encoding output while external cost takes an offset and
     /// multiplier into account.
-    fn externalize_internal_costs(&self, costs: Vec<usize>) -> Vec<isize> {
+    fn externalize_internal_costs(&self, costs: &[usize]) -> Vec<isize> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         costs
             .into_iter()
             .enumerate()
-            .map(|(idx, cst)| match self.objs[idx] {
+            .map(|(idx, &cst)| match self.objs[idx] {
                 Objective::Weighted { offset, .. } => {
                     let signed_cst: isize = cst.try_into().expect("cost exceeds `isize`");
                     signed_cst + offset
@@ -196,6 +197,34 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
                 Objective::Constant { offset } => {
                     debug_assert_eq!(cst, 0);
                     offset
+                }
+            })
+            .collect()
+    }
+
+    /// Converts an external cost vector to an internal one.
+    fn internalize_external_costs(&self, costs: &[isize]) -> Vec<usize> {
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        costs
+            .into_iter()
+            .enumerate()
+            .map(|(idx, &cst)| match self.objs[idx] {
+                Objective::Weighted { offset, .. } => (cst - offset)
+                    .try_into()
+                    .expect("internalized external cost is negative"),
+                Objective::Unweighted {
+                    offset,
+                    unit_weight,
+                    ..
+                } => {
+                    let multi_cost: usize = (cst - offset)
+                        .try_into()
+                        .expect("internalized external cost is negative");
+                    multi_cost / unit_weight
+                }
+                Objective::Constant { offset } => {
+                    debug_assert_eq!(cst, offset);
+                    0
                 }
             })
             .collect()
@@ -278,12 +307,12 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
         Ok(())
     }
 
-    /// Logs a Pareto point. Can return a termination if the Pareto point limit is reached.
-    fn log_pareto_point(&mut self, pareto_point: &NonDomPoint) -> Result<(), Termination> {
+    /// Logs a non-dominated point. Can return a termination if the non-dominated point limit is reached.
+    fn log_non_dominated(&mut self, pareto_point: &NonDomPoint) -> Result<(), Termination> {
         self.stats.n_pareto_points += 1;
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_pareto_point(pareto_point)?;
+            logger.log_non_dominated(pareto_point)?;
         }
         // Update limit and check termination
         if let Some(pps) = &mut self.lims.pps {
@@ -351,7 +380,7 @@ where
 {
     /// Performs heuristic solution improvement and computes the improved
     /// (internal) cost for one objective
-    fn get_cost_with_heuristic_improvements(
+    pub fn get_cost_with_heuristic_improvements(
         &mut self,
         obj_idx: usize,
         sol: &mut Assignment,
@@ -375,6 +404,10 @@ where
                 }
                 cost += w;
             }
+        }
+        if reduction > 0 {
+            // get assignment from the solver again to trigger reconstruction stack
+            *sol = self.oracle.solution(sol.max_var().unwrap())?;
         }
         if tightening {
             self.log_heuristic_obj_improvement(obj_idx, cost + reduction, cost)?;
@@ -468,7 +501,7 @@ where
     fn yield_solutions(
         &mut self,
         costs: Vec<usize>,
-        assumps: Vec<Lit>,
+        assumps: &[Lit],
         mut solution: Assignment,
     ) -> Result<(), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
@@ -476,7 +509,7 @@ where
         self.unphase_solution()?;
 
         // Create Pareto point
-        let mut pareto_point = NonDomPoint::new(self.externalize_internal_costs(costs));
+        let mut pareto_point = NonDomPoint::new(self.externalize_internal_costs(&costs));
 
         // Truncate internal solution to only include original variables
         solution = solution.truncate(self.max_orig_var);
@@ -487,8 +520,8 @@ where
             match self.log_solution() {
                 Ok(_) => (),
                 Err(term) => {
-                    let pp_term = self.log_pareto_point(&pareto_point);
-                    self.pareto_front.add_pp(pareto_point);
+                    let pp_term = self.log_non_dominated(&pareto_point);
+                    self.pareto_front.add_non_dom(pareto_point);
                     pp_term?;
                     return Err(term);
                 }
@@ -499,8 +532,8 @@ where
                 EnumOptions::PMCSs(Some(limit)) => pareto_point.n_sols() >= limit,
                 _unlimited => false,
             } {
-                let pp_term = self.log_pareto_point(&pareto_point);
-                self.pareto_front.add_pp(pareto_point);
+                let pp_term = self.log_non_dominated(&pareto_point);
+                self.pareto_front.add_non_dom(pareto_point);
                 self.log_routine_end()?;
                 return pp_term;
             }
@@ -516,15 +549,15 @@ where
             }
 
             // Find next solution
-            let res = self.solve_assumps(&assumps)?;
+            let res = self.solve_assumps(assumps)?;
             if res == SolverResult::Interrupted {
                 return Err(Termination::Callback);
             }
             self.log_oracle_call(res)?;
             if res == SolverResult::Unsat {
-                let pp_term = self.log_pareto_point(&pareto_point);
+                let pp_term = self.log_non_dominated(&pareto_point);
                 // All solutions enumerated
-                self.pareto_front.add_pp(pareto_point);
+                self.pareto_front.add_non_dom(pareto_point);
                 self.log_routine_end()?;
                 return pp_term;
             }

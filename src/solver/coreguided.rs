@@ -16,9 +16,9 @@ use super::{Objective, SolverKernel};
 
 #[derive(Clone, Copy)]
 pub struct TotOutput {
-    root: NodeId,
-    oidx: usize,
-    tot_weight: usize,
+    pub root: NodeId,
+    pub oidx: usize,
+    pub tot_weight: usize,
 }
 
 #[derive(Default)]
@@ -64,24 +64,29 @@ where
     /// refinements:
     /// - Weight-aware core extraction
     /// - Core exhaustion
+    /// When using base assumptions, the user has to guarantee that a potential
+    /// subsequent call is only made with tighter constraints.
     pub fn oll(
         &mut self,
-        mut reform: OllReformulation,
+        reform: &mut OllReformulation,
+        base_assumps: &[Lit],
         tot_db: &mut TotDb,
-    ) -> Result<(Assignment, OllReformulation), Termination> {
+    ) -> Result<Option<Assignment>, Termination> {
         self.log_routine_start("oll")?;
 
         // cores not yet reformulated (because of WCE)
         let mut unreform_cores = vec![];
         let mut core_lits = vec![];
 
-        let mut assumps: Vec<_> = reform.inactives.iter().map(|(&l, _)| !l).collect();
+        let mut assumps = Vec::from(base_assumps);
+        assumps.extend(reform.inactives.iter().map(|(&l, _)| !l));
 
         loop {
             // Build assumptions sorted by weight
-            assumps.sort_unstable_by_key(|&l| -(reform.inactives[&!l] as isize));
+            assumps[base_assumps.len()..]
+                .sort_unstable_by_key(|&l| -(reform.inactives[&!l] as isize));
             // Remove assumptions that turned active
-            while reform.inactives[&!assumps[assumps.len() - 1]] == 0 {
+            while !assumps.is_empty() && reform.inactives[&!assumps[assumps.len() - 1]] == 0 {
                 assumps.pop();
             }
 
@@ -93,7 +98,7 @@ where
                         // Cleanup: remove literals that turned active from inactives
                         reform.inactives.retain(|_, w| *w > 0);
                         self.log_routine_end()?;
-                        return Ok((sol, reform));
+                        return Ok(Some(sol));
                     }
                     // TODO: maybe get solution and do hardening
                     // Reformulate cores
@@ -117,7 +122,10 @@ where
                 }
                 SolverResult::Unsat => {
                     let core = self.oracle.core()?;
-                    debug_assert!(!core.is_empty());
+                    if core.is_empty() {
+                        // unsat
+                        return Ok(None);
+                    }
                     let core_weight = core
                         .iter()
                         .fold(usize::MAX, |cw, l| std::cmp::min(cw, reform.inactives[l]));
