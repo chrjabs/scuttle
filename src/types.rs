@@ -53,6 +53,10 @@ where
     pub fn is_empty(&self) -> bool {
         self.ndoms.is_empty()
     }
+    
+    pub fn iter(&self) -> std::slice::Iter<'_, NonDomPoint<S>> {
+        self.ndoms.iter()
+    }
 }
 
 impl<S: Clone + Eq> Index<usize> for ParetoFront<S> {

@@ -473,6 +473,15 @@ where
             self.kernel.log_routine_end()?;
             return Ok((sol, cost));
         }
+        let mut cnf = Cnf::new();
+        dpw::encode_output(
+            &enc,
+            (cost - offset - 1) / (1 << enc.output_power()),
+            &mut self.tot_db,
+            &mut self.kernel.var_manager,
+            &mut cnf,
+        );
+        self.kernel.oracle.add_cnf(cnf)?;
         // fine convergence
         while cost - offset > 0 {
             assumps.drain(base_assumps.len()..);

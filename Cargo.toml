@@ -25,6 +25,7 @@ scuttle-proc = { version = "0.1", path = "./proc" }
 
 [build-dependencies]
 rustsat-cadical = { version = "0.2", path = "../rustsat/cadical", features = ["v1-7-1"] }
+maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 
 [features]
 default = ["build-binary", "phasing", "sol-tightening"]

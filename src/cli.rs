@@ -182,6 +182,8 @@ pub enum Algorithm {
     LowerBounding,
     /// Tri core prototype
     TriCore,
+    /// Divide and conquer prototype
+    DivCon,
 }
 
 impl fmt::Display for Algorithm {
@@ -190,6 +192,7 @@ impl fmt::Display for Algorithm {
             Algorithm::PMinimal => write!(f, "p-minimal"),
             Algorithm::LowerBounding => write!(f, "lower-bounding"),
             Algorithm::TriCore => write!(f, "tri-core"),
+            Algorithm::DivCon => write!(f, "div-con"),
         }
     }
 }

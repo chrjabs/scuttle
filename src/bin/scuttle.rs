@@ -24,7 +24,7 @@ use rustsat_cadical::CaDiCaL;
 use scuttle::{
     self,
     cli::{Algorithm, Cli, FileFormat},
-    solver::tricore::TriCore,
+    solver::{tricore::TriCore, divcon::SeqDivCon},
     LoggerError, LowerBounding, PMinimal, Solve,
 };
 
@@ -67,6 +67,8 @@ type Lb<VM> = LowerBounding<
 >;
 /// Tri-core prototype used
 type Tc<VM> = TriCore<VM, Oracle, fn(Assignment) -> Clause>;
+/// Divide and Conquer prototype used
+type Dc<VM> = SeqDivCon<VM, Oracle, fn(Assignment) -> Clause>;
 
 fn main() -> Result<(), Error> {
     let cli = Cli::init();
@@ -120,6 +122,12 @@ fn main() -> Result<(), Error> {
         ),
         Algorithm::TriCore => generic_main(
             handle_term!(Tc::new_default_blocking(inst, oracle, cli.options), cli),
+            cli,
+            prepro,
+            reindexer,
+        ),
+        Algorithm::DivCon => generic_main(
+            handle_term!(Dc::new_default_blocking(inst, oracle, cli.options), cli),
             cli,
             prepro,
             reindexer,
