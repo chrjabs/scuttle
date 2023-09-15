@@ -115,6 +115,9 @@ struct CliArgs {
     /// The index in the OPB file to treat as the lowest variable
     #[arg(long, default_value_t = 0)]
     first_var_idx: u32,
+    /// Verbosity of the solver output
+    #[arg(short, long, default_value_t = 0)]
+    verbosity: u8,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -349,14 +352,15 @@ impl Cli {
             print_stats: !args.no_print_stats,
             color: args.color,
             logger_config: LoggerConfig {
-                log_candidates: args.log_candidates,
+                log_candidates: args.log_candidates || args.verbosity >= 2,
                 log_solutions: args.log_solutions,
-                log_non_dom: args.log_non_dom,
-                log_oracle_calls: args.log_oracle_calls,
-                log_heuristic_obj_improvement: args.log_heuristic_obj_improvement,
-                log_fence: args.log_fence,
-                log_routines: args.log_routines,
-                log_bound_points: args.log_bound_points,
+                log_non_dom: args.log_non_dom || args.verbosity >= 1,
+                log_oracle_calls: args.log_oracle_calls || args.verbosity >= 3,
+                log_heuristic_obj_improvement: args.log_heuristic_obj_improvement
+                    || args.verbosity >= 3,
+                log_fence: args.log_fence || args.verbosity >= 2,
+                log_routines: std::cmp::max(args.log_routines, args.verbosity as usize * 2),
+                log_bound_points: args.log_bound_points || args.verbosity >= 2,
             },
         };
         #[cfg(not(feature = "sol-tightening"))]
@@ -800,7 +804,7 @@ impl WriteSolverLog for CliLogger {
         if self.config.log_non_dom {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "pareto point")?;
+            write!(buffer, "non-dominated point")?;
             buffer.reset()?;
             writeln!(
                 buffer,
