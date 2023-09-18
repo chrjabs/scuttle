@@ -27,7 +27,7 @@ use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
         CE: card::BoundUpperIncremental,
         VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental")]
+        O: SolveIncremental + SolveStats")]
 pub struct LowerBounding<PBE, CE, VM, BCG, O> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
@@ -42,7 +42,7 @@ where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
-    O: SolveIncremental,
+    O: SolveIncremental + SolveStats,
 {
     pub fn new_default_blocking(
         inst: MultiOptInstance<VM>,
@@ -65,7 +65,7 @@ where
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental + Default,
+    O: SolveIncremental + SolveStats + Default,
 {
     pub fn new_default_oracle(
         inst: MultiOptInstance<VM>,
@@ -82,7 +82,7 @@ where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
-    O: SolveIncremental + Default,
+    O: SolveIncremental + SolveStats + Default,
 {
     pub fn new_defaults(inst: MultiOptInstance<VM>, opts: Options) -> Result<Self, Termination> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
@@ -101,7 +101,7 @@ where
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental,
+    O: SolveIncremental + SolveStats,
 {
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
@@ -161,7 +161,7 @@ where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
-    O: SolveIncremental,
+    O: SolveIncremental + SolveStats,
 {
     /// Initializes the solver
     fn init(mut kernel: SolverKernel<VM, O, BCG>) -> Self {
@@ -183,10 +183,7 @@ where
                     ),
                     Objective::Constant { .. } => ObjEncoding::Constant,
                 };
-                kernel
-                    .oracle
-                    .add_cnf(enc.encode_ub_change(0..1, &mut kernel.var_manager))
-                    .expect("couldn't add cnf to oracle");
+                enc.encode_ub_change(0..1, &mut kernel.oracle, &mut kernel.var_manager);
                 let assumps = enc.enforce_ub(0).unwrap();
                 let assump = if assumps.is_empty() {
                     None
@@ -217,7 +214,7 @@ where
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental,
+    O: SolveIncremental + SolveStats,
 {
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> Result<(), Termination> {
@@ -247,9 +244,11 @@ where
                         // update bound
                         let enc = &mut self.obj_encs[obj_idx];
                         *bound = enc.next_higher(*bound);
-                        self.kernel.oracle.add_cnf(
-                            enc.encode_ub_change(*bound..*bound + 1, &mut self.kernel.var_manager),
-                        )?;
+                        enc.encode_ub_change(
+                            *bound..*bound + 1,
+                            &mut self.kernel.oracle,
+                            &mut self.kernel.var_manager,
+                        );
                         let assumps = enc.enforce_ub(*bound).unwrap();
                         *olit = if assumps.is_empty() {
                             None

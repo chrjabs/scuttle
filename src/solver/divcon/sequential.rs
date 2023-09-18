@@ -2,14 +2,15 @@
 
 use rustsat::{
     encodings::{
+        atomics,
         card::dbtotalizer::{Node, TotDb},
         nodedb::{NodeById, NodeCon, NodeLike},
         pb::dpw,
     },
-    instances::{Cnf, ManageVars, MultiOptInstance},
+    instances::{ManageVars, MultiOptInstance},
     lit,
     solvers::{
-        SolveIncremental,
+        SolveIncremental, SolveStats,
         SolverResult::{Sat, Unsat},
     },
     types::{Assignment, Clause, Lit, RsHashMap},
@@ -26,7 +27,7 @@ use super::{super::coreguided::OllReformulation, ObjEncData};
 #[derive(KernelFunctions, Solve)]
 #[solve(bounds = "where VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental")]
+        O: SolveIncremental + SolveStats")]
 pub struct DivCon<VM, O, BCG> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
@@ -108,7 +109,7 @@ impl<VM, O, BCG> DivCon<VM, O, BCG>
 where
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental,
+    O: SolveIncremental + SolveStats,
 {
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> Result<(), Termination> {
@@ -244,15 +245,13 @@ where
             } else {
                 // bound inc_obj
                 let inc_enc = self.encodings[inc_obj].as_ref().unwrap();
-                let mut cnf = Cnf::new();
                 dpw::encode_output(
                     &inc_enc.structure,
                     (inc_cost - inc_enc.offset) / (1 << inc_enc.structure.output_power()),
                     &mut self.tot_db,
+                    &mut self.kernel.oracle,
                     &mut self.kernel.var_manager,
-                    &mut cnf,
                 );
-                self.kernel.oracle.add_cnf(cnf)?;
                 assumps.extend(
                     dpw::enforce_ub(
                         &inc_enc.structure,
@@ -270,15 +269,13 @@ where
                 );
                 // bound dec_obj
                 let dec_enc = self.encodings[dec_obj].as_ref().unwrap();
-                let mut cnf = Cnf::new();
                 dpw::encode_output(
                     &dec_enc.structure,
                     (dec_cost - dec_enc.offset) / (1 << dec_enc.structure.output_power()),
                     &mut self.tot_db,
+                    &mut self.kernel.oracle,
                     &mut self.kernel.var_manager,
-                    &mut cnf,
                 );
-                self.kernel.oracle.add_cnf(cnf)?;
                 assumps.extend(
                     dpw::enforce_ub(
                         &dec_enc.structure,
@@ -368,15 +365,13 @@ where
         while (cost - enc.offset) >= output_weight {
             let oidx = (cost - enc.offset) / output_weight - 1;
             debug_assert!(oidx < self.tot_db[enc.structure.root].len());
-            let mut cnf = Cnf::new();
             dpw::encode_output(
                 &enc.structure,
                 oidx,
                 &mut self.tot_db,
+                &mut self.kernel.oracle,
                 &mut self.kernel.var_manager,
-                &mut cnf,
             );
-            self.kernel.oracle.add_cnf(cnf)?;
             assumps[base_assumps.len()] = !self.tot_db[enc.structure.root][oidx];
             match self.kernel.solve_assumps(&assumps)? {
                 Sat => {
@@ -410,15 +405,13 @@ where
             self.kernel.log_routine_end()?;
             return Ok((sol, cost));
         }
-        let mut cnf = Cnf::new();
         dpw::encode_output(
             &enc.structure,
             (cost - enc.offset - 1) / (1 << enc.structure.output_power()),
             &mut self.tot_db,
+            &mut self.kernel.oracle,
             &mut self.kernel.var_manager,
-            &mut cnf,
         );
-        self.kernel.oracle.add_cnf(cnf)?;
         // fine convergence
         while cost - enc.offset > 0 {
             assumps.drain(base_assumps.len()..);
@@ -448,7 +441,6 @@ where
 
     /// Cuts away the areas dominated by the points in `self.discovered`
     fn cut_dominated(&mut self) -> Result<(), Termination> {
-        let mut cnf = Cnf::new();
         for point_idx in self.last_blocked..self.kernel.pareto_front.len() {
             let cost = self
                 .kernel
@@ -472,8 +464,8 @@ where
                         &enc.structure,
                         (cost - enc.offset - 1) / (1 << enc.structure.output_power()),
                         &mut self.tot_db,
+                        &mut self.kernel.oracle,
                         &mut self.kernel.var_manager,
-                        &mut cnf,
                     );
                     let units =
                         dpw::enforce_ub(&enc.structure, cost - enc.offset - 1, &mut self.tot_db)
@@ -482,15 +474,16 @@ where
                         Some(units[0])
                     } else {
                         let and_lit = self.kernel.var_manager.new_var().pos_lit();
-                        cnf.add_lit_impl_cube(and_lit, &units);
+                        self.kernel
+                            .oracle
+                            .extend(atomics::lit_impl_cube(and_lit, &units));
                         Some(and_lit)
                     }
                 })
                 .collect();
-            cnf.add_clause(clause);
+            self.kernel.oracle.add_clause(clause)?;
         }
         self.last_blocked = self.kernel.pareto_front.len();
-        self.kernel.oracle.add_cnf(cnf)?;
         Ok(())
     }
 

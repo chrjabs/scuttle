@@ -2,13 +2,14 @@
 
 use rustsat::{
     encodings::{
+        atomics,
         card::dbtotalizer::{Node, TotDb},
         nodedb::{NodeById, NodeCon, NodeLike},
         pb::dpw,
     },
-    instances::{Cnf, ManageVars, MultiOptInstance},
+    instances::{ManageVars, MultiOptInstance},
     lit,
-    solvers::{SolveIncremental, SolverResult},
+    solvers::{SolveIncremental, SolveStats, SolverResult},
     types::{Assignment, Clause, Lit},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
@@ -20,7 +21,7 @@ use super::{coreguided::OllReformulation, default_blocking_clause, SolverKernel}
 #[derive(KernelFunctions, Solve)]
 #[solve(bounds = "where VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental")]
+        O: SolveIncremental + SolveStats")]
 pub struct TriCore<VM, O, BCG> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
@@ -106,7 +107,7 @@ impl<VM, O, BCG> TriCore<VM, O, BCG>
 where
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental,
+    O: SolveIncremental + SolveStats,
 {
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> Result<(), Termination> {
@@ -169,7 +170,6 @@ where
 
     /// Introduces the nadir point cut
     fn cut_nadir(&mut self) -> Result<(), Termination> {
-        let mut cnf = Cnf::new();
         for obj_idx in 0..self.kernel.stats.n_objs {
             if self.nadir[obj_idx] == self.ideal[obj_idx] {
                 continue;
@@ -179,16 +179,15 @@ where
                 enc,
                 (self.nadir[obj_idx] - offset - 1) / (1 << enc.output_power()),
                 &mut self.tot_db,
+                &mut self.kernel.oracle,
                 &mut self.kernel.var_manager,
-                &mut cnf,
             );
             for unit in
                 dpw::enforce_ub(enc, self.nadir[obj_idx] - offset - 1, &mut self.tot_db).unwrap()
             {
-                cnf.add_unit(unit);
+                self.kernel.oracle.add_unit(unit)?;
             }
         }
-        self.kernel.oracle.add_cnf(cnf)?;
         Ok(())
     }
 
@@ -201,7 +200,6 @@ where
         let below_nadir = |cost: &[usize; 3]| {
             cost[0] < self.nadir[0] && cost[1] < self.nadir[1] && cost[2] < self.nadir[2]
         };
-        let mut cnf = Cnf::new();
         for cost in self.disc_costs.drain(..) {
             if !below_nadir(&cost) {
                 continue;
@@ -218,22 +216,23 @@ where
                         enc,
                         (cst - offset - 1) / (1 << enc.output_power()),
                         &mut self.tot_db,
+                        &mut self.kernel.oracle,
                         &mut self.kernel.var_manager,
-                        &mut cnf,
                     );
                     let units = dpw::enforce_ub(enc, cst - offset - 1, &mut self.tot_db).unwrap();
                     if units.len() == 1 {
                         Some(units[0])
                     } else {
                         let and_lit = self.kernel.var_manager.new_var().pos_lit();
-                        cnf.add_lit_impl_cube(and_lit, &units);
+                        self.kernel
+                            .oracle
+                            .extend(atomics::lit_impl_cube(and_lit, &units));
                         Some(and_lit)
                     }
                 })
                 .collect();
-            cnf.add_clause(clause);
+            self.kernel.oracle.add_clause(clause)?;
         }
-        self.kernel.oracle.add_cnf(cnf)?;
         Ok(())
     }
 
@@ -303,15 +302,13 @@ where
             let (sol, other_cost) = self.linsu(other_obj, &base_assumps)?;
             self.nadir[other_obj] = other_cost;
             let (enc, offset) = self.encodings[other_obj].as_ref().unwrap();
-            let mut cnf = Cnf::new();
             dpw::encode_output(
                 enc,
                 (other_cost - offset) / (1 << enc.output_power()),
                 &mut self.tot_db,
+                &mut self.kernel.oracle,
                 &mut self.kernel.var_manager,
-                &mut cnf,
             );
-            self.kernel.oracle.add_cnf(cnf)?;
             base_assumps
                 .extend(dpw::enforce_ub(enc, other_cost - offset, &mut self.tot_db).unwrap());
             let mut costs = vec![0; self.kernel.stats.n_objs];
@@ -351,15 +348,13 @@ where
                 }
 
                 let (enc, offset) = self.encodings[second_obj].as_ref().unwrap();
-                let mut cnf = Cnf::new();
                 dpw::encode_output(
                     enc,
                     (second_cost - offset) / (1 << enc.output_power()),
                     &mut self.tot_db,
+                    &mut self.kernel.oracle,
                     &mut self.kernel.var_manager,
-                    &mut cnf,
                 );
-                self.kernel.oracle.add_cnf(cnf)?;
                 base_assumps
                     .extend(dpw::enforce_ub(enc, second_cost - offset, &mut self.tot_db).unwrap());
 
@@ -377,15 +372,13 @@ where
                 }
 
                 let (enc, offset) = self.encodings[third_obj].as_ref().unwrap();
-                let mut cnf = Cnf::new();
                 dpw::encode_output(
                     enc,
                     (third_cost - offset) / (1 << enc.output_power()),
                     &mut self.tot_db,
+                    &mut self.kernel.oracle,
                     &mut self.kernel.var_manager,
-                    &mut cnf,
                 );
-                self.kernel.oracle.add_cnf(cnf)?;
                 base_assumps
                     .extend(dpw::enforce_ub(enc, third_cost - offset, &mut self.tot_db).unwrap());
 
@@ -431,15 +424,13 @@ where
         while (cost - offset) >= output_weight {
             let oidx = (cost - offset) / output_weight - 1;
             debug_assert!(oidx < self.tot_db[enc.root].len());
-            let mut cnf = Cnf::new();
             dpw::encode_output(
                 enc,
                 oidx,
                 &mut self.tot_db,
+                &mut self.kernel.oracle,
                 &mut self.kernel.var_manager,
-                &mut cnf,
             );
-            self.kernel.oracle.add_cnf(cnf)?;
             assumps[base_assumps.len()] = !self.tot_db[enc.root][oidx];
             match self.kernel.solve_assumps(&assumps)? {
                 SolverResult::Sat => {
@@ -473,15 +464,13 @@ where
             self.kernel.log_routine_end()?;
             return Ok((sol, cost));
         }
-        let mut cnf = Cnf::new();
         dpw::encode_output(
             &enc,
             (cost - offset - 1) / (1 << enc.output_power()),
             &mut self.tot_db,
+            &mut self.kernel.oracle,
             &mut self.kernel.var_manager,
-            &mut cnf,
         );
-        self.kernel.oracle.add_cnf(cnf)?;
         // fine convergence
         while cost - offset > 0 {
             assumps.drain(base_assumps.len()..);

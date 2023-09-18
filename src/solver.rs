@@ -3,9 +3,9 @@
 use std::ops::{Not, Range};
 
 use rustsat::{
-    encodings::{card, pb},
+    encodings::{card, pb, CollectClauses},
     instances::{Cnf, ManageVars, MultiOptInstance},
-    solvers::{ControlSignal, SolveIncremental, SolverResult},
+    solvers::{ControlSignal, SolveIncremental, SolveStats, SolverResult},
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
 };
 use scuttle_proc::oracle_bounds;
@@ -91,7 +91,7 @@ where
         let (cnf, mut var_manager) = constr.as_cnf();
         let stats = Stats {
             n_objs: objs.len(),
-            n_orig_clauses: cnf.n_clauses(),
+            n_orig_clauses: cnf.len(),
             ..Default::default()
         };
         // Add objectives to solver
@@ -571,7 +571,7 @@ where
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     VM: ManageVars,
-    O: SolveIncremental,
+    O: SolveIncremental + SolveStats,
 {
     /// Gets the current objective costs without offset or multiplier. The phase
     /// parameter is needed to determine if the solution should be heuristically
@@ -659,9 +659,7 @@ where
         let mut assumps = vec![];
         costs.iter().enumerate().for_each(|(idx, &cst)| {
             let enc = &mut obj_encs[idx];
-            self.oracle
-                .add_cnf(enc.encode_ub_change(cst..cst + 1, &mut self.var_manager))
-                .unwrap();
+            enc.encode_ub_change(cst..cst + 1, &mut self.oracle, &mut self.var_manager);
             assumps.extend(enc.enforce_ub(cst).unwrap());
         });
         assumps
@@ -692,9 +690,7 @@ where
                     return None;
                 }
                 // Encode and add to solver
-                self.oracle
-                    .add_cnf(enc.encode_ub_change(cst - 1..cst, &mut self.var_manager))
-                    .unwrap();
+                enc.encode_ub_change(cst - 1..cst, &mut self.oracle, &mut self.var_manager);
                 let assumps = enc.enforce_ub(cst - 1).unwrap();
                 if assumps.len() == 1 {
                     Some(assumps[0])
@@ -921,11 +917,18 @@ where
     }
 
     /// Encodes the given range
-    fn encode_ub_change(&mut self, range: Range<usize>, var_manager: &mut dyn ManageVars) -> Cnf {
+    fn encode_ub_change<Col>(
+        &mut self,
+        range: Range<usize>,
+        collector: &mut Col,
+        var_manager: &mut dyn ManageVars,
+    ) where
+        Col: CollectClauses,
+    {
         match self {
-            ObjEncoding::Weighted(enc) => enc.encode_ub_change(range, var_manager),
-            ObjEncoding::Unweighted(enc) => enc.encode_ub_change(range, var_manager),
-            ObjEncoding::Constant => Cnf::new(),
+            ObjEncoding::Weighted(enc) => enc.encode_ub_change(range, collector, var_manager),
+            ObjEncoding::Unweighted(enc) => enc.encode_ub_change(range, collector, var_manager),
+            ObjEncoding::Constant => (),
         }
     }
 

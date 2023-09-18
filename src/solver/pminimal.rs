@@ -39,7 +39,7 @@ use super::{default_blocking_clause, Objective, SolverKernel};
         CE: card::BoundUpperIncremental,
         VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental")]
+        O: SolveIncremental + SolveStats")]
 pub struct PMinimal<PBE, CE, VM, BCG, O> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
@@ -203,7 +203,7 @@ where
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental,
+    O: SolveIncremental + SolveStats,
 {
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> Result<(), Termination> {
