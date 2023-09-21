@@ -16,7 +16,7 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput) -> TokenStream {
     let name = &ast.ident;
 
     // Check whether type has generic named O that is assumed to be the oracle
-    #[cfg(feature = "oracle-term")]
+    #[cfg(feature = "interrupt-oracle")]
     {
         let mut found_oracle = false;
         for gen in ast.generics.type_params() {
@@ -32,8 +32,11 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput) -> TokenStream {
 
     ast.generics.make_where_clause();
     let obounds = "where";
-    #[cfg(feature = "oracle-term")]
-    let obounds = format!("{} O: rustsat::solvers::Terminate<'static>,", obounds);
+    #[cfg(feature = "interrupt-oracle")]
+    let obounds = format!(
+        "{} O: rustsat::solvers::Interrupt,",
+        obounds
+    );
     let obounds: TokenStream = obounds.parse().unwrap();
     let obounds: syn::WhereClause = parse_macro_input!(obounds);
     ast.generics
@@ -63,12 +66,8 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput) -> TokenStream {
                 self.kernel.detach_logger()
             }
 
-            fn attach_terminator(&mut self, term_cb: fn() -> rustsat::solvers::ControlSignal) {
-                self.kernel.attach_terminator(term_cb)
-            }
-
-            fn detach_terminator(&mut self) {
-                self.kernel.detach_terminator()
+            fn interrupter(&mut self) -> crate::solver::Interrupter {
+                self.kernel.interrupter()
             }
         }
     }
@@ -94,7 +93,7 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, opts: SolveOpts) -> TokenStream {
     let name = &ast.ident;
 
     // Check whether type has generic named O that is assumed to be the oracle
-    #[cfg(feature = "oracle-term")]
+    #[cfg(feature = "interrupt-oracle")]
     {
         let mut found_oracle = false;
         for gen in ast.generics.type_params() {
@@ -110,8 +109,8 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, opts: SolveOpts) -> TokenStream {
 
     ast.generics.make_where_clause();
     let obounds = "where";
-    #[cfg(feature = "oracle-term")]
-    let obounds = format!("{} O: rustsat::solvers::Terminate<'static>,", obounds);
+    #[cfg(feature = "interrupt-oracle")]
+    let obounds = format!("{} O: rustsat::solvers::Interrupt,", obounds);
     #[cfg(feature = "phasing")]
     let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
     #[cfg(feature = "sol-tightening")]

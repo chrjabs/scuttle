@@ -1,14 +1,4 @@
-#![cfg(feature = "build-binary")]
-
-use std::{
-    ffi::OsString,
-    fmt,
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::{ffi::OsString, fmt, path::PathBuf, thread};
 
 use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
 use rustsat::{
@@ -17,18 +7,16 @@ use rustsat::{
         fio::{self, ParsingError},
         BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReinducingVarManager,
     },
-    solvers::{ControlSignal, SolverError},
+    solvers::SolverError,
     types::{Assignment, Clause},
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle::{
     self,
     cli::{Algorithm, Cli, FileFormat},
-    solver::{tricore::TriCore, divcon::SeqDivCon},
+    solver::{divcon::SeqDivCon, tricore::TriCore},
     LoggerError, LowerBounding, PMinimal, Solve,
 };
-
-static mut SIG_TERM_FLAG: Option<Arc<AtomicBool>> = None;
 
 macro_rules! handle_term {
     ($e:expr, $cli:expr) => {
@@ -142,32 +130,18 @@ fn generic_main<S: Solve>(
     reindexer: Option<ReinducingVarManager>,
 ) -> Result<(), Error> {
     // Set up signal handling
-    unsafe { SIG_TERM_FLAG = Some(Arc::new(AtomicBool::new(false))) };
-    signal_hook::flag::register(
+    let mut interrupter = solver.interrupter();
+    let mut signals = signal_hook::iterator::Signals::new(&[
         signal_hook::consts::SIGTERM,
-        Arc::clone(unsafe { SIG_TERM_FLAG.as_ref().unwrap() }),
-    )?;
-    signal_hook::flag::register(
         signal_hook::consts::SIGINT,
-        Arc::clone(unsafe { SIG_TERM_FLAG.as_ref().unwrap() }),
-    )?;
-    signal_hook::flag::register(
-        signal_hook::consts::SIGABRT,
-        Arc::clone(unsafe { SIG_TERM_FLAG.as_ref().unwrap() }),
-    )?;
-    signal_hook::flag::register(
         signal_hook::consts::SIGXCPU,
-        Arc::clone(unsafe { SIG_TERM_FLAG.as_ref().unwrap() }),
-    )?;
-    solver.attach_terminator(|| {
-        unsafe {
-            if let Some(flag) = &SIG_TERM_FLAG {
-                if flag.load(Ordering::Relaxed) {
-                    return ControlSignal::Terminate;
-                }
-            }
+        signal_hook::consts::SIGABRT,
+    ])?;
+    // Thread for catching incoming signals
+    thread::spawn(move || {
+        for _ in signals.forever() {
+            interrupter.interrupt();
         }
-        ControlSignal::Continue
     });
 
     solver.attach_logger(cli.new_cli_logger());

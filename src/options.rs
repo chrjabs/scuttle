@@ -4,9 +4,6 @@
 
 use std::fmt;
 
-#[cfg(feature = "build-binary")]
-use clap::ValueEnum;
-
 use crate::Phase;
 
 /// Configuration options for the $P$-minimal solver
@@ -81,7 +78,7 @@ impl Default for HeurImprOptions {
 
 /// Options for when solution improvement can be performed
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "build-binary", derive(ValueEnum))]
+#[cfg_attr(feature = "binary-deps", derive(clap::ValueEnum))]
 pub enum HeurImprWhen {
     /// Never perform solution improvement
     #[default]

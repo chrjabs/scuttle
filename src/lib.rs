@@ -20,7 +20,7 @@ pub use solver::Solve;
 pub use solver::lowerbounding::LowerBounding;
 pub use solver::pminimal::PMinimal;
 
-#[cfg(feature = "build-binary")]
+#[cfg(feature = "binary-deps")]
 pub mod cli;
 
 /// Trait for getting statistics from the solver
@@ -46,8 +46,8 @@ pub enum Termination {
     OracleCallsLimit,
     /// Termination because an attached logger failed
     LoggerError(LoggerError),
-    /// Termination because of termination callback
-    Callback,
+    /// Termination because of external interrupt
+    Interrupted,
     /// An error occured in the oracle
     OracleError(SolverError),
 }
@@ -81,7 +81,7 @@ impl fmt::Display for Termination {
             Termination::LoggerError(log_error) => {
                 write!(f, "Solver terminated because logger failed: {}", log_error)
             }
-            Termination::Callback => {
+            Termination::Interrupted => {
                 write!(f, "Solver terminated early because of interrupt signal")
             }
             Termination::OracleError(oe) => {
@@ -200,7 +200,6 @@ impl LoggerError {
     }
 }
 
-#[cfg(feature = "build-binary")]
 impl From<std::io::Error> for LoggerError {
     fn from(value: std::io::Error) -> Self {
         Self {

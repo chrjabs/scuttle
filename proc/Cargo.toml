@@ -19,6 +19,6 @@ quote = "1.0"
 darling = "0.20"
 
 [features]
-oracle-term = []
+interrupt-oracle = []
 phasing = []
 sol-tightening = []

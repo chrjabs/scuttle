@@ -1,11 +1,17 @@
 //! Core solver functionality shared between different algorithms
 
-use std::ops::{Not, Range};
+use std::{
+    ops::{Not, Range},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use rustsat::{
     encodings::{card, pb, CollectClauses},
     instances::{Cnf, ManageVars, MultiOptInstance},
-    solvers::{ControlSignal, SolveIncremental, SolveStats, SolverResult},
+    solvers::{SolveIncremental, SolveStats, SolverResult},
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
 };
 use scuttle_proc::oracle_bounds;
@@ -40,10 +46,33 @@ pub trait KernelFunctions {
     fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L);
     /// Detaches a logger from the solver
     fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>>;
-    /// Attaches a terminator callback. Only one callback can be attached at a time.
-    fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal);
-    /// Detaches the termination callback
-    fn detach_terminator(&mut self);
+    /// Gets an iterrupter to the solver
+    fn interrupter(&mut self) -> Interrupter;
+}
+
+pub struct Interrupter {
+    /// Termination flag of the solver
+    term_flag: Arc<AtomicBool>,
+    /// The terminator of the underlying SAT oracle
+    #[cfg(feature = "interrupt-oracle")]
+    oracle_interrupter: Box<dyn rustsat::solvers::InterruptSolver + Send>,
+}
+
+#[cfg(feature = "interrupt-oracle")]
+impl Interrupter {
+    /// Interrupts the solver asynchronously
+    pub fn interrupt(&mut self) {
+        self.term_flag.store(true, Ordering::Relaxed);
+        self.oracle_interrupter.interrupt();
+    }
+}
+
+#[cfg(not(feature = "interrupt-oracle"))]
+impl Interrupter {
+    /// Interrupts the solver asynchronously
+    pub fn interrupt(&mut self) {
+        self.term_flag.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Kernel struct shared between all solvers
@@ -71,8 +100,8 @@ struct SolverKernel<VM, O, BCG> {
     lims: Limits,
     /// Logger to log with
     logger: Option<Box<dyn WriteSolverLog>>,
-    /// Termination callback
-    term_cb: Option<fn() -> ControlSignal>,
+    /// Termination flag
+    term_flag: Arc<AtomicBool>,
 }
 
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
@@ -148,7 +177,7 @@ where
             stats,
             lims: Limits::none(),
             logger: None,
-            term_cb: None,
+            term_flag: Arc::new(AtomicBool::new(false)),
         })
     }
 }
@@ -165,10 +194,6 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
 
     fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>> {
         self.logger.take()
-    }
-
-    fn detach_terminator(&mut self) {
-        self.term_cb = None
     }
 
     /// Converts an internal cost vector to an external one. Internal cost is
@@ -245,14 +270,13 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
             .expect("Tautological blocking clause")
     }
 
-    /// Checks the termination callback and terminates if appropriate
-    fn check_terminator(&mut self) -> Result<(), Termination> {
-        if let Some(cb) = &mut self.term_cb {
-            if cb() == ControlSignal::Terminate {
-                return Err(Termination::Callback);
-            }
+    /// Checks the termination flag and terminates if appropriate
+    fn check_termination(&self) -> Result<(), Termination> {
+        if self.term_flag.load(Ordering::Relaxed) {
+            Err(Termination::Interrupted)
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     /// Logs a cost point candidate. Can error a termination if the candidates limit is reached.
@@ -357,18 +381,25 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     }
 }
 
-#[cfg(feature = "oracle-term")]
-impl<VM, O: Terminate<'static>, BCG> SolverKernel<VM, O, BCG> {
-    fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal) {
-        self.term_cb = Some(term_cb);
-        self.oracle.attach_terminator(term_cb);
+#[cfg(feature = "interrupt-oracle")]
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    O: rustsat::solvers::Interrupt,
+{
+    fn interrupter(&mut self) -> Interrupter {
+        Interrupter {
+            term_flag: self.term_flag.clone(),
+            oracle_interrupter: Box::new(self.oracle.interrupter()),
+        }
     }
 }
 
-#[cfg(not(feature = "oracle-term"))]
+#[cfg(not(feature = "interrupt-oracle"))]
 impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
-    fn attach_terminator(&mut self, term_cb: fn() -> ControlSignal) {
-        self.term_cb = Some(term_cb);
+    fn interrupter(&mut self) -> Interrupter {
+        Interrupter {
+            term_flag: self.term_flag.clone(),
+        }
     }
 }
 
@@ -537,7 +568,7 @@ where
                 self.log_routine_end()?;
                 return pp_term;
             }
-            self.check_terminator()?;
+            self.check_termination()?;
 
             // Block last solution
             match self.opts.enumeration {
@@ -551,7 +582,7 @@ where
             // Find next solution
             let res = self.solve_assumps(assumps)?;
             if res == SolverResult::Interrupted {
-                return Err(Termination::Callback);
+                return Err(Termination::Interrupted);
             }
             self.log_oracle_call(res)?;
             if res == SolverResult::Unsat {
@@ -561,7 +592,7 @@ where
                 self.log_routine_end()?;
                 return pp_term;
             }
-            self.check_terminator()?;
+            self.check_termination()?;
             solution = self.oracle.solution(self.max_orig_var)?;
         }
     }
@@ -630,7 +661,7 @@ where
                 // Termination criteria, return last solution and costs
                 return Ok((costs, solution, block_switch));
             }
-            self.check_terminator()?;
+            self.check_termination()?;
 
             (costs, solution) = self.get_solution_and_internal_costs(
                 self.opts
@@ -639,7 +670,7 @@ where
                     .wanted(Phase::Minimization),
             )?;
             self.log_candidate(&costs, Phase::Minimization)?;
-            self.check_terminator()?;
+            self.check_termination()?;
             self.phase_solution(solution.clone())?;
         }
     }
@@ -737,7 +768,7 @@ where
         let res = self.oracle.solve()?;
         self.log_routine_end()?;
         if res == SolverResult::Interrupted {
-            return Err(Termination::Callback);
+            return Err(Termination::Interrupted);
         }
         self.log_oracle_call(res)?;
         Ok(res)
@@ -750,7 +781,7 @@ where
         let res = self.oracle.solve_assumps(assumps)?;
         self.log_routine_end()?;
         if res == SolverResult::Interrupted {
-            return Err(Termination::Callback);
+            self.check_termination()?;
         }
         self.log_oracle_call(res)?;
         Ok(res)

@@ -28,11 +28,11 @@ rustsat-cadical = { version = "0.2", path = "../rustsat/cadical", features = ["v
 maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 
 [features]
-default = ["build-binary", "phasing", "sol-tightening"]
-oracle-term = ["scuttle-proc/oracle-term"]
+default = ["binary-deps", "phasing", "sol-tightening", "interrupt-oracle"]
+interrupt-oracle = ["scuttle-proc/interrupt-oracle"]
 phasing = ["scuttle-proc/phasing"]
 sol-tightening = ["scuttle-proc/sol-tightening"]
-build-binary = [
+binary-deps = [
   "dep:clap",
   "dep:concolor-clap",
   "dep:termcolor",
@@ -46,3 +46,7 @@ build-binary = [
 
 [profile.release]
 lto = true
+
+[[bin]]
+name = "scuttle"
+required-features = ["binary-deps"]

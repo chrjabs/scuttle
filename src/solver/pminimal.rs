@@ -215,7 +215,7 @@ where
             if SolverResult::Unsat == res {
                 return Ok(());
             }
-            self.kernel.check_terminator()?;
+            self.kernel.check_termination()?;
 
             // Minimize solution
             let (costs, solution) = self.kernel.get_solution_and_internal_costs(
@@ -226,7 +226,7 @@ where
                     .wanted(Phase::OuterLoop),
             )?;
             self.kernel.log_candidate(&costs, Phase::OuterLoop)?;
-            self.kernel.check_terminator()?;
+            self.kernel.check_termination()?;
             self.kernel.phase_solution(solution.clone())?;
             let (costs, solution, block_switch) =
                 self.kernel
