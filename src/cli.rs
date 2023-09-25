@@ -46,6 +46,9 @@ struct CliArgs {
     /// Use solution-guided search, aka phasing literals according to found solutions
     #[arg(long, default_value_t = Bool::from(Options::default().solution_guided_search))]
     solution_guided_search: Bool,
+    /// Use BiOptSat as the recursion anchor for the `div-con` algorithm
+    #[arg(long, default_value_t = Bool::from(Options::default().bioptsat))]
+    bioptsat: Bool,
     /// Reindex the variables in the instance before solving
     #[arg(long, default_value_t = Bool::from(false))]
     reindexing: Bool,
@@ -306,6 +309,7 @@ impl Cli {
                 },
                 reserve_enc_vars: args.reserve_encoding_vars.is_true(),
                 solution_guided_search: args.solution_guided_search.is_true(),
+                bioptsat: args.bioptsat.is_true(),
             },
             limits: Limits {
                 pps: none_if_zero!(args.pp_limit),

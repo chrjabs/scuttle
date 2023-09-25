@@ -357,4 +357,15 @@ generate_tests!(lb_default, Lb!(), scuttle::Options::default());
 
 generate_tests!(tc_default, Tc!(), scuttle::Options::default());
 
-generate_tests!(dc_default, Dc!(), scuttle::Options::default());
+generate_tests!(divcon_default, Dc!(), scuttle::Options::default());
+
+generate_tests!(divcon_other_bioptsat, Dc!(), {
+    let mut opts = scuttle::Options::default();
+    opts.bioptsat = !opts.bioptsat;
+    opts
+});
+
+#[test]
+fn debug() {
+    packup_3!(Dc!(), scuttle::Options::default())
+}

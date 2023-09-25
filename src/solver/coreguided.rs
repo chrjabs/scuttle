@@ -21,7 +21,7 @@ pub struct TotOutput {
     pub tot_weight: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct OllReformulation {
     /// Inactive literals, aka the reformulated objective
     pub inactives: RsHashMap<Lit, usize>,
@@ -79,6 +79,8 @@ where
         let mut core_lits = vec![];
 
         let mut assumps = Vec::from(base_assumps);
+        // sort base assumptions for filtering them out efficiently
+        assumps.sort_unstable();
         assumps.extend(reform.inactives.iter().map(|(&l, _)| !l));
 
         loop {
@@ -86,7 +88,9 @@ where
             assumps[base_assumps.len()..]
                 .sort_unstable_by_key(|&l| -(reform.inactives[&!l] as isize));
             // Remove assumptions that turned active
-            while !assumps.is_empty() && reform.inactives[&!assumps[assumps.len() - 1]] == 0 {
+            while assumps.len() > base_assumps.len()
+                && reform.inactives[&!assumps[assumps.len() - 1]] == 0
+            {
                 assumps.pop();
             }
 
@@ -121,7 +125,24 @@ where
                     core_lits.clear();
                 }
                 SolverResult::Unsat => {
-                    let core = self.oracle.core()?;
+                    let mut core = self.oracle.core()?;
+                    // filter out base assumptions
+                    // !!! Note: this relies on the fact that the core is in the same order as the
+                    // assumptions going into the solver
+                    let mut base_assumps_idx = 0;
+                    core.retain(|&lit| {
+                        while base_assumps_idx < base_assumps.len()
+                            && assumps[base_assumps_idx] < !lit
+                        {
+                            base_assumps_idx += 1;
+                        }
+                        if base_assumps_idx >= base_assumps.len()
+                            || !lit != assumps[base_assumps_idx]
+                        {
+                            return true;
+                        }
+                        return false;
+                    });
                     if core.is_empty() {
                         // unsat
                         return Ok(None);

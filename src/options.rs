@@ -17,6 +17,8 @@ pub struct Options {
     pub reserve_enc_vars: bool,
     /// Solution-guided search (aka phasing solutions)
     pub solution_guided_search: bool,
+    /// Using BiOptSat as recursion anchor in DivCon
+    pub bioptsat: bool,
 }
 
 impl Default for Options {
@@ -27,6 +29,7 @@ impl Default for Options {
             heuristic_improvements: Default::default(),
             reserve_enc_vars: false,
             solution_guided_search: false,
+            bioptsat: true,
         }
     }
 }

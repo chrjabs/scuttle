@@ -117,7 +117,7 @@ where
         self.kernel.log_routine_start("tri-core")?;
         loop {
             if !self.find_ideal()? {
-                return Ok(());
+                break
             }
             if let Some(logger) = &mut self.kernel.logger {
                 logger.log_ideal(&self.ideal)?;
