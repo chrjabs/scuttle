@@ -311,6 +311,14 @@ macro_rules! PMin {() => {scuttle::PMinimal<
     rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
+macro_rules! PMinDpw {() => {scuttle::PMinimal<
+    rustsat::encodings::pb::DynamicPolyWatchdog,
+    rustsat::encodings::card::DefIncUpperBounding,
+    rustsat::instances::BasicVarManager,
+    fn(rustsat::types::Assignment) -> rustsat::types::Clause,
+    rustsat_cadical::CaDiCaL<'static, 'static>,
+>};}
+
 macro_rules! Lb {() => { scuttle::LowerBounding<
     rustsat::encodings::pb::DefIncUpperBounding,
     rustsat::encodings::card::DefIncUpperBounding,
@@ -367,5 +375,5 @@ generate_tests!(divcon_other_bioptsat, Dc!(), {
 
 #[test]
 fn debug() {
-    packup_3!(Dc!(), scuttle::Options::default())
+    set_cover!(PMinDpw!(), scuttle::Options::default())
 }

@@ -635,6 +635,61 @@ where
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.log_routine_start("p minimization")?;
         let mut block_switch = None;
+        #[cfg(feature = "coarse-convergence")]
+        {
+            let mut coarse_costs;
+            // Coarse convergence
+            loop {
+                coarse_costs = costs.iter().enumerate().map(|(oidx, &c)| {
+                    match &obj_encs[oidx] {
+                        ObjEncoding::Weighted(pbe) => {
+                            pbe.coarse_ub(c)
+                        }
+                        _ => c,
+                    }
+                }).collect();
+                // Force next solution to dominate the current one
+                let mut assumps = self.enforce_dominating(&coarse_costs, obj_encs);
+                // Block solutions dominated by the current one
+                if self.opts.enumeration == EnumOptions::NoEnum {
+                    // Block permanently since no enumeration at Pareto point
+                    let block_clause = self.dominated_block_clause(&costs, obj_encs);
+                    self.oracle.add_clause(block_clause)?;
+                } else {
+                    // Permanently block last candidate
+                    if let Some(block_lit) = block_switch {
+                        self.oracle.add_unit(block_lit)?;
+                    }
+                    // Temporarily block to allow for enumeration at Pareto point
+                    let block_lit = self.tmp_block_dominated(&costs, obj_encs);
+                    block_switch = Some(block_lit);
+                    assumps.push(block_lit);
+                }
+
+                // Check if dominating solution exists
+                let res = self.solve_assumps(&assumps)?;
+                if res == SolverResult::Unsat {
+                    // Termination criteria, return last solution and costs
+                    break;
+                }
+                self.check_termination()?;
+
+                (costs, solution) = self.get_solution_and_internal_costs(
+                    self.opts
+                        .heuristic_improvements
+                        .solution_tightening
+                        .wanted(Phase::Minimization),
+                )?;
+                self.log_candidate(&costs, Phase::Minimization)?;
+                self.check_termination()?;
+                self.phase_solution(solution.clone())?;
+            }
+            if coarse_costs == costs {
+                // No more fine convergence to do
+                return Ok((costs, solution, block_switch));
+            }
+        }
+        // Fine convergence
         loop {
             // Force next solution to dominate the current one
             let mut assumps = self.enforce_dominating(&costs, obj_encs);

@@ -28,10 +28,11 @@ rustsat-cadical = { version = "0.2", path = "../rustsat/cadical", features = ["v
 maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 
 [features]
-default = ["binary-deps", "phasing", "sol-tightening", "interrupt-oracle"]
+default = ["binary-deps", "phasing", "sol-tightening", "interrupt-oracle", "coarse-convergence"]
 interrupt-oracle = ["scuttle-proc/interrupt-oracle"]
 phasing = ["scuttle-proc/phasing"]
 sol-tightening = ["scuttle-proc/sol-tightening"]
+coarse-convergence = []
 binary-deps = [
   "dep:clap",
   "dep:concolor-clap",

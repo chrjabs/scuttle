@@ -45,6 +45,14 @@ type PMin<VM> = PMinimal<
     fn(Assignment) -> Clause,
     Oracle,
 >;
+/// P-Minimal instantiation used (DPW)
+type PMinDpw<VM> = PMinimal<
+    pb::DynamicPolyWatchdog,
+    card::DefIncUpperBounding,
+    VM,
+    fn(Assignment) -> Clause,
+    Oracle,
+>;
 /// Lower-bounding instantiation used
 type Lb<VM> = LowerBounding<
     pb::DefIncUpperBounding,
@@ -98,6 +106,12 @@ fn main() -> Result<(), Error> {
     match cli.alg {
         Algorithm::PMinimal => generic_main(
             handle_term!(PMin::new_default_blocking(inst, oracle, cli.options), cli),
+            cli,
+            prepro,
+            reindexer,
+        ),
+        Algorithm::PMinimalDpw => generic_main(
+            handle_term!(PMinDpw::new_default_blocking(inst, oracle, cli.options), cli),
             cli,
             prepro,
             reindexer,

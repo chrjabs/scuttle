@@ -184,6 +184,8 @@ pub enum Algorithm {
     /// P-Minimal model enumeration - Soh et al. CP'17
     #[default]
     PMinimal,
+    /// P-Minimal model enumeration with the DPW encoding and coarse convergence
+    PMinimalDpw,
     /// Lower-bounding search - Cortes et al. TACAS'23
     LowerBounding,
     /// Tri core prototype
@@ -196,6 +198,7 @@ impl fmt::Display for Algorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Algorithm::PMinimal => write!(f, "p-minimal"),
+            Algorithm::PMinimalDpw => write!(f, "p-minimal-dpw"),
             Algorithm::LowerBounding => write!(f, "lower-bounding"),
             Algorithm::TriCore => write!(f, "tri-core"),
             Algorithm::DivCon => write!(f, "div-con"),
