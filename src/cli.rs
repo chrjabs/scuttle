@@ -510,7 +510,10 @@ impl Cli {
         Ok(())
     }
 
-    pub fn print_pareto_front(&self, pareto_front: ParetoFront) -> Result<(), IOError> {
+    pub fn print_pareto_front<S: Clone + Eq + fmt::Display>(
+        &self,
+        pareto_front: ParetoFront<S>,
+    ) -> Result<(), IOError> {
         let mut buffer = self.stdout.buffer();
         Self::start_block(&mut buffer)?;
         buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
@@ -520,7 +523,7 @@ impl Cli {
         buffer.reset()?;
         pareto_front.into_iter().fold(Ok(()), |res, pp| {
             if res.is_ok() {
-                self.print_pareto_point(&mut buffer, pp)
+                self.print_non_dom(&mut buffer, pp)
             } else {
                 res
             }
@@ -542,7 +545,7 @@ impl Cli {
             buffer.reset()?;
             Self::print_parameter(&mut buffer, "n-solve-calls", stats.n_solve_calls)?;
             Self::print_parameter(&mut buffer, "n-solutions", stats.n_solutions)?;
-            Self::print_parameter(&mut buffer, "n-pareto-points", stats.n_pareto_points)?;
+            Self::print_parameter(&mut buffer, "n-non-dominated", stats.n_non_dominated)?;
             Self::print_parameter(&mut buffer, "n-candidates", stats.n_candidates)?;
             Self::print_parameter(&mut buffer, "n-objectives", stats.n_objs)?;
             Self::print_parameter(&mut buffer, "n-orig-clauses", stats.n_orig_clauses)?;
@@ -662,10 +665,10 @@ impl Cli {
         Ok(())
     }
 
-    fn print_pareto_point(
+    fn print_non_dom<S: Clone + Eq + fmt::Display>(
         &self,
         buffer: &mut Buffer,
-        pareto_point: NonDomPoint,
+        non_dom: NonDomPoint<S>,
     ) -> Result<(), IOError> {
         Self::start_block(buffer)?;
         buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -674,11 +677,11 @@ impl Cli {
         writeln!(
             buffer,
             ": costs: {}; n-sols: {}",
-            VecPrinter::new(pareto_point.costs()),
-            pareto_point.n_sols()
+            VecPrinter::new(non_dom.costs()),
+            non_dom.n_sols()
         )?;
         if self.print_solutions {
-            pareto_point.into_iter().fold(Ok(()), |res, sol| {
+            non_dom.into_iter().fold(Ok(()), |res, sol| {
                 if res.is_ok() {
                     write!(buffer, "s {}", sol)
                 } else {
@@ -807,7 +810,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_non_dominated(&mut self, pareto_point: &NonDomPoint) -> Result<(), LoggerError> {
+    fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> Result<(), LoggerError> {
         if self.config.log_non_dom {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -816,8 +819,8 @@ impl WriteSolverLog for CliLogger {
             writeln!(
                 buffer,
                 ": costs: {}; n-sols: {}; cpu-time: {}",
-                VecPrinter::new(pareto_point.costs()),
-                pareto_point.n_sols(),
+                VecPrinter::new(non_dominated.costs()),
+                non_dominated.n_sols(),
                 DurPrinter::new(ProcessTime::now().as_duration()),
             )?;
             self.stdout.print(&buffer)?;

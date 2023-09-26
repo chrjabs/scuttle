@@ -131,8 +131,8 @@ pub struct Stats {
     pub n_solve_calls: usize,
     /// The number of Pareto-optimal solutions found
     pub n_solutions: usize,
-    /// The number of Pareto points found
-    pub n_pareto_points: usize,
+    /// The number of non-dominated points found
+    pub n_non_dominated: usize,
     /// The number of candidates explored
     pub n_candidates: usize,
     /// The number of calls to the SAT oracle

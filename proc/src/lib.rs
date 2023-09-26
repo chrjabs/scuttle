@@ -69,7 +69,7 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
     quote! {
         impl #impl_generics KernelFunctions for #name #ty_generics #where_clause {
             fn pareto_front(&self) -> crate::types::ParetoFront {
-                #kernel.pareto_front.clone()
+                self.pareto_front.clone()
             }
 
             fn stats(&self) -> crate::Stats {

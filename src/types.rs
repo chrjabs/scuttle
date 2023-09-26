@@ -7,7 +7,7 @@ use std::ops::Index;
 use rustsat::types::Assignment;
 
 /// The Pareto front of an instance. This is the return type of the solver.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ParetoFront<S = Assignment>
 where
     S: Clone + Eq,
@@ -19,16 +19,6 @@ impl<S> ParetoFront<S>
 where
     S: Clone + Eq,
 {
-    /// Initializes a new Pareto front
-    pub(crate) fn new() -> Self {
-        ParetoFront { ndoms: vec![] }
-    }
-
-    /// Adds a non-dominated point to the Pareto front
-    pub(crate) fn add_non_dom(&mut self, pp: NonDomPoint<S>) {
-        self.ndoms.push(pp)
-    }
-
     /// Converts all solutions to another type
     pub fn convert_solutions<C, S2>(self, conv: &mut C) -> ParetoFront<S2>
     where
@@ -53,7 +43,7 @@ where
     pub fn is_empty(&self) -> bool {
         self.ndoms.is_empty()
     }
-    
+
     pub fn iter(&self) -> std::slice::Iter<'_, NonDomPoint<S>> {
         self.ndoms.iter()
     }
@@ -90,6 +80,15 @@ where
 
     fn into_iter(self) -> Self::IntoIter {
         self.ndoms.into_iter()
+    }
+}
+
+impl<S> Extend<NonDomPoint<S>> for ParetoFront<S>
+where
+    S: Clone + Eq,
+{
+    fn extend<T: IntoIterator<Item = NonDomPoint<S>>>(&mut self, iter: T) {
+        self.ndoms.extend(iter)
     }
 }
 

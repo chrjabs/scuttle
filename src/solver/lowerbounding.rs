@@ -17,7 +17,8 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
-    EncodingStats, ExtendedSolveStats, KernelFunctions, Limits, Options, Phase, Solve, Termination,
+    types::ParetoFront, EncodingStats, ExtendedSolveStats, KernelFunctions, Limits, Options, Phase,
+    Solve, Termination,
 };
 
 use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
@@ -35,6 +36,8 @@ pub struct LowerBounding<PBE, CE, VM, BCG, O> {
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
     /// The current fence
     fence: Fence,
+    /// The Pareto front discovered so far
+    pareto_front: ParetoFront,
 }
 
 impl<PBE, CE, VM, O> LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, O>
@@ -203,6 +206,7 @@ where
             kernel,
             obj_encs,
             fence: Fence { data: fence_data },
+            pareto_front: Default::default(),
         }
     }
 }
@@ -302,7 +306,8 @@ where
                     .p_minimization(costs, solution, &mut self.obj_encs)?;
 
             let assumps = self.kernel.enforce_dominating(&costs, &mut self.obj_encs);
-            self.kernel.yield_solutions(costs, &assumps, solution)?;
+            self.kernel
+                .yield_solutions(costs, &assumps, solution, &mut self.pareto_front)?;
 
             // Block last Pareto point, if temporarily blocked
             if let Some(block_lit) = block_switch {

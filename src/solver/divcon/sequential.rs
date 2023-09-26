@@ -9,6 +9,7 @@ use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
     solver::{default_blocking_clause, SolverKernel},
+    types::ParetoFront,
     KernelFunctions, Limits, Options, Solve, Termination,
 };
 
@@ -25,6 +26,8 @@ pub struct DivCon<VM, O, BCG> {
     /// The index of the last non-dominated point in the Pareto front that has
     /// been blocked
     last_blocked: usize,
+    /// The Pareto front discovered so far
+    pareto_front: ParetoFront,
 }
 
 impl<VM, O> DivCon<VM, O, fn(Assignment) -> Clause>
@@ -73,6 +76,7 @@ where
         Self {
             worker,
             last_blocked: 0,
+            pareto_front: Default::default(),
         }
     }
 }
@@ -113,14 +117,24 @@ where
 
             // TODO: use upper bound from ideal point computation
             if obj_idxs.len() == 2 && self.worker.kernel.opts.bioptsat {
-                self.worker
-                    .bioptsat((obj_idxs[0], obj_idxs[1]), base_assumps, None, |_| None)?;
+                self.worker.bioptsat(
+                    (obj_idxs[0], obj_idxs[1]),
+                    base_assumps,
+                    None,
+                    |_| None,
+                    &mut self.pareto_front,
+                )?;
                 self.cut_dominated()?;
                 return Ok(());
             }
             if obj_idxs.len() == 1 {
-                self.worker
-                    .linsu_yield(obj_idxs[0], base_assumps, None, None)?;
+                self.worker.linsu_yield(
+                    obj_idxs[0],
+                    base_assumps,
+                    None,
+                    None,
+                    &mut self.pareto_front,
+                )?;
                 self.cut_dominated()?;
                 return Ok(());
             }
@@ -141,11 +155,11 @@ where
 
     fn cut_dominated(&mut self) -> Result<(), Termination> {
         let mut costs = Vec::new();
-        for point_idx in self.last_blocked..self.worker.kernel.pareto_front.len() {
+        for point_idx in self.last_blocked..self.pareto_front.len() {
             costs.extend(
                 self.worker
                     .kernel
-                    .internalize_external_costs(self.worker.kernel.pareto_front[point_idx].costs()),
+                    .internalize_external_costs(self.pareto_front[point_idx].costs()),
             );
         }
         let mut points = Vec::new();
@@ -153,7 +167,7 @@ where
             points.push(&costs[start_idx..start_idx + self.worker.kernel.stats.n_objs]);
         }
         self.worker.cut_dominated(&points)?;
-        self.last_blocked = self.worker.kernel.pareto_front.len();
+        self.last_blocked = self.pareto_front.len();
         Ok(())
     }
 }

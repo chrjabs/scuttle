@@ -15,12 +15,12 @@ use rustsat::{
     },
     types::{Assignment, Clause, Lit},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions};
+use scuttle_proc::oracle_bounds;
 
 mod sequential;
 pub use sequential::DivCon as SeqDivCon;
 
-use crate::{KernelFunctions, Termination};
+use crate::{types::NonDomPoint, Termination};
 
 use super::{
     coreguided::{OllReformulation, TotOutput},
@@ -33,7 +33,6 @@ struct ObjEncData {
     offset: usize,
 }
 
-#[derive(KernelFunctions)]
 struct Worker<VM, O, BCG> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
@@ -108,15 +107,17 @@ where
     /// `lookup`: for a value of the increasing objective, checks if the
     /// non-dominated point has already been discovered and returns the
     /// corresponding value of the decreasing objective
-    fn bioptsat<Lookup>(
+    fn bioptsat<Lookup, Col>(
         &mut self,
         (inc_obj, dec_obj): (usize, usize),
         base_assumps: &[Lit],
         starting_point: Option<(usize, Assignment)>,
         lookup: Lookup,
+        collector: &mut Col,
     ) -> Result<(), Termination>
     where
         Lookup: Fn(usize) -> Option<usize>,
+        Col: Extend<NonDomPoint>,
     {
         self.kernel.log_routine_start("bioptsat")?;
 
@@ -164,7 +165,15 @@ where
                 // bound inc_obj
                 assumps.extend(self.bound_objective(inc_obj, inc_cost));
                 // minimize dec_obj
-                dec_cost = self.linsu_yield(dec_obj, &assumps, Some((dec_cost, Some(sol))), None)?.unwrap();
+                dec_cost = self
+                    .linsu_yield(
+                        dec_obj,
+                        &assumps,
+                        Some((dec_cost, Some(sol))),
+                        None,
+                        collector,
+                    )?
+                    .unwrap();
             };
             // termination condition 1: can't decrease decreasing objective further
             if dec_cost <= self.reforms[dec_obj].offset {
@@ -189,12 +198,13 @@ where
         return Ok(());
     }
 
-    fn linsu_yield(
+    fn linsu_yield<Col: Extend<NonDomPoint>>(
         &mut self,
         obj_idx: usize,
         base_assumps: &[Lit],
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
+        collector: &mut Col,
     ) -> Result<Option<usize>, Termination> {
         let (cost, mut sol) =
             if let Some(res) = self.linsu(obj_idx, base_assumps, upper_bound, lower_bound)? {
@@ -223,7 +233,8 @@ where
         );
         assumps
             .extend(dpw::enforce_ub(&enc.structure, cost - enc.offset, &mut self.tot_db).unwrap());
-        self.kernel.yield_solutions(costs, &assumps, sol)?;
+        self.kernel
+            .yield_solutions(costs, &assumps, sol, collector)?;
         Ok(Some(cost))
     }
 

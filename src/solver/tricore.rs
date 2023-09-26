@@ -14,7 +14,10 @@ use rustsat::{
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
-use crate::{solver::coreguided::TotOutput, KernelFunctions, Limits, Options, Solve, Termination};
+use crate::{
+    solver::coreguided::TotOutput, types::ParetoFront, KernelFunctions, Limits, Options, Solve,
+    Termination,
+};
 
 use super::{coreguided::OllReformulation, default_blocking_clause, SolverKernel};
 
@@ -37,6 +40,8 @@ pub struct TriCore<VM, O, BCG> {
     disc_costs: Vec<[usize; 3]>,
     /// The totalizer database
     tot_db: TotDb,
+    /// The Pareto front discovered so far
+    pareto_front: ParetoFront,
 }
 
 impl<VM, O> TriCore<VM, O, fn(Assignment) -> Clause>
@@ -90,6 +95,7 @@ where
             encodings: [None, None, None],
             disc_costs: Default::default(),
             tot_db: Default::default(),
+            pareto_front: Default::default(),
         };
         // Initialize objective reformulations
         for (idx, obj) in solver.kernel.objs.iter().enumerate() {
@@ -117,7 +123,7 @@ where
         self.kernel.log_routine_start("tri-core")?;
         loop {
             if !self.find_ideal()? {
-                break
+                break;
             }
             if let Some(logger) = &mut self.kernel.logger {
                 logger.log_ideal(&self.ideal)?;
@@ -314,7 +320,8 @@ where
             let mut costs = vec![0; self.kernel.stats.n_objs];
             costs[ideal_obj] = self.reforms[ideal_obj].as_ref().unwrap().offset;
             costs[other_obj] = other_cost;
-            self.kernel.yield_solutions(costs, &base_assumps, sol)?;
+            self.kernel
+                .yield_solutions(costs, &base_assumps, sol, &mut self.pareto_front)?;
         }
         Ok(())
     }
@@ -386,7 +393,8 @@ where
                 costs[ideal_obj] = self.reforms[ideal_obj].as_ref().unwrap().offset;
                 costs[second_obj] = second_cost;
                 costs[third_obj] = third_cost;
-                self.kernel.yield_solutions(costs, &base_assumps, sol)?;
+                self.kernel
+                    .yield_solutions(costs, &base_assumps, sol, &mut self.pareto_front)?;
 
                 let mut costs = [0, 0, 0];
                 costs[ideal_obj] = self.reforms[ideal_obj].as_ref().unwrap().offset;

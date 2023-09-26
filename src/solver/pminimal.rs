@@ -17,8 +17,8 @@
 //!   2009.
 
 use crate::{
-    solver::ObjEncoding, EncodingStats, ExtendedSolveStats, KernelFunctions, Limits, Options,
-    Phase, Solve, Termination,
+    solver::ObjEncoding, types::ParetoFront, EncodingStats, ExtendedSolveStats, KernelFunctions,
+    Limits, Options, Phase, Solve, Termination,
 };
 use rustsat::{
     encodings,
@@ -45,6 +45,8 @@ pub struct PMinimal<PBE, CE, VM, BCG, O> {
     kernel: SolverKernel<VM, O, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
+    /// The Pareto front discovered so far
+    pareto_front: ParetoFront,
 }
 
 impl<PBE, CE, VM, O> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, O>
@@ -192,7 +194,11 @@ where
                 Objective::Constant { .. } => ObjEncoding::Constant,
             })
             .collect();
-        Self { kernel, obj_encs }
+        Self {
+            kernel,
+            obj_encs,
+            pareto_front: Default::default(),
+        }
     }
 }
 
@@ -233,7 +239,8 @@ where
                     .p_minimization(costs, solution, &mut self.obj_encs)?;
 
             let assumps = self.kernel.enforce_dominating(&costs, &mut self.obj_encs);
-            self.kernel.yield_solutions(costs, &assumps, solution)?;
+            self.kernel
+                .yield_solutions(costs, &assumps, solution, &mut self.pareto_front)?;
 
             // Block last Pareto point, if temporarily blocked
             if let Some(block_lit) = block_switch {

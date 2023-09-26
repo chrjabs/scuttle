@@ -88,8 +88,6 @@ struct SolverKernel<VM, O, BCG> {
     max_orig_var: Var,
     /// The objectives
     objs: Vec<Objective>,
-    /// The Pareto front discovered so far
-    pareto_front: ParetoFront,
     /// Generator of blocking clauses
     block_clause_gen: BCG,
     /// Configuration options
@@ -171,7 +169,6 @@ where
             obj_lit_data,
             max_orig_var,
             objs,
-            pareto_front: ParetoFront::new(),
             block_clause_gen: bcg,
             opts,
             stats,
@@ -332,11 +329,14 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     }
 
     /// Logs a non-dominated point. Can return a termination if the non-dominated point limit is reached.
-    fn log_non_dominated(&mut self, pareto_point: &NonDomPoint) -> Result<(), Termination> {
-        self.stats.n_pareto_points += 1;
+    fn log_non_dominated(
+        &mut self,
+        non_dominated: &NonDomPoint,
+    ) -> Result<(), Termination> {
+        self.stats.n_non_dominated += 1;
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_non_dominated(pareto_point)?;
+            logger.log_non_dominated(non_dominated)?;
         }
         // Update limit and check termination
         if let Some(pps) = &mut self.lims.pps {
@@ -529,42 +529,43 @@ where
     /// Yields Pareto-optimal solutions. The given assumptions must only allow
     /// for solutions at the non-dominated point with given cost. If the options
     /// ask for enumeration, will enumerate all solutions at this point.
-    fn yield_solutions(
+    fn yield_solutions<Col: Extend<NonDomPoint>>(
         &mut self,
         costs: Vec<usize>,
         assumps: &[Lit],
         mut solution: Assignment,
+        collector: &mut Col,
     ) -> Result<(), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.log_routine_start("yield solutions")?;
         self.unphase_solution()?;
 
         // Create Pareto point
-        let mut pareto_point = NonDomPoint::new(self.externalize_internal_costs(&costs));
+        let mut non_dominated = NonDomPoint::new(self.externalize_internal_costs(&costs));
 
         // Truncate internal solution to only include original variables
         solution = solution.truncate(self.max_orig_var);
 
         loop {
             // TODO: add debug assert checking solution cost
-            pareto_point.add_sol(solution.clone());
+            non_dominated.add_sol(solution.clone());
             match self.log_solution() {
                 Ok(_) => (),
                 Err(term) => {
-                    let pp_term = self.log_non_dominated(&pareto_point);
-                    self.pareto_front.add_non_dom(pareto_point);
+                    let pp_term = self.log_non_dominated(&non_dominated);
+                    collector.extend([non_dominated]);
                     pp_term?;
                     return Err(term);
                 }
             }
             if match self.opts.enumeration {
                 EnumOptions::NoEnum => true,
-                EnumOptions::Solutions(Some(limit)) => pareto_point.n_sols() >= limit,
-                EnumOptions::PMCSs(Some(limit)) => pareto_point.n_sols() >= limit,
+                EnumOptions::Solutions(Some(limit)) => non_dominated.n_sols() >= limit,
+                EnumOptions::PMCSs(Some(limit)) => non_dominated.n_sols() >= limit,
                 _unlimited => false,
             } {
-                let pp_term = self.log_non_dominated(&pareto_point);
-                self.pareto_front.add_non_dom(pareto_point);
+                let pp_term = self.log_non_dominated(&non_dominated);
+                collector.extend([non_dominated]);
                 self.log_routine_end()?;
                 return pp_term;
             }
@@ -586,9 +587,9 @@ where
             }
             self.log_oracle_call(res)?;
             if res == SolverResult::Unsat {
-                let pp_term = self.log_non_dominated(&pareto_point);
+                let pp_term = self.log_non_dominated(&non_dominated);
                 // All solutions enumerated
-                self.pareto_front.add_non_dom(pareto_point);
+                collector.extend([non_dominated]);
                 self.log_routine_end()?;
                 return pp_term;
             }
@@ -640,14 +641,14 @@ where
             let mut coarse_costs;
             // Coarse convergence
             loop {
-                coarse_costs = costs.iter().enumerate().map(|(oidx, &c)| {
-                    match &obj_encs[oidx] {
-                        ObjEncoding::Weighted(pbe) => {
-                            pbe.coarse_ub(c)
-                        }
+                coarse_costs = costs
+                    .iter()
+                    .enumerate()
+                    .map(|(oidx, &c)| match &obj_encs[oidx] {
+                        ObjEncoding::Weighted(pbe) => pbe.coarse_ub(c),
                         _ => c,
-                    }
-                }).collect();
+                    })
+                    .collect();
                 // Force next solution to dominate the current one
                 let mut assumps = self.enforce_dominating(&coarse_costs, obj_encs);
                 // Block solutions dominated by the current one
