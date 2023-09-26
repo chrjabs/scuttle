@@ -8,9 +8,10 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
+    options::DivConOptions,
     solver::{default_blocking_clause, SolverKernel},
     types::ParetoFront,
-    KernelFunctions, Limits, Options, Solve, Termination,
+    KernelFunctions, Limits, Solve, Termination,
 };
 
 use super::Worker;
@@ -28,6 +29,8 @@ pub struct DivCon<VM, O, BCG> {
     last_blocked: usize,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
+    /// The algorithm options
+    opts: DivConOptions,
 }
 
 impl<VM, O> DivCon<VM, O, fn(Assignment) -> Clause>
@@ -38,15 +41,15 @@ where
     pub fn new_default_blocking(
         inst: MultiOptInstance<VM>,
         oracle: O,
-        opts: Options,
+        opts: DivConOptions,
     ) -> Result<Self, Termination> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             oracle,
             default_blocking_clause,
-            opts,
+            opts.kernel,
         )?;
-        Ok(Self::init(kernel))
+        Ok(Self::init(kernel, opts))
     }
 }
 
@@ -55,14 +58,17 @@ where
     VM: ManageVars,
     O: SolveIncremental + Default,
 {
-    pub fn new_defaults(inst: MultiOptInstance<VM>, opts: Options) -> Result<Self, Termination> {
+    pub fn new_defaults(
+        inst: MultiOptInstance<VM>,
+        opts: DivConOptions,
+    ) -> Result<Self, Termination> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             O::default(),
             default_blocking_clause,
-            opts,
+            opts.kernel,
         )?;
-        Ok(Self::init(kernel))
+        Ok(Self::init(kernel, opts))
     }
 }
 
@@ -71,12 +77,13 @@ where
     VM: ManageVars,
 {
     /// Initializes the solver
-    fn init(kernel: SolverKernel<VM, O, BCG>) -> Self {
+    fn init(kernel: SolverKernel<VM, O, BCG>, opts: DivConOptions) -> Self {
         let worker = Worker::init(kernel);
         Self {
             worker,
             last_blocked: 0,
             pareto_front: Default::default(),
+            opts,
         }
     }
 }
@@ -116,7 +123,7 @@ where
             }
 
             // TODO: use upper bound from ideal point computation
-            if obj_idxs.len() == 2 && self.worker.kernel.opts.bioptsat {
+            if obj_idxs.len() == 2 && self.opts.bioptsat {
                 self.worker.bioptsat(
                     (obj_idxs[0], obj_idxs[1]),
                     base_assumps,

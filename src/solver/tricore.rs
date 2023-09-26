@@ -15,8 +15,8 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
-    solver::coreguided::TotOutput, types::ParetoFront, KernelFunctions, Limits, Options, Solve,
-    Termination,
+    solver::coreguided::TotOutput, types::ParetoFront, KernelFunctions, KernelOptions, Limits,
+    Solve, Termination,
 };
 
 use super::{coreguided::OllReformulation, default_blocking_clause, SolverKernel};
@@ -52,7 +52,7 @@ where
     pub fn new_default_blocking(
         inst: MultiOptInstance<VM>,
         oracle: O,
-        opts: Options,
+        opts: KernelOptions,
     ) -> Result<Self, Termination> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
@@ -69,7 +69,10 @@ where
     VM: ManageVars,
     O: SolveIncremental + Default,
 {
-    pub fn new_defaults(inst: MultiOptInstance<VM>, opts: Options) -> Result<Self, Termination> {
+    pub fn new_defaults(
+        inst: MultiOptInstance<VM>,
+        opts: KernelOptions,
+    ) -> Result<Self, Termination> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             O::default(),

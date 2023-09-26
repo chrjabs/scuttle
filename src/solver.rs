@@ -19,7 +19,7 @@ use scuttle_proc::oracle_bounds;
 use crate::{
     options::EnumOptions,
     types::{NonDomPoint, ParetoFront},
-    Limits, Options, Phase, Stats, Termination, WriteSolverLog,
+    KernelOptions, Limits, Phase, Stats, Termination, WriteSolverLog,
 };
 
 pub mod divcon;
@@ -91,7 +91,7 @@ struct SolverKernel<VM, O, BCG> {
     /// Generator of blocking clauses
     block_clause_gen: BCG,
     /// Configuration options
-    opts: Options,
+    opts: KernelOptions,
     /// Running statistics
     stats: Stats,
     /// Limits for the current solving run
@@ -112,7 +112,7 @@ where
         inst: MultiOptInstance<VM>,
         mut oracle: O,
         bcg: BCG,
-        opts: Options,
+        opts: KernelOptions,
     ) -> Result<Self, Termination> {
         let (constr, objs) = inst.decompose();
         let (cnf, mut var_manager) = constr.as_cnf();
@@ -329,10 +329,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     }
 
     /// Logs a non-dominated point. Can return a termination if the non-dominated point limit is reached.
-    fn log_non_dominated(
-        &mut self,
-        non_dominated: &NonDomPoint,
-    ) -> Result<(), Termination> {
+    fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> Result<(), Termination> {
         self.stats.n_non_dominated += 1;
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {

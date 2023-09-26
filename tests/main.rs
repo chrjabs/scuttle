@@ -264,7 +264,7 @@ macro_rules! generate_tests {
             #[test]
             fn medium_all() {
                 let mut opts = $o;
-                opts.enumeration = scuttle::options::EnumOptions::Solutions(None);
+                opts.set_enumeration(scuttle::options::EnumOptions::Solutions(None));
                 medium_all!($s, opts)
             }
 
@@ -339,41 +339,41 @@ macro_rules! Dc {() => { scuttle::solver::divcon::SeqDivCon<
     fn(rustsat::types::Assignment) -> rustsat::types::Clause,
 >};}
 
-generate_tests!(pmin_default, PMin!(), scuttle::Options::default());
+generate_tests!(pmin_default, PMin!(), scuttle::KernelOptions::default());
 generate_tests!(pmin_no_heur, PMin!(), {
-    let mut opts = scuttle::Options::default();
+    let mut opts = scuttle::KernelOptions::default();
     opts.heuristic_improvements = scuttle::options::HeurImprOptions::none();
     opts
 });
 generate_tests!(pmin_all_heur, PMin!(), {
-    let mut opts = scuttle::Options::default();
+    let mut opts = scuttle::KernelOptions::default();
     opts.heuristic_improvements = scuttle::options::HeurImprOptions::all();
     opts
 });
 generate_tests!(pmin_other_reserve, PMin!(), {
-    let mut opts = scuttle::Options::default();
+    let mut opts = scuttle::KernelOptions::default();
     opts.reserve_enc_vars = !opts.reserve_enc_vars;
     opts
 });
 generate_tests!(pmin_other_sol_guided, PMin!(), {
-    let mut opts = scuttle::Options::default();
+    let mut opts = scuttle::KernelOptions::default();
     opts.solution_guided_search = !opts.solution_guided_search;
     opts
 });
 
-generate_tests!(lb_default, Lb!(), scuttle::Options::default());
+generate_tests!(lb_default, Lb!(), scuttle::KernelOptions::default());
 
-generate_tests!(tc_default, Tc!(), scuttle::Options::default());
+generate_tests!(tc_default, Tc!(), scuttle::KernelOptions::default());
 
-generate_tests!(divcon_default, Dc!(), scuttle::Options::default());
+generate_tests!(divcon_default, Dc!(), scuttle::DivConOptions::default());
 
 generate_tests!(divcon_other_bioptsat, Dc!(), {
-    let mut opts = scuttle::Options::default();
+    let mut opts = scuttle::DivConOptions::default();
     opts.bioptsat = !opts.bioptsat;
     opts
 });
 
 #[test]
 fn debug() {
-    set_cover!(PMinDpw!(), scuttle::Options::default())
+    set_cover!(PMinDpw!(), scuttle::KernelOptions::default())
 }

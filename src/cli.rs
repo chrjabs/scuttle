@@ -8,13 +8,13 @@ use std::{
     io::Write,
 };
 
-use crate::options::{EnumOptions, HeurImprOptions, HeurImprWhen};
+use crate::options::{DivConOptions, EnumOptions, HeurImprOptions, HeurImprWhen};
 use crate::{
     types::{NonDomPoint, ParetoFront},
-    EncodingStats, Limits, Options, Stats, WriteSolverLog,
+    EncodingStats, KernelOptions, Limits, Stats, WriteSolverLog,
 };
 use crate::{LoggerError, Phase, Termination};
-use clap::{crate_authors, crate_name, crate_version, Parser, ValueEnum};
+use clap::{crate_authors, crate_name, crate_version, Args, Parser, Subcommand, ValueEnum};
 use cpu_time::ProcessTime;
 use rustsat::{
     instances::fio,
@@ -22,33 +22,102 @@ use rustsat::{
 };
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 
+macro_rules! none_if_zero {
+    ($val:expr) => {
+        if $val == 0 {
+            None
+        } else {
+            Some($val)
+        }
+    };
+}
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct CliArgs {
-    /// The path to the instance file to load. Compressed files with an
-    /// extension like `.bz2` or `.gz` can be read.
-    inst_path: PathBuf,
-    /// The algorithm to run
-    #[arg(long, default_value_t = Algorithm::default())]
-    algorithm: Algorithm,
+    #[command(subcommand)]
+    command: AlgorithmCommand,
+}
+
+#[derive(Subcommand)]
+enum AlgorithmCommand {
+    /// P-Minimal model enumeration - Soh et al. CP'17
+    PMinimal {
+        #[command(flatten)]
+        shared: SharedArgs,
+    },
+    /// P-Minimal model enumeration with the DPW encoding and coarse convergence
+    PMinimalDpw {
+        #[command(flatten)]
+        shared: SharedArgs,
+    },
+    /// Lower-bounding search - Cortes et al. TACAS'23
+    LowerBounding {
+        #[command(flatten)]
+        shared: SharedArgs,
+        /// Log fence updates
+        #[arg(long)]
+        log_fence: bool,
+    },
+    /// Tri core prototype
+    TriCore {
+        #[command(flatten)]
+        shared: SharedArgs,
+        /// Log ideal and nadir points
+        #[arg(long)]
+        log_bound_points: bool,
+    },
+    /// Divide and conquer prototype
+    DivCon {
+        #[command(flatten)]
+        shared: SharedArgs,
+        /// Use BiOptSat as the recursion anchor
+        #[arg(long, default_value_t = Bool::from(DivConOptions::default().bioptsat))]
+        bioptsat: Bool,
+        /// Log ideal and nadir points
+        #[arg(long)]
+        log_bound_points: bool,
+    },
+}
+
+#[derive(Args)]
+struct SharedArgs {
+    /// Reserve variables for the encodings in advance
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().reserve_enc_vars))]
+    reserve_encoding_vars: Bool,
+    /// Use solution-guided search, aka phasing literals according to found solutions
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().solution_guided_search))]
+    solution_guided_search: Bool,
+    /// When to perform solution tightening
+    #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening)]
+    solution_tightening: HeurImprWhen,
+    /// The CaDiCaL profile to use
+    #[arg(long, default_value_t = CadicalConfig::Default)]
+    cadical_config: CadicalConfig,
+    #[command(flatten)]
+    enumeration: EnumArgs,
+    #[command(flatten)]
+    prepro: PreproArgs,
+    #[command(flatten)]
+    limits: LimitArgs,
+    #[command(flatten)]
+    file: FileArgs,
+    #[command(flatten)]
+    log: LogArgs,
+}
+
+#[derive(Args)]
+struct EnumArgs {
     /// The type of enumeration to perform at each non-dominated point
     #[arg(long, default_value_t = EnumOptionsArg::NoEnum)]
     enumeration: EnumOptionsArg,
     /// The limit for enumeration at each non-dominated point (0 for no limit)
     #[arg(long, default_value_t = 0)]
     enumeration_limit: usize,
-    /// When to perform solution tightening
-    #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening)]
-    solution_tightening: HeurImprWhen,
-    /// Reserve variables for the encodings in advance
-    #[arg(long, default_value_t = Bool::from(Options::default().reserve_enc_vars))]
-    reserve_encoding_vars: Bool,
-    /// Use solution-guided search, aka phasing literals according to found solutions
-    #[arg(long, default_value_t = Bool::from(Options::default().solution_guided_search))]
-    solution_guided_search: Bool,
-    /// Use BiOptSat as the recursion anchor for the `div-con` algorithm
-    #[arg(long, default_value_t = Bool::from(Options::default().bioptsat))]
-    bioptsat: Bool,
+}
+
+#[derive(Args)]
+struct PreproArgs {
     /// Reindex the variables in the instance before solving
     #[arg(long, default_value_t = Bool::from(false))]
     reindexing: Bool,
@@ -61,9 +130,10 @@ struct CliArgs {
     /// Reindex the variables in MaxPre
     #[arg(long, default_value_t = Bool::from(false))]
     maxpre_reindexing: Bool,
-    /// The CaDiCaL profile to use
-    #[arg(long, default_value_t = CadicalConfig::Default)]
-    cadical_config: CadicalConfig,
+}
+
+#[derive(Args)]
+struct LimitArgs {
     /// Limit the number of non-dominated points to enumerate (0 is no limit)
     #[arg(long, default_value_t = 0)]
     pp_limit: usize,
@@ -76,10 +146,35 @@ struct CliArgs {
     /// Limit the number of SAT oracle calls (0 is not limit)
     #[arg(long, default_value_t = 0)]
     oracle_call_limit: usize,
-    #[arg(long, value_enum, default_value_t = FileFormat::Infer)]
+}
+
+impl Into<Limits> for &LimitArgs {
+    fn into(self) -> Limits {
+        Limits {
+            pps: none_if_zero!(self.pp_limit),
+            sols: none_if_zero!(self.sol_limit),
+            candidates: none_if_zero!(self.candidate_limit),
+            oracle_calls: none_if_zero!(self.oracle_call_limit),
+        }
+    }
+}
+
+#[derive(Args)]
+struct FileArgs {
     /// The file format of the input file. With infer, the file format is
     /// inferred from the file extension.
+    #[arg(long, value_enum, default_value_t = FileFormat::Infer)]
     file_format: FileFormat,
+    /// The index in the OPB file to treat as the lowest variable
+    #[arg(long, default_value_t = 0)]
+    first_var_idx: u32,
+    /// The path to the instance file to load. Compressed files with an
+    /// extension like `.bz2` or `.gz` can be read.
+    inst_path: PathBuf,
+}
+
+#[derive(Args)]
+struct LogArgs {
     #[command(flatten)]
     color: concolor_clap::Color,
     /// Print the solver configuration
@@ -91,6 +186,9 @@ struct CliArgs {
     /// Don't print statistics
     #[arg(long)]
     no_print_stats: bool,
+    /// Verbosity of the solver output
+    #[arg(short, long, default_value_t = 0)]
+    verbosity: u8,
     /// Log candidates along the search trace
     #[arg(long)]
     log_candidates: bool,
@@ -106,21 +204,25 @@ struct CliArgs {
     /// Log heuristic objective improvement
     #[arg(long)]
     log_heuristic_obj_improvement: bool,
-    /// Log fence updates in the lower-bounding algorithm
-    #[arg(long)]
-    log_fence: bool,
     /// Log routine starts and ends till a given depth
     #[arg(long, default_value_t = 0)]
     log_routines: usize,
-    /// Log ideal and nadir points
-    #[arg(long)]
-    log_bound_points: bool,
-    /// The index in the OPB file to treat as the lowest variable
-    #[arg(long, default_value_t = 0)]
-    first_var_idx: u32,
-    /// Verbosity of the solver output
-    #[arg(short, long, default_value_t = 0)]
-    verbosity: u8,
+}
+
+impl Into<LoggerConfig> for &LogArgs {
+    fn into(self) -> LoggerConfig {
+        LoggerConfig {
+            log_candidates: self.log_candidates || self.verbosity >= 2,
+            log_solutions: self.log_solutions,
+            log_non_dom: self.log_non_dom || self.verbosity >= 1,
+            log_oracle_calls: self.log_oracle_calls || self.verbosity >= 3,
+            log_heuristic_obj_improvement: self.log_heuristic_obj_improvement
+                || self.verbosity >= 3,
+            log_fence: false,
+            log_routines: std::cmp::max(self.log_routines, self.verbosity as usize * 2),
+            log_bound_points: false,
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -131,9 +233,9 @@ pub enum Bool {
     False,
 }
 
-impl Bool {
-    fn is_true(&self) -> bool {
-        self == &Bool::True
+impl Into<bool> for Bool {
+    fn into(self) -> bool {
+        self == Bool::True
     }
 }
 
@@ -175,33 +277,6 @@ impl fmt::Display for FileFormat {
             FileFormat::Infer => write!(f, "infer"),
             FileFormat::Dimacs => write!(f, "dimacs"),
             FileFormat::Opb => write!(f, "opb"),
-        }
-    }
-}
-
-#[derive(Default, Copy, Clone, PartialEq, Eq, ValueEnum)]
-pub enum Algorithm {
-    /// P-Minimal model enumeration - Soh et al. CP'17
-    #[default]
-    PMinimal,
-    /// P-Minimal model enumeration with the DPW encoding and coarse convergence
-    PMinimalDpw,
-    /// Lower-bounding search - Cortes et al. TACAS'23
-    LowerBounding,
-    /// Tri core prototype
-    TriCore,
-    /// Divide and conquer prototype
-    DivCon,
-}
-
-impl fmt::Display for Algorithm {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Algorithm::PMinimal => write!(f, "p-minimal"),
-            Algorithm::PMinimalDpw => write!(f, "p-minimal-dpw"),
-            Algorithm::LowerBounding => write!(f, "lower-bounding"),
-            Algorithm::TriCore => write!(f, "tri-core"),
-            Algorithm::DivCon => write!(f, "div-con"),
         }
     }
 }
@@ -263,17 +338,15 @@ impl fmt::Display for EnumOptionsArg {
 }
 
 pub struct Cli {
-    pub options: Options,
     pub limits: Limits,
     pub file_format: FileFormat,
+    pub opb_options: fio::opb::Options,
     pub inst_path: PathBuf,
-    pub alg: Algorithm,
     pub preprocessing: bool,
     pub maxpre_techniques: String,
-    pub cadical_config: rustsat_cadical::Config,
     pub reindexing: bool,
     pub maxpre_reindexing: bool,
-    pub opb_options: fio::opb::Options,
+    pub cadical_config: rustsat_cadical::Config,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,
@@ -281,69 +354,33 @@ pub struct Cli {
     print_stats: bool,
     color: concolor_clap::Color,
     logger_config: LoggerConfig,
+    pub alg: Algorithm,
 }
 
-macro_rules! none_if_zero {
-    ($val:expr) => {
-        if $val == 0 {
-            None
-        } else {
-            Some($val)
+pub enum Algorithm {
+    PMinimal(KernelOptions),
+    PMinimalDpw(KernelOptions),
+    LowerBounding(KernelOptions),
+    TriCore(KernelOptions),
+    DivCon(DivConOptions),
+}
+
+impl fmt::Display for Algorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Algorithm::PMinimal(_) => write!(f, "p-pminimal"),
+            Algorithm::PMinimalDpw(_) => write!(f, "p-pminimal-dpw"),
+            Algorithm::LowerBounding(_) => write!(f, "lower-bounding"),
+            Algorithm::TriCore(_) => write!(f, "tri-core"),
+            Algorithm::DivCon(_) => write!(f, "div-con"),
         }
-    };
+    }
 }
 
 impl Cli {
     pub fn init() -> Self {
-        let args = CliArgs::parse();
-        let cli = Self {
-            options: Options {
-                enumeration: match args.enumeration {
-                    EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
-                    EnumOptionsArg::Solutions => {
-                        EnumOptions::Solutions(none_if_zero!(args.enumeration_limit))
-                    }
-                    EnumOptionsArg::ParetoMCS => {
-                        EnumOptions::PMCSs(none_if_zero!(args.enumeration_limit))
-                    }
-                },
-                heuristic_improvements: HeurImprOptions {
-                    solution_tightening: args.solution_tightening,
-                },
-                reserve_enc_vars: args.reserve_encoding_vars.is_true(),
-                solution_guided_search: args.solution_guided_search.is_true(),
-                bioptsat: args.bioptsat.is_true(),
-            },
-            limits: Limits {
-                pps: none_if_zero!(args.pp_limit),
-                sols: none_if_zero!(args.sol_limit),
-                candidates: none_if_zero!(args.candidate_limit),
-                oracle_calls: none_if_zero!(args.oracle_call_limit),
-            },
-            file_format: args.file_format,
-            inst_path: args.inst_path.clone(),
-            alg: args.algorithm,
-            preprocessing: args.preprocessing.is_true(),
-            maxpre_techniques: args.maxpre_techniques,
-            cadical_config: args.cadical_config.into(),
-            reindexing: args.reindexing.is_true(),
-            maxpre_reindexing: args.maxpre_reindexing.is_true(),
-            opb_options: fio::opb::Options {
-                first_var_idx: args.first_var_idx,
-                ..fio::opb::Options::default()
-            },
-            stdout: BufferWriter::stdout(match args.color.color {
-                concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
-                concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
-                concolor_clap::ColorChoice::Auto => {
-                    if atty::is(atty::Stream::Stdout) {
-                        termcolor::ColorChoice::Auto
-                    } else {
-                        termcolor::ColorChoice::Never
-                    }
-                }
-            }),
-            stderr: BufferWriter::stderr(match args.color.color {
+        let stdout = |color: concolor_clap::Color| {
+            BufferWriter::stdout(match color.color {
                 concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
                 concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
                 concolor_clap::ColorChoice::Auto => {
@@ -353,34 +390,193 @@ impl Cli {
                         termcolor::ColorChoice::Never
                     }
                 }
-            }),
-            print_solver_config: args.print_solver_config,
-            print_solutions: args.print_solutions,
-            print_stats: !args.no_print_stats,
-            color: args.color,
-            logger_config: LoggerConfig {
-                log_candidates: args.log_candidates || args.verbosity >= 2,
-                log_solutions: args.log_solutions,
-                log_non_dom: args.log_non_dom || args.verbosity >= 1,
-                log_oracle_calls: args.log_oracle_calls || args.verbosity >= 3,
-                log_heuristic_obj_improvement: args.log_heuristic_obj_improvement
-                    || args.verbosity >= 3,
-                log_fence: args.log_fence || args.verbosity >= 2,
-                log_routines: std::cmp::max(args.log_routines, args.verbosity as usize * 2),
-                log_bound_points: args.log_bound_points || args.verbosity >= 2,
+            })
+        };
+        let stderr = |color: concolor_clap::Color| {
+            BufferWriter::stderr(match color.color {
+                concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
+                concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
+                concolor_clap::ColorChoice::Auto => {
+                    if atty::is(atty::Stream::Stderr) {
+                        termcolor::ColorChoice::Auto
+                    } else {
+                        termcolor::ColorChoice::Never
+                    }
+                }
+            })
+        };
+        let kernel_opts = |shared: SharedArgs| KernelOptions {
+            enumeration: match shared.enumeration.enumeration {
+                EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
+                EnumOptionsArg::Solutions => {
+                    EnumOptions::Solutions(none_if_zero!(shared.enumeration.enumeration_limit))
+                }
+                EnumOptionsArg::ParetoMCS => {
+                    EnumOptions::PMCSs(none_if_zero!(shared.enumeration.enumeration_limit))
+                }
+            },
+            reserve_enc_vars: shared.reserve_encoding_vars.into(),
+            heuristic_improvements: HeurImprOptions {
+                solution_tightening: shared.solution_tightening,
+            },
+            solution_guided_search: shared.solution_guided_search.into(),
+        };
+        let cli = match CliArgs::parse().command {
+            AlgorithmCommand::PMinimal { shared } => Cli {
+                limits: (&shared.limits).into(),
+                file_format: shared.file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: shared.file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: shared.file.inst_path.clone(),
+                preprocessing: shared.prepro.preprocessing.into(),
+                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                reindexing: shared.prepro.reindexing.into(),
+                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                cadical_config: shared.cadical_config.into(),
+                stdout: stdout(shared.log.color),
+                stderr: stderr(shared.log.color),
+                print_solver_config: shared.log.print_solver_config,
+                print_solutions: shared.log.print_solutions,
+                print_stats: !shared.log.no_print_stats,
+                color: shared.log.color,
+                logger_config: (&shared.log).into(),
+                alg: Algorithm::PMinimal(kernel_opts(shared)),
+            },
+            AlgorithmCommand::PMinimalDpw { shared } => Cli {
+                limits: (&shared.limits).into(),
+                file_format: shared.file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: shared.file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: shared.file.inst_path.clone(),
+                preprocessing: shared.prepro.preprocessing.into(),
+                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                reindexing: shared.prepro.reindexing.into(),
+                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                cadical_config: shared.cadical_config.into(),
+                stdout: stdout(shared.log.color),
+                stderr: stderr(shared.log.color),
+                print_solver_config: shared.log.print_solver_config,
+                print_solutions: shared.log.print_solutions,
+                print_stats: !shared.log.no_print_stats,
+                color: shared.log.color,
+                logger_config: (&shared.log).into(),
+                alg: Algorithm::PMinimalDpw(kernel_opts(shared)),
+            },
+            AlgorithmCommand::LowerBounding { shared, log_fence } => Cli {
+                limits: (&shared.limits).into(),
+                file_format: shared.file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: shared.file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: shared.file.inst_path.clone(),
+                preprocessing: shared.prepro.preprocessing.into(),
+                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                reindexing: shared.prepro.reindexing.into(),
+                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                cadical_config: shared.cadical_config.into(),
+                stdout: stdout(shared.log.color),
+                stderr: stderr(shared.log.color),
+                print_solver_config: shared.log.print_solver_config,
+                print_solutions: shared.log.print_solutions,
+                print_stats: !shared.log.no_print_stats,
+                color: shared.log.color,
+                logger_config: {
+                    let mut conf: LoggerConfig = (&shared.log).into();
+                    conf.log_fence = log_fence || shared.log.verbosity >= 2;
+                    conf
+                },
+                alg: Algorithm::LowerBounding(kernel_opts(shared)),
+            },
+            AlgorithmCommand::TriCore {
+                shared,
+                log_bound_points,
+            } => Cli {
+                limits: (&shared.limits).into(),
+                file_format: shared.file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: shared.file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: shared.file.inst_path.clone(),
+                preprocessing: shared.prepro.preprocessing.into(),
+                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                reindexing: shared.prepro.reindexing.into(),
+                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                cadical_config: shared.cadical_config.into(),
+                stdout: stdout(shared.log.color),
+                stderr: stderr(shared.log.color),
+                print_solver_config: shared.log.print_solver_config,
+                print_solutions: shared.log.print_solutions,
+                print_stats: !shared.log.no_print_stats,
+                color: shared.log.color,
+                logger_config: {
+                    let mut conf: LoggerConfig = (&shared.log).into();
+                    conf.log_bound_points = log_bound_points || shared.log.verbosity >= 2;
+                    conf
+                },
+                alg: Algorithm::TriCore(kernel_opts(shared)),
+            },
+            AlgorithmCommand::DivCon {
+                shared,
+                bioptsat,
+                log_bound_points,
+            } => Cli {
+                limits: (&shared.limits).into(),
+                file_format: shared.file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: shared.file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: shared.file.inst_path.clone(),
+                preprocessing: shared.prepro.preprocessing.into(),
+                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                reindexing: shared.prepro.reindexing.into(),
+                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                cadical_config: shared.cadical_config.into(),
+                stdout: stdout(shared.log.color),
+                stderr: stderr(shared.log.color),
+                print_solver_config: shared.log.print_solver_config,
+                print_solutions: shared.log.print_solutions,
+                print_stats: !shared.log.no_print_stats,
+                color: shared.log.color,
+                logger_config: {
+                    let mut conf: LoggerConfig = (&shared.log).into();
+                    conf.log_bound_points = log_bound_points || shared.log.verbosity >= 2;
+                    conf
+                },
+                alg: Algorithm::DivCon(DivConOptions {
+                    kernel: kernel_opts(shared),
+                    bioptsat: bioptsat.into(),
+                }),
             },
         };
-        #[cfg(not(feature = "sol-tightening"))]
-        if cli.options.heuristic_improvements.solution_tightening != HeurImprWhen::Never {
-            cli.warning("requested solution tightening but solver is built without this feature")
-                .expect("IO error during CLI initialization");
-        }
-        #[cfg(not(feature = "phasing"))]
-        if cli.options.solution_guided_search {
-            cli.warning(
-                "requested solution guided search but solver is built without this feature",
-            )
-            .expect("IO error during CLI initialization");
+        #[cfg(any(not(feature = "sol-tightening"), not(feature = "phasing")))]
+        match &cli.alg {
+            Algorithm::PMinimal(opts)
+            | Algorithm::PMinimalDpw(opts)
+            | Algorithm::LowerBounding(opts)
+            | Algorithm::TriCore(opts)
+            | Algorithm::DivCon(DivConOptions { kernel: opts, .. }) => {
+                #[cfg(not(feature = "sol-tightening"))]
+                if opts.heuristic_improvements.solution_tightening != HeurImprWhen::Never {
+                    cli.warning(
+                        "requested solution tightening but solver is built without this feature",
+                    )
+                    .expect("IO error during CLI initialization");
+                }
+                #[cfg(not(feature = "phasing"))]
+                if opts.solution_guided_search {
+                    cli.warning(
+                        "requested solution guided search but solver is built without this feature",
+                    )
+                    .expect("IO error during CLI initialization");
+                }
+            }
         }
         cli
     }
@@ -482,16 +678,37 @@ impl Cli {
             buffer.set_color(ColorSpec::new().set_bold(true))?;
             writeln!(buffer, ": ")?;
             buffer.reset()?;
-            Self::print_parameter(
-                &mut buffer,
-                "enumeration",
-                EnumPrinter::new(self.options.enumeration),
-            )?;
-            Self::print_parameter(
-                &mut buffer,
-                "solution-tightening",
-                self.options.heuristic_improvements.solution_tightening,
-            )?;
+            match self.alg {
+                Algorithm::PMinimal(opts) | Algorithm::PMinimalDpw(opts) => {
+                    Self::print_parameter(
+                        &mut buffer,
+                        "enumeration",
+                        EnumPrinter::new(opts.enumeration),
+                    )?;
+                    Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
+                }
+                Algorithm::LowerBounding(opts) | Algorithm::TriCore(opts) => {
+                    Self::print_parameter(
+                        &mut buffer,
+                        "enumeration",
+                        EnumPrinter::new(opts.enumeration),
+                    )?;
+                    Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
+                }
+                Algorithm::DivCon(opts) => {
+                    Self::print_parameter(
+                        &mut buffer,
+                        "enumeration",
+                        EnumPrinter::new(opts.kernel.enumeration),
+                    )?;
+                    Self::print_parameter(
+                        &mut buffer,
+                        "reserve-enc-vars",
+                        opts.kernel.reserve_enc_vars,
+                    )?;
+                    Self::print_parameter(&mut buffer, "bioptsat", opts.bioptsat)?;
+                }
+            }
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;
             Self::print_parameter(&mut buffer, "sol-limit", OptVal::new(self.limits.sols))?;
             Self::print_parameter(

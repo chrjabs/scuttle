@@ -7,7 +7,7 @@ use std::fmt;
 use rustsat::solvers::{SolverError, SolverResult, SolverStats};
 
 pub mod options;
-pub use options::{Limits, Options};
+pub use options::{DivConOptions, KernelOptions, Limits};
 
 pub mod types;
 use types::NonDomPoint;

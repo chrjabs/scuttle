@@ -6,31 +6,55 @@ use std::fmt;
 
 use crate::Phase;
 
-/// Configuration options for the $P$-minimal solver
+/// Solver-wide configuration options
 #[derive(Clone, Copy)]
-pub struct Options {
+pub struct KernelOptions {
     /// The Pareto point enumeration mode
     pub enumeration: EnumOptions,
-    /// Heuristic solution improvement options
-    pub heuristic_improvements: HeurImprOptions,
     /// Reserve encoding variables in advance
     pub reserve_enc_vars: bool,
+    /// Heuristic solution improvement options
+    pub heuristic_improvements: HeurImprOptions,
     /// Solution-guided search (aka phasing solutions)
     pub solution_guided_search: bool,
+}
+
+impl Default for KernelOptions {
+    fn default() -> Self {
+        KernelOptions {
+            enumeration: Default::default(),
+            reserve_enc_vars: false,
+            heuristic_improvements: Default::default(),
+            solution_guided_search: false,
+        }
+    }
+}
+
+impl KernelOptions {
+    pub fn set_enumeration(&mut self, enumeration: EnumOptions) {
+        self.enumeration = enumeration;
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DivConOptions {
+    pub kernel: KernelOptions,
     /// Using BiOptSat as recursion anchor in DivCon
     pub bioptsat: bool,
 }
 
-impl Default for Options {
-    /// Get the default options
+impl Default for DivConOptions {
     fn default() -> Self {
-        Options {
-            enumeration: Default::default(),
-            heuristic_improvements: Default::default(),
-            reserve_enc_vars: false,
-            solution_guided_search: false,
+        Self {
+            kernel: Default::default(),
             bioptsat: true,
         }
+    }
+}
+
+impl DivConOptions {
+    pub fn set_enumeration(&mut self, enumeration: EnumOptions) {
+        self.kernel.set_enumeration(enumeration)
     }
 }
 

@@ -104,32 +104,32 @@ fn main() -> Result<(), Error> {
     };
 
     match cli.alg {
-        Algorithm::PMinimal => generic_main(
-            handle_term!(PMin::new_default_blocking(inst, oracle, cli.options), cli),
+        Algorithm::PMinimal(opts) => generic_main(
+            handle_term!(PMin::new_default_blocking(inst, oracle, opts), cli),
             cli,
             prepro,
             reindexer,
         ),
-        Algorithm::PMinimalDpw => generic_main(
-            handle_term!(PMinDpw::new_default_blocking(inst, oracle, cli.options), cli),
+        Algorithm::PMinimalDpw(opts) => generic_main(
+            handle_term!(PMinDpw::new_default_blocking(inst, oracle, opts), cli),
             cli,
             prepro,
             reindexer,
         ),
-        Algorithm::LowerBounding => generic_main(
-            handle_term!(Lb::new_default_blocking(inst, oracle, cli.options), cli),
+        Algorithm::LowerBounding(opts) => generic_main(
+            handle_term!(Lb::new_default_blocking(inst, oracle, opts), cli),
             cli,
             prepro,
             reindexer,
         ),
-        Algorithm::TriCore => generic_main(
-            handle_term!(Tc::new_default_blocking(inst, oracle, cli.options), cli),
+        Algorithm::TriCore(opts) => generic_main(
+            handle_term!(Tc::new_default_blocking(inst, oracle, opts), cli),
             cli,
             prepro,
             reindexer,
         ),
-        Algorithm::DivCon => generic_main(
-            handle_term!(Dc::new_default_blocking(inst, oracle, cli.options), cli),
+        Algorithm::DivCon(opts) => generic_main(
+            handle_term!(Dc::new_default_blocking(inst, oracle, opts), cli),
             cli,
             prepro,
             reindexer,

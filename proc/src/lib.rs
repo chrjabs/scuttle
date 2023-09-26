@@ -13,12 +13,13 @@ struct KernelOpts {
 pub fn kernel_functions_derive(input: TokenStream) -> TokenStream {
     // Construct a representation of the code as a syntax tree to manipulate
     let ast = parse_macro_input!(input);
-    let opts = KernelOpts::from_derive_input(&ast).expect("Wrong options for KernelFunctions derive macro");
+    let opts = KernelOpts::from_derive_input(&ast)
+        .expect("Wrong options for KernelFunctions derive macro");
 
     if let Some(kernel) = opts.kernel.as_ref() {
         match kernel {
             syn::Expr::Field(_) => (),
-            _ => panic!("kernel attribute must be a struct field access")
+            _ => panic!("kernel attribute must be a struct field access"),
         }
     }
 
@@ -43,7 +44,7 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
             panic!("KernelFunctions derive needs a generic for the oracle type called 'O'")
         }
     }
-    
+
     let kernel = if let Some(kernel) = opts.kernel {
         kernel
     } else {
@@ -101,13 +102,14 @@ struct SolveOpts {
 #[proc_macro_derive(Solve, attributes(solve))]
 pub fn solve_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input);
-    let kopts = KernelOpts::from_derive_input(&ast).expect("Wrong options for KernelFunctions derive macro");
+    let kopts = KernelOpts::from_derive_input(&ast)
+        .expect("Wrong options for KernelFunctions derive macro");
     let sopts = SolveOpts::from_derive_input(&ast).expect("Wrong options for Solve derive macro");
 
     if let Some(kernel) = kopts.kernel.as_ref() {
         match kernel {
             syn::Expr::Field(_) => (),
-            _ => panic!("kernel attribute must be a struct field access")
+            _ => panic!("kernel attribute must be a struct field access"),
         }
     }
 
@@ -132,7 +134,7 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
             panic!("Solve derive needs a generic for the oracle type called 'O'")
         }
     }
-    
+
     let kernel = if let Some(kernel) = kopts.kernel {
         kernel
     } else {

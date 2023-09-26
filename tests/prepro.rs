@@ -332,15 +332,35 @@ macro_rules! Dc {() => { scuttle::solver::divcon::SeqDivCon<
     fn(rustsat::types::Assignment) -> rustsat::types::Clause,
 >};}
 
-generate_tests!(pmin, PMin!(), scuttle::Options::default(), "[[uvsrgc]VRTG]");
+generate_tests!(
+    pmin,
+    PMin!(),
+    scuttle::KernelOptions::default(),
+    "[[uvsrgc]VRTG]"
+);
 
-generate_tests!(lb, Lb!(), scuttle::Options::default(), "[[uvsrgc]VRTG]");
+generate_tests!(
+    lb,
+    Lb!(),
+    scuttle::KernelOptions::default(),
+    "[[uvsrgc]VRTG]"
+);
 
-generate_tests!(tc, Tc!(), scuttle::Options::default(), "[[uvsrgc]VRTG]");
+generate_tests!(
+    tc,
+    Tc!(),
+    scuttle::KernelOptions::default(),
+    "[[uvsrgc]VRTG]"
+);
 
-generate_tests!(dc, Dc!(), scuttle::Options::default(), "[[uvsrgc]VRTG]");
+generate_tests!(
+    dc,
+    Dc!(),
+    scuttle::DivConOptions::default(),
+    "[[uvsrgc]VRTG]"
+);
 
 #[test]
 fn debug() {
-    parkinsons!(Dc!(), scuttle::Options::default(), "[[uvsrgc]VRTG]")
+    parkinsons!(Dc!(), scuttle::DivConOptions::default(), "[[uvsrgc]VRTG]")
 }

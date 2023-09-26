@@ -18,7 +18,7 @@
 
 use crate::{
     solver::ObjEncoding, types::ParetoFront, EncodingStats, ExtendedSolveStats, KernelFunctions,
-    Limits, Options, Phase, Solve, Termination,
+    KernelOptions, Limits, Phase, Solve, Termination,
 };
 use rustsat::{
     encodings,
@@ -59,7 +59,7 @@ where
     pub fn new_default_blocking(
         inst: MultiOptInstance<VM>,
         oracle: O,
-        opts: Options,
+        opts: KernelOptions,
     ) -> Result<Self, Termination> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
@@ -81,7 +81,7 @@ where
 {
     pub fn new_default_oracle(
         inst: MultiOptInstance<VM>,
-        opts: Options,
+        opts: KernelOptions,
         block_clause_gen: BCG,
     ) -> Result<Self, Termination> {
         let kernel = SolverKernel::new(inst, O::default(), block_clause_gen, opts)?;
@@ -96,7 +96,10 @@ where
     VM: ManageVars,
     O: SolveIncremental + Default,
 {
-    pub fn new_defaults(inst: MultiOptInstance<VM>, opts: Options) -> Result<Self, Termination> {
+    pub fn new_defaults(
+        inst: MultiOptInstance<VM>,
+        opts: KernelOptions,
+    ) -> Result<Self, Termination> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             O::default(),
@@ -120,7 +123,7 @@ where
     pub fn new(
         inst: MultiOptInstance<VM>,
         oracle: O,
-        opts: Options,
+        opts: KernelOptions,
         block_clause_gen: BCG,
     ) -> Result<Self, Termination> {
         let kernel = SolverKernel::new(inst, oracle, block_clause_gen, opts)?;
