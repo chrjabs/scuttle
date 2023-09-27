@@ -45,9 +45,11 @@ enum AlgorithmCommand {
     PMinimal {
         #[command(flatten)]
         shared: SharedArgs,
+        #[command(flatten)]
+        obj_encs: ObjEncArgs,
     },
-    /// P-Minimal model enumeration with the DPW encoding and coarse convergence
-    PMinimalDpw {
+    /// BiOptSat Linear Sat-Unsat - Jabs et al. SAT'22
+    Bioptsat {
         #[command(flatten)]
         shared: SharedArgs,
     },
@@ -55,6 +57,8 @@ enum AlgorithmCommand {
     LowerBounding {
         #[command(flatten)]
         shared: SharedArgs,
+        #[command(flatten)]
+        obj_encs: ObjEncArgs,
         /// Log fence updates
         #[arg(long)]
         log_fence: bool,
@@ -104,6 +108,16 @@ struct SharedArgs {
     file: FileArgs,
     #[command(flatten)]
     log: LogArgs,
+}
+
+#[derive(Args)]
+struct ObjEncArgs {
+    /// The encoding to use for weighted objectives
+    #[arg(long, default_value_t = PbEncoding::default())]
+    obj_pb_encoding: PbEncoding,
+    /// The encoding to use for unweighted objectivesh
+    #[arg(long, default_value_t = CardEncoding::default())]
+    obj_card_encoding: CardEncoding,
 }
 
 #[derive(Args)]
@@ -221,6 +235,39 @@ impl Into<LoggerConfig> for &LogArgs {
             log_fence: false,
             log_routines: std::cmp::max(self.log_routines, self.verbosity as usize * 2),
             log_bound_points: false,
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum, Default)]
+pub enum PbEncoding {
+    /// Generalized totalizer encoding - Joshi et al. CP'15
+    #[default]
+    Gte,
+    /// Dynamic polynomial watchdog encoding - Paxian et al. SAT'18
+    Dpw,
+}
+
+impl fmt::Display for PbEncoding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PbEncoding::Gte => write!(f, "gte"),
+            PbEncoding::Dpw => write!(f, "dpw"),
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum, Default)]
+pub enum CardEncoding {
+    /// Totalizer encoding - Ballieux and Boufkhad CP'03
+    #[default]
+    Tot,
+}
+
+impl fmt::Display for CardEncoding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CardEncoding::Tot => write!(f, "tot"),
         }
     }
 }
@@ -347,6 +394,8 @@ pub struct Cli {
     pub reindexing: bool,
     pub maxpre_reindexing: bool,
     pub cadical_config: rustsat_cadical::Config,
+    pub obj_pb_enc: PbEncoding,
+    pub obj_card_enc: CardEncoding,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,
@@ -359,7 +408,7 @@ pub struct Cli {
 
 pub enum Algorithm {
     PMinimal(KernelOptions),
-    PMinimalDpw(KernelOptions),
+    BiOptSat(KernelOptions),
     LowerBounding(KernelOptions),
     TriCore(KernelOptions),
     DivCon(DivConOptions),
@@ -369,7 +418,7 @@ impl fmt::Display for Algorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Algorithm::PMinimal(_) => write!(f, "p-pminimal"),
-            Algorithm::PMinimalDpw(_) => write!(f, "p-pminimal-dpw"),
+            Algorithm::BiOptSat(_) => write!(f, "bioptsat"),
             Algorithm::LowerBounding(_) => write!(f, "lower-bounding"),
             Algorithm::TriCore(_) => write!(f, "tri-core"),
             Algorithm::DivCon(_) => write!(f, "div-con"),
@@ -422,7 +471,7 @@ impl Cli {
             solution_guided_search: shared.solution_guided_search.into(),
         };
         let cli = match CliArgs::parse().command {
-            AlgorithmCommand::PMinimal { shared } => Cli {
+            AlgorithmCommand::PMinimal { shared, obj_encs } => Cli {
                 limits: (&shared.limits).into(),
                 file_format: shared.file.file_format,
                 opb_options: fio::opb::Options {
@@ -435,6 +484,8 @@ impl Cli {
                 reindexing: shared.prepro.reindexing.into(),
                 maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
                 cadical_config: shared.cadical_config.into(),
+                obj_pb_enc: obj_encs.obj_pb_encoding,
+                obj_card_enc: obj_encs.obj_card_encoding,
                 stdout: stdout(shared.log.color),
                 stderr: stderr(shared.log.color),
                 print_solver_config: shared.log.print_solver_config,
@@ -444,7 +495,12 @@ impl Cli {
                 logger_config: (&shared.log).into(),
                 alg: Algorithm::PMinimal(kernel_opts(shared)),
             },
-            AlgorithmCommand::PMinimalDpw { shared } => Cli {
+            AlgorithmCommand::Bioptsat { shared } => todo!(),
+            AlgorithmCommand::LowerBounding {
+                shared,
+                obj_encs,
+                log_fence,
+            } => Cli {
                 limits: (&shared.limits).into(),
                 file_format: shared.file.file_format,
                 opb_options: fio::opb::Options {
@@ -457,28 +513,8 @@ impl Cli {
                 reindexing: shared.prepro.reindexing.into(),
                 maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
                 cadical_config: shared.cadical_config.into(),
-                stdout: stdout(shared.log.color),
-                stderr: stderr(shared.log.color),
-                print_solver_config: shared.log.print_solver_config,
-                print_solutions: shared.log.print_solutions,
-                print_stats: !shared.log.no_print_stats,
-                color: shared.log.color,
-                logger_config: (&shared.log).into(),
-                alg: Algorithm::PMinimalDpw(kernel_opts(shared)),
-            },
-            AlgorithmCommand::LowerBounding { shared, log_fence } => Cli {
-                limits: (&shared.limits).into(),
-                file_format: shared.file.file_format,
-                opb_options: fio::opb::Options {
-                    first_var_idx: shared.file.first_var_idx,
-                    ..Default::default()
-                },
-                inst_path: shared.file.inst_path.clone(),
-                preprocessing: shared.prepro.preprocessing.into(),
-                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                reindexing: shared.prepro.reindexing.into(),
-                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                cadical_config: shared.cadical_config.into(),
+                obj_pb_enc: obj_encs.obj_pb_encoding,
+                obj_card_enc: obj_encs.obj_card_encoding,
                 stdout: stdout(shared.log.color),
                 stderr: stderr(shared.log.color),
                 print_solver_config: shared.log.print_solver_config,
@@ -508,6 +544,8 @@ impl Cli {
                 reindexing: shared.prepro.reindexing.into(),
                 maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
                 cadical_config: shared.cadical_config.into(),
+                obj_pb_enc: Default::default(),
+                obj_card_enc: Default::default(),
                 stdout: stdout(shared.log.color),
                 stderr: stderr(shared.log.color),
                 print_solver_config: shared.log.print_solver_config,
@@ -538,6 +576,8 @@ impl Cli {
                 reindexing: shared.prepro.reindexing.into(),
                 maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
                 cadical_config: shared.cadical_config.into(),
+                obj_pb_enc: Default::default(),
+                obj_card_enc: Default::default(),
                 stdout: stdout(shared.log.color),
                 stderr: stderr(shared.log.color),
                 print_solver_config: shared.log.print_solver_config,
@@ -679,15 +719,17 @@ impl Cli {
             writeln!(buffer, ": ")?;
             buffer.reset()?;
             match self.alg {
-                Algorithm::PMinimal(opts) | Algorithm::PMinimalDpw(opts) => {
+                Algorithm::PMinimal(opts) | Algorithm::LowerBounding(opts) => {
                     Self::print_parameter(
                         &mut buffer,
                         "enumeration",
                         EnumPrinter::new(opts.enumeration),
                     )?;
                     Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
+                    Self::print_parameter(&mut buffer, "obj-pb-encoding", self.obj_pb_enc)?;
+                    Self::print_parameter(&mut buffer, "obj-card-encoding", self.obj_card_enc)?;
                 }
-                Algorithm::LowerBounding(opts) | Algorithm::TriCore(opts) => {
+                Algorithm::BiOptSat(opts) | Algorithm::TriCore(opts) => {
                     Self::print_parameter(
                         &mut buffer,
                         "enumeration",

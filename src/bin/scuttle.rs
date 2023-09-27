@@ -13,7 +13,7 @@ use rustsat::{
 use rustsat_cadical::CaDiCaL;
 use scuttle::{
     self,
-    cli::{Algorithm, Cli, FileFormat},
+    cli::{Algorithm, CardEncoding, Cli, FileFormat, PbEncoding},
     solver::{divcon::SeqDivCon, tricore::TriCore},
     LoggerError, LowerBounding, PMinimal, Solve,
 };
@@ -34,33 +34,42 @@ macro_rules! handle_term {
     };
 }
 
+macro_rules! main_with_obj_encs {
+    ($s:ident, $pb:expr, $card: expr, $inst:expr, $oracle:expr, $opts:expr, $cli:expr, $prepro:expr, $reind:expr) => {{
+        match $pb {
+            PbEncoding::Gte => match $card {
+                CardEncoding::Tot => {
+                    type T<VM> = $s<pb::GeneralizedTotalizer, card::Totalizer, VM>;
+                    generic_main(
+                        handle_term!(T::new_default_blocking($inst, $oracle, $opts), $cli),
+                        $cli,
+                        $prepro,
+                        $reind,
+                    )
+                }
+            },
+            PbEncoding::Dpw => match $card {
+                CardEncoding::Tot => {
+                    type T<VM> = $s<pb::DynamicPolyWatchdog, card::Totalizer, VM>;
+                    generic_main(
+                        handle_term!(T::new_default_blocking($inst, $oracle, $opts), $cli),
+                        $cli,
+                        $prepro,
+                        $reind,
+                    )
+                }
+            },
+        }
+    }};
+}
+
 /// The SAT solver used
 type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
-type PMin<VM> = PMinimal<
-    pb::DefIncUpperBounding,
-    card::DefIncUpperBounding,
-    VM,
-    fn(Assignment) -> Clause,
-    Oracle,
->;
-/// P-Minimal instantiation used (DPW)
-type PMinDpw<VM> = PMinimal<
-    pb::DynamicPolyWatchdog,
-    card::DefIncUpperBounding,
-    VM,
-    fn(Assignment) -> Clause,
-    Oracle,
->;
+type PMin<PBE, CE, VM> = PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
 /// Lower-bounding instantiation used
-type Lb<VM> = LowerBounding<
-    pb::DefIncUpperBounding,
-    card::DefIncUpperBounding,
-    VM,
-    fn(Assignment) -> Clause,
-    Oracle,
->;
+type Lb<PBE, CE, VM> = LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
 /// Tri-core prototype used
 type Tc<VM> = TriCore<VM, Oracle, fn(Assignment) -> Clause>;
 /// Divide and Conquer prototype used
@@ -104,23 +113,28 @@ fn main() -> Result<(), Error> {
     };
 
     match cli.alg {
-        Algorithm::PMinimal(opts) => generic_main(
-            handle_term!(PMin::new_default_blocking(inst, oracle, opts), cli),
+        Algorithm::PMinimal(opts) => main_with_obj_encs!(
+            PMin,
+            cli.obj_pb_enc,
+            cli.obj_card_enc,
+            inst,
+            oracle,
+            opts,
             cli,
             prepro,
-            reindexer,
+            reindexer
         ),
-        Algorithm::PMinimalDpw(opts) => generic_main(
-            handle_term!(PMinDpw::new_default_blocking(inst, oracle, opts), cli),
+        Algorithm::BiOptSat(opts) => todo!(),
+        Algorithm::LowerBounding(opts) => main_with_obj_encs!(
+            Lb,
+            cli.obj_pb_enc,
+            cli.obj_card_enc,
+            inst,
+            oracle,
+            opts,
             cli,
             prepro,
-            reindexer,
-        ),
-        Algorithm::LowerBounding(opts) => generic_main(
-            handle_term!(Lb::new_default_blocking(inst, oracle, opts), cli),
-            cli,
-            prepro,
-            reindexer,
+            reindexer
         ),
         Algorithm::TriCore(opts) => generic_main(
             handle_term!(Tc::new_default_blocking(inst, oracle, opts), cli),
