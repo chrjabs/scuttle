@@ -1,18 +1,22 @@
 //! # Divide and Conquer Multi-Objective Optimization
 
+use std::cell::RefCell;
+
 use rustsat::{
     encodings::{
         atomics,
-        card::dbtotalizer::{Node, TotDb},
+        card::{
+            self,
+            dbtotalizer::{Node, TotDb},
+        },
         nodedb::{NodeById, NodeCon, NodeLike},
-        pb::dpw,
+        pb::dpw::{
+            self,
+            referenced::{DynamicPolyWatchdog, DynamicPolyWatchdogCell},
+        },
     },
     instances::ManageVars,
-    lit,
-    solvers::{
-        SolveIncremental, SolveStats,
-        SolverResult::{Sat, Unsat},
-    },
+    solvers::{SolveIncremental, SolveStats},
     types::{Assignment, Clause, Lit},
 };
 use scuttle_proc::oracle_bounds;
@@ -24,7 +28,7 @@ use crate::{types::NonDomPoint, Termination};
 
 use super::{
     coreguided::{OllReformulation, TotOutput},
-    SolverKernel,
+    ObjEncoding, Objective, SolverKernel,
 };
 
 #[derive(Clone)]
@@ -112,6 +116,7 @@ where
         (inc_obj, dec_obj): (usize, usize),
         base_assumps: &[Lit],
         starting_point: Option<(usize, Assignment)>,
+        (inc_lb, dec_lb): (Option<usize>, Option<usize>),
         lookup: Lookup,
         collector: &mut Col,
     ) -> Result<(), Termination>
@@ -119,8 +124,6 @@ where
         Lookup: Fn(usize) -> Option<usize>,
         Col: Extend<NonDomPoint>,
     {
-        self.kernel.log_routine_start("bioptsat")?;
-
         if self.encodings[inc_obj].is_none() {
             self.encodings[inc_obj] = Some(self.build_obj_encoding(inc_obj));
         }
@@ -128,74 +131,32 @@ where
             self.encodings[dec_obj] = Some(self.build_obj_encoding(dec_obj));
         }
 
-        let mut assumps = Vec::from(base_assumps);
-        let (mut inc_cost, mut sol) = if let Some(bound) = starting_point {
-            bound
-        } else {
-            let res = self.kernel.solve_assumps(&assumps)?;
-            debug_assert_eq!(res, Sat);
-            let mut sol = self.kernel.oracle.solution(self.kernel.max_orig_var)?;
-            let cost = self
-                .kernel
-                .get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
-            (cost, sol)
-        };
-        let mut dec_cost;
-        let mut last_inc_cost = None;
-        loop {
-            // minimize inc_obj
-            (inc_cost, sol) = if let Some(res) = self.linsu(
-                inc_obj,
-                &assumps,
-                Some((inc_cost, Some(sol))),
-                last_inc_cost.map(|lc| lc + 1),
-            )? {
-                res
-            } else {
-                // no solutions
-                return Ok(());
-            };
-            last_inc_cost = Some(inc_cost);
-            dec_cost = self
-                .kernel
-                .get_cost_with_heuristic_improvements(dec_obj, &mut sol, false)?;
-            if let Some(found) = lookup(inc_cost) {
-                dec_cost = found;
-            } else {
-                // bound inc_obj
-                assumps.extend(self.bound_objective(inc_obj, inc_cost));
-                // minimize dec_obj
-                dec_cost = self
-                    .linsu_yield(
-                        dec_obj,
-                        &assumps,
-                        Some((dec_cost, Some(sol))),
-                        None,
-                        collector,
-                    )?
-                    .unwrap();
-            };
-            // termination condition 1: can't decrease decreasing objective further
-            if dec_cost <= self.reforms[dec_obj].offset {
-                break;
-            }
-            // skip to next non-dom
-            assumps.drain(base_assumps.len()..);
-            assumps.extend(self.bound_objective(dec_obj, dec_cost - 1));
-            (sol, inc_cost) = match self.kernel.solve_assumps(&assumps)? {
-                Sat => {
-                    let mut sol = self.kernel.oracle.solution(self.kernel.max_orig_var)?;
-                    let cost = self
-                        .kernel
-                        .get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
-                    (sol, cost)
-                }
-                Unsat => break,
-                _ => panic!(),
-            };
-        }
-        self.kernel.log_routine_end()?;
-        return Ok(());
+        let tot_db_cell = RefCell::from(&mut self.tot_db);
+
+        let mut inc_enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
+            DynamicPolyWatchdogCell::new(
+                Some(self.encodings[inc_obj].as_ref().unwrap().structure.clone()),
+                &tot_db_cell,
+            ),
+            self.encodings[inc_obj].as_ref().unwrap().offset,
+        );
+        let mut dec_enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
+            DynamicPolyWatchdogCell::new(
+                Some(self.encodings[dec_obj].as_ref().unwrap().structure.clone()),
+                &tot_db_cell,
+            ),
+            self.encodings[dec_obj].as_ref().unwrap().offset,
+        );
+
+        self.kernel.bioptsat(
+            (inc_obj, dec_obj),
+            (&mut inc_enc, &mut dec_enc),
+            base_assumps,
+            starting_point,
+            (inc_lb, dec_lb),
+            lookup,
+            collector,
+        )
     }
 
     fn linsu_yield<Col: Extend<NonDomPoint>>(
@@ -206,178 +167,28 @@ where
         lower_bound: Option<usize>,
         collector: &mut Col,
     ) -> Result<Option<usize>, Termination> {
-        let (cost, mut sol) =
-            if let Some(res) = self.linsu(obj_idx, base_assumps, upper_bound, lower_bound)? {
-                res
-            } else {
-                // nothing to yield
-                return Ok(None);
-            };
-        let costs: Vec<_> = (0..self.kernel.stats.n_objs)
-            .map(|idx| {
-                self.kernel
-                    .get_cost_with_heuristic_improvements(idx, &mut sol, false)
-                    .unwrap()
-            })
-            .collect();
-        debug_assert_eq!(costs[obj_idx], cost);
-        // bound obj
-        let mut assumps = Vec::from(base_assumps);
-        let enc = self.encodings[obj_idx].as_ref().unwrap();
-        dpw::encode_output(
-            &enc.structure,
-            (cost - enc.offset) / (1 << enc.structure.output_power()),
-            &mut self.tot_db,
-            &mut self.kernel.oracle,
-            &mut self.kernel.var_manager,
-        );
-        assumps
-            .extend(dpw::enforce_ub(&enc.structure, cost - enc.offset, &mut self.tot_db).unwrap());
-        self.kernel
-            .yield_solutions(costs, &assumps, sol, collector)?;
-        Ok(Some(cost))
-    }
-
-    fn linsu(
-        &mut self,
-        obj_idx: usize,
-        base_assumps: &[Lit],
-        upper_bound: Option<(usize, Option<Assignment>)>,
-        lower_bound: Option<usize>,
-    ) -> Result<Option<(usize, Assignment)>, Termination> {
-        self.kernel.log_routine_start("linsu")?;
-
         if self.encodings[obj_idx].is_none() {
             self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx));
         }
 
+        let mut enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
+            DynamicPolyWatchdog::new(
+                Some(self.encodings[obj_idx].as_ref().unwrap().structure.clone()),
+                &mut self.tot_db,
+            ),
+            self.encodings[obj_idx].as_ref().unwrap().offset,
+        );
+
         let lower_bound = std::cmp::max(lower_bound.unwrap_or(0), self.reforms[obj_idx].offset);
 
-        let mut assumps = Vec::from(base_assumps);
-        let (mut cost, mut sol) = if let Some(bound) = upper_bound {
-            bound
-        } else {
-            let res = self.kernel.solve_assumps(&assumps)?;
-            if res == Unsat {
-                return Ok(None);
-            }
-            let mut sol = self.kernel.oracle.solution(self.kernel.max_orig_var)?;
-            let cost = self
-                .kernel
-                .get_cost_with_heuristic_improvements(obj_idx, &mut sol, true)?;
-            (cost, Some(sol))
-        };
-        let enc = self.encodings[obj_idx].as_ref().unwrap();
-        let output_weight = 1 << (enc.structure.output_power());
-        if cost == lower_bound {
-            // make sure to have a solution
-            if sol.is_none() {
-                assumps.extend(self.bound_objective(obj_idx, cost));
-                let res = self.kernel.solve_assumps(&assumps)?;
-                debug_assert_eq!(res, Sat);
-                sol = Some(self.kernel.oracle.solution(self.kernel.max_orig_var)?);
-            }
-            self.kernel.log_routine_end()?;
-            return Ok(Some((cost, sol.unwrap())));
-        }
-        assumps.push(lit![0]);
-        // coarse convergence
-        while (cost - enc.offset) >= output_weight {
-            let oidx = (cost - enc.offset) / output_weight - 1;
-            debug_assert!(oidx < self.tot_db[enc.structure.root].len());
-            dpw::encode_output(
-                &enc.structure,
-                oidx,
-                &mut self.tot_db,
-                &mut self.kernel.oracle,
-                &mut self.kernel.var_manager,
-            );
-            assumps[base_assumps.len()] = !self.tot_db[enc.structure.root][oidx];
-            match self.kernel.solve_assumps(&assumps)? {
-                Sat => {
-                    let mut thissol = self.kernel.oracle.solution(self.kernel.max_orig_var)?;
-                    let new_cost = self.kernel.get_cost_with_heuristic_improvements(
-                        obj_idx,
-                        &mut thissol,
-                        false,
-                    )?;
-                    debug_assert!(new_cost < cost);
-                    sol = Some(thissol);
-                    cost = new_cost;
-                    if cost == lower_bound {
-                        self.kernel.log_routine_end()?;
-                        return Ok(Some((cost, sol.unwrap())));
-                    }
-                }
-                Unsat => break,
-                _ => panic!(),
-            }
-        }
-        if (cost - enc.offset) % output_weight == 0 {
-            // first call of fine convergence would not set any tares
-            debug_assert_eq!(
-                if cost - enc.offset > 0 {
-                    dpw::enforce_ub(&enc.structure, cost - enc.offset - 1, &mut self.tot_db)
-                        .unwrap()
-                        .len()
-                } else {
-                    1
-                },
-                1
-            );
-            // make sure to have a solution
-            if sol.is_none() {
-                assumps.extend(self.bound_objective(obj_idx, cost));
-                let res = self.kernel.solve_assumps(&assumps)?;
-                debug_assert_eq!(res, Sat);
-                sol = Some(self.kernel.oracle.solution(self.kernel.max_orig_var)?);
-            }
-
-            self.kernel.log_routine_end()?;
-            return Ok(Some((cost, sol.unwrap())));
-        }
-        dpw::encode_output(
-            &enc.structure,
-            (cost - enc.offset - 1) / output_weight,
-            &mut self.tot_db,
-            &mut self.kernel.oracle,
-            &mut self.kernel.var_manager,
-        );
-        // fine convergence
-        while cost - enc.offset > 0 {
-            assumps.drain(base_assumps.len()..);
-            assumps.extend(
-                dpw::enforce_ub(&enc.structure, cost - enc.offset - 1, &mut self.tot_db).unwrap(),
-            );
-            match self.kernel.solve_assumps(&assumps)? {
-                Sat => {
-                    let mut thissol = self.kernel.oracle.solution(self.kernel.max_orig_var)?;
-                    let new_cost = self.kernel.get_cost_with_heuristic_improvements(
-                        obj_idx,
-                        &mut thissol,
-                        false,
-                    )?;
-                    debug_assert!(new_cost < cost);
-                    sol = Some(thissol);
-                    cost = new_cost;
-                    if cost == lower_bound {
-                        self.kernel.log_routine_end()?;
-                        return Ok(Some((cost, sol.unwrap())));
-                    }
-                }
-                Unsat => break,
-                _ => panic!(),
-            }
-        }
-        // make sure to have a solution
-        if sol.is_none() {
-            assumps.extend(self.bound_objective(obj_idx, cost));
-            let res = self.kernel.solve_assumps(&assumps)?;
-            debug_assert_eq!(res, Sat);
-            sol = Some(self.kernel.oracle.solution(self.kernel.max_orig_var)?);
-        }
-        self.kernel.log_routine_end()?;
-        Ok(Some((cost, sol.unwrap())))
+        self.kernel.linsu_yield(
+            obj_idx,
+            &mut enc,
+            base_assumps,
+            upper_bound,
+            Some(lower_bound),
+            collector,
+        )
     }
 
     /// Cuts away the areas dominated by the points in `self.discovered`
@@ -387,6 +198,10 @@ where
                 .into_iter()
                 .enumerate()
                 .filter_map(|(obj_idx, &cost)| {
+                    if matches!(self.kernel.objs[obj_idx], Objective::Constant { .. }) {
+                        debug_assert_eq!(cost, 0);
+                        return None;
+                    }
                     if self.encodings[obj_idx].is_none() {
                         self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx));
                     }
@@ -426,7 +241,8 @@ where
 
     /// Bounds an objective at `<= bound`
     fn bound_objective(&mut self, obj_idx: usize, bound: usize) -> Vec<Lit> {
-        if bound <= self.reforms[obj_idx].offset {
+        debug_assert!(bound >= self.reforms[obj_idx].offset);
+        if bound == self.reforms[obj_idx].offset {
             return self.reforms[obj_idx]
                 .inactives
                 .iter()

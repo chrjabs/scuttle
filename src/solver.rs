@@ -22,6 +22,7 @@ use crate::{
     KernelOptions, Limits, Phase, Stats, Termination, WriteSolverLog,
 };
 
+pub mod bioptsat;
 pub mod divcon;
 pub mod lowerbounding;
 pub mod pminimal;
@@ -116,8 +117,9 @@ where
     ) -> Result<Self, Termination> {
         let (constr, objs) = inst.decompose();
         let (cnf, mut var_manager) = constr.as_cnf();
-        let stats = Stats {
+        let mut stats = Stats {
             n_objs: objs.len(),
+            n_real_objs: objs.len(),
             n_orig_clauses: cnf.len(),
             ..Default::default()
         };
@@ -152,7 +154,7 @@ where
                         }
                     }
                 }
-                Objective::Constant { .. } => (),
+                Objective::Constant { .. } => stats.n_real_objs -= 1,
             }
         }
         // Add hard clauses and relaxed soft clauses to oracle
@@ -579,10 +581,6 @@ where
 
             // Find next solution
             let res = self.solve_assumps(assumps)?;
-            if res == SolverResult::Interrupted {
-                return Err(Termination::Interrupted);
-            }
-            self.log_oracle_call(res)?;
             if res == SolverResult::Unsat {
                 let pp_term = self.log_non_dominated(&non_dominated);
                 // All solutions enumerated
@@ -593,6 +591,159 @@ where
             self.check_termination()?;
             solution = self.oracle.solution(self.max_orig_var)?;
         }
+    }
+}
+
+#[oracle_bounds]
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    VM: ManageVars,
+    O: SolveIncremental + SolveStats,
+    BCG: FnMut(Assignment) -> Clause,
+{
+    /// Performs linear sat-unsat search on a given objective and yields
+    /// solutions found at the optimum.
+    fn linsu_yield<PBE, CE, Col>(
+        &mut self,
+        obj_idx: usize,
+        encoding: &mut ObjEncoding<PBE, CE>,
+        base_assumps: &[Lit],
+        upper_bound: Option<(usize, Option<Assignment>)>,
+        lower_bound: Option<usize>,
+        collector: &mut Col,
+    ) -> Result<Option<usize>, Termination>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+        Col: Extend<NonDomPoint>,
+    {
+        let (cost, mut sol) = if let Some(res) =
+            self.linsu(obj_idx, encoding, base_assumps, upper_bound, lower_bound)?
+        {
+            res
+        } else {
+            // nothing to yield
+            return Ok(None);
+        };
+        let costs: Vec<_> = (0..self.stats.n_objs)
+            .map(|idx| {
+                self.get_cost_with_heuristic_improvements(idx, &mut sol, false)
+                    .unwrap()
+            })
+            .collect();
+        debug_assert_eq!(costs[obj_idx], cost);
+        // bound obj
+        let mut assumps = Vec::from(base_assumps);
+        encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager);
+        assumps.extend(encoding.enforce_ub(cost).unwrap());
+        self.yield_solutions(costs, &assumps, sol, collector)?;
+        Ok(Some(cost))
+    }
+
+    /// Runs the BiOptSat algorithm on two objectives. BiOptSat is run in the
+    /// LSU variant.
+    ///
+    /// `starting_point`: optional starting point with known cost of increasing
+    /// objective
+    ///
+    /// `lookup`: for a value of the increasing objective, checks if the
+    /// non-dominated point has already been discovered and returns the
+    /// corresponding value of the decreasing objective
+    fn bioptsat<PBE, CE, Lookup, Col>(
+        &mut self,
+        (inc_obj, dec_obj): (usize, usize),
+        (inc_encoding, dec_encoding): (&mut ObjEncoding<PBE, CE>, &mut ObjEncoding<PBE, CE>),
+        base_assumps: &[Lit],
+        starting_point: Option<(usize, Assignment)>,
+        (inc_lb, dec_lb): (Option<usize>, Option<usize>),
+        lookup: Lookup,
+        collector: &mut Col,
+    ) -> Result<(), Termination>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+        Lookup: Fn(usize) -> Option<usize>,
+        Col: Extend<NonDomPoint>,
+    {
+        self.log_routine_start("bioptsat")?;
+
+        let mut inc_lb = inc_lb.unwrap_or(0);
+        let dec_lb = dec_lb.unwrap_or(0);
+
+        let mut assumps = Vec::from(base_assumps);
+        let (mut inc_cost, mut sol) = if let Some(bound) = starting_point {
+            bound
+        } else {
+            let res = self.solve_assumps(&assumps)?;
+            debug_assert_eq!(res, SolverResult::Sat);
+            let mut sol = self.oracle.solution(self.max_orig_var)?;
+            let cost = self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
+            (cost, sol)
+        };
+        let mut dec_cost;
+        loop {
+            // minimize inc_obj
+            (inc_cost, sol) = if let Some(res) = self.linsu(
+                inc_obj,
+                inc_encoding,
+                &assumps,
+                Some((inc_cost, Some(sol))),
+                Some(inc_lb),
+            )? {
+                res
+            } else {
+                // no solutions
+                return Ok(());
+            };
+            inc_lb = inc_cost + 1;
+            dec_cost = self.get_cost_with_heuristic_improvements(dec_obj, &mut sol, false)?;
+            if let Some(found) = lookup(inc_cost) {
+                dec_cost = found;
+            } else {
+                // bound inc_obj
+                inc_encoding.encode_ub_change(
+                    inc_cost..inc_cost + 1,
+                    &mut self.oracle,
+                    &mut self.var_manager,
+                );
+                assumps.extend(inc_encoding.enforce_ub(inc_cost).unwrap());
+                // minimize dec_obj
+                dec_cost = self
+                    .linsu_yield(
+                        dec_obj,
+                        dec_encoding,
+                        &assumps,
+                        Some((dec_cost, Some(sol))),
+                        Some(dec_lb),
+                        collector,
+                    )?
+                    .unwrap();
+            };
+            // termination condition: can't decrease decreasing objective further
+            if dec_cost <= dec_lb {
+                break;
+            }
+            // skip to next non-dom
+            assumps.drain(base_assumps.len()..);
+            dec_encoding.encode_ub_change(
+                dec_cost - 1..dec_cost,
+                &mut self.oracle,
+                &mut self.var_manager,
+            );
+            assumps.extend(dec_encoding.enforce_ub(dec_cost - 1).unwrap());
+            (sol, inc_cost) = match self.solve_assumps(&assumps)? {
+                SolverResult::Sat => {
+                    let mut sol = self.oracle.solution(self.max_orig_var)?;
+                    let cost =
+                        self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
+                    (sol, cost)
+                }
+                SolverResult::Unsat => break,
+                _ => panic!(),
+            };
+        }
+        self.log_routine_end()?;
+        return Ok(());
     }
 }
 
@@ -634,63 +785,21 @@ where
         self.log_routine_start("p minimization")?;
         let mut block_switch = None;
         #[cfg(feature = "coarse-convergence")]
-        {
-            let mut coarse_costs;
-            // Coarse convergence
-            loop {
-                coarse_costs = costs
-                    .iter()
-                    .enumerate()
-                    .map(|(oidx, &c)| match &obj_encs[oidx] {
-                        ObjEncoding::Weighted(pbe) => pbe.coarse_ub(c),
-                        _ => c,
-                    })
-                    .collect();
-                // Force next solution to dominate the current one
-                let mut assumps = self.enforce_dominating(&coarse_costs, obj_encs);
-                // Block solutions dominated by the current one
-                if self.opts.enumeration == EnumOptions::NoEnum {
-                    // Block permanently since no enumeration at Pareto point
-                    let block_clause = self.dominated_block_clause(&costs, obj_encs);
-                    self.oracle.add_clause(block_clause)?;
-                } else {
-                    // Permanently block last candidate
-                    if let Some(block_lit) = block_switch {
-                        self.oracle.add_unit(block_lit)?;
-                    }
-                    // Temporarily block to allow for enumeration at Pareto point
-                    let block_lit = self.tmp_block_dominated(&costs, obj_encs);
-                    block_switch = Some(block_lit);
-                    assumps.push(block_lit);
-                }
-
-                // Check if dominating solution exists
-                let res = self.solve_assumps(&assumps)?;
-                if res == SolverResult::Unsat {
-                    // Termination criteria, return last solution and costs
-                    break;
-                }
-                self.check_termination()?;
-
-                (costs, solution) = self.get_solution_and_internal_costs(
-                    self.opts
-                        .heuristic_improvements
-                        .solution_tightening
-                        .wanted(Phase::Minimization),
-                )?;
-                self.log_candidate(&costs, Phase::Minimization)?;
-                self.check_termination()?;
-                self.phase_solution(solution.clone())?;
-            }
-            if coarse_costs == costs {
-                // No more fine convergence to do
-                return Ok((costs, solution, block_switch));
-            }
-        }
-        // Fine convergence
+        let mut coarse = true;
         loop {
+            let bound_costs: Vec<_> = costs
+                .iter()
+                .enumerate()
+                .map(|(_oidx, &c)| {
+                    #[cfg(feature = "coarse-convergence")]
+                    if coarse {
+                        return obj_encs[_oidx].coarse_ub(c);
+                    }
+                    c
+                })
+                .collect();
             // Force next solution to dominate the current one
-            let mut assumps = self.enforce_dominating(&costs, obj_encs);
+            let mut assumps = self.enforce_dominating(&bound_costs, obj_encs);
             // Block solutions dominated by the current one
             if self.opts.enumeration == EnumOptions::NoEnum {
                 // Block permanently since no enumeration at Pareto point
@@ -710,6 +819,12 @@ where
             // Check if dominating solution exists
             let res = self.solve_assumps(&assumps)?;
             if res == SolverResult::Unsat {
+                #[cfg(feature = "coarse-convergence")]
+                if bound_costs != costs {
+                    // Switch to fine convergence
+                    coarse = false;
+                    continue;
+                }
                 self.log_routine_end()?;
                 // Termination criteria, return last solution and costs
                 return Ok((costs, solution, block_switch));
@@ -807,6 +922,91 @@ where
         clause.add(block_lit);
         self.oracle.add_clause(clause).unwrap();
         !block_lit
+    }
+
+    /// Performs linear sat-unsat search on a given objective.
+    fn linsu<PBE, CE>(
+        &mut self,
+        obj_idx: usize,
+        encoding: &mut ObjEncoding<PBE, CE>,
+        base_assumps: &[Lit],
+        upper_bound: Option<(usize, Option<Assignment>)>,
+        lower_bound: Option<usize>,
+    ) -> Result<Option<(usize, Assignment)>, Termination>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        self.log_routine_start("linsu")?;
+
+        let lower_bound = lower_bound.unwrap_or(0);
+
+        let mut assumps = Vec::from(base_assumps);
+        let (mut cost, mut sol) = if let Some(bound) = upper_bound {
+            bound
+        } else {
+            let res = self.solve_assumps(&assumps)?;
+            if res == SolverResult::Unsat {
+                return Ok(None);
+            }
+            let mut sol = self.oracle.solution(self.max_orig_var)?;
+            let cost = self.get_cost_with_heuristic_improvements(obj_idx, &mut sol, true)?;
+            (cost, Some(sol))
+        };
+        #[cfg(feature = "coarse-convergence")]
+        let mut coarse = true;
+        while cost > lower_bound {
+            let bound = '_bound: {
+                #[cfg(feature = "coarse-convergence")]
+                if coarse {
+                    break '_bound encoding.coarse_ub(cost - 1);
+                }
+                cost - 1
+            };
+            assumps.drain(base_assumps.len()..);
+            encoding.encode_ub_change(bound..bound + 1, &mut self.oracle, &mut self.var_manager);
+            assumps.extend(encoding.enforce_ub(bound).unwrap());
+            match self.solve_assumps(&assumps)? {
+                SolverResult::Sat => {
+                    let mut thissol = self.oracle.solution(self.max_orig_var)?;
+                    let new_cost =
+                        self.get_cost_with_heuristic_improvements(obj_idx, &mut thissol, false)?;
+                    let costs = (0..self.stats.n_objs)
+                        .map(|oidx| {
+                            self.get_cost_with_heuristic_improvements(oidx, &mut thissol, false)
+                                .unwrap()
+                        })
+                        .collect();
+                    self.log_candidate(&costs, Phase::Linsu)?;
+                    debug_assert!(new_cost < cost);
+                    sol = Some(thissol);
+                    cost = new_cost;
+                    if cost == lower_bound {
+                        self.log_routine_end()?;
+                        return Ok(Some((cost, sol.unwrap())));
+                    }
+                }
+                SolverResult::Unsat => {
+                    #[cfg(feature = "coarse-convergence")]
+                    if bound + 1 < cost {
+                        coarse = false;
+                        continue;
+                    }
+                    break;
+                }
+                _ => panic!(),
+            }
+        }
+        // make sure to have a solution
+        if sol.is_none() {
+            encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager);
+            assumps.extend(encoding.enforce_ub(cost).unwrap());
+            let res = self.solve_assumps(&assumps)?;
+            debug_assert_eq!(res, SolverResult::Sat);
+            sol = Some(self.oracle.solution(self.max_orig_var)?);
+        }
+        self.log_routine_end()?;
+        Ok(Some((cost, sol.unwrap())))
     }
 }
 
@@ -955,15 +1155,14 @@ impl Iterator for ObjIter<'_> {
 
 /// An objective encoding for either a weighted or an unweighted objective
 enum ObjEncoding<PBE, CE> {
-    Weighted(PBE),
-    Unweighted(CE),
+    Weighted(PBE, usize),
+    Unweighted(CE, usize),
     Constant,
 }
 
 impl<PBE, CE> ObjEncoding<PBE, CE>
 where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
 {
     /// Initializes a new objective encoding for a weighted objective
     fn new_weighted<VM: ManageVars, LI: WLitIter>(
@@ -975,9 +1174,14 @@ where
         if reserve {
             encoding.reserve(var_manager);
         }
-        ObjEncoding::Weighted(encoding)
+        ObjEncoding::Weighted(encoding, 0)
     }
+}
 
+impl<PBE, CE> ObjEncoding<PBE, CE>
+where
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
+{
     /// Initializes a new objective encoding for a weighted objective
     fn new_unweighted<VM: ManageVars, LI: LitIter>(
         lits: LI,
@@ -988,14 +1192,20 @@ where
         if reserve {
             encoding.reserve(var_manager);
         }
-        ObjEncoding::Unweighted(encoding)
+        ObjEncoding::Unweighted(encoding, 0)
     }
+}
 
+impl<PBE, CE> ObjEncoding<PBE, CE>
+where
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
+{
     /// Gets the next higher objective value
     fn next_higher(&self, val: usize) -> usize {
         match self {
-            ObjEncoding::Weighted(enc) => enc.next_higher(val),
-            ObjEncoding::Unweighted(_) => val + 1,
+            ObjEncoding::Weighted(enc, offset) => enc.next_higher(val - offset) + offset,
+            ObjEncoding::Unweighted(..) => val + 1,
             ObjEncoding::Constant => val,
         }
     }
@@ -1010,8 +1220,32 @@ where
         Col: CollectClauses,
     {
         match self {
-            ObjEncoding::Weighted(enc) => enc.encode_ub_change(range, collector, var_manager),
-            ObjEncoding::Unweighted(enc) => enc.encode_ub_change(range, collector, var_manager),
+            ObjEncoding::Weighted(enc, offset) => enc.encode_ub_change(
+                if range.start >= *offset {
+                    range.start - *offset
+                } else {
+                    0
+                }..if range.end >= *offset {
+                    range.end - *offset
+                } else {
+                    0
+                },
+                collector,
+                var_manager,
+            ),
+            ObjEncoding::Unweighted(enc, offset) => enc.encode_ub_change(
+                if range.start >= *offset {
+                    range.start - *offset
+                } else {
+                    0
+                }..if range.end >= *offset {
+                    range.end - *offset
+                } else {
+                    0
+                },
+                collector,
+                var_manager,
+            ),
             ObjEncoding::Constant => (),
         }
     }
@@ -1019,9 +1253,28 @@ where
     /// Enforces the given upper bound
     fn enforce_ub(&mut self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::Error> {
         match self {
-            ObjEncoding::Weighted(enc) => enc.enforce_ub(ub),
-            ObjEncoding::Unweighted(enc) => enc.enforce_ub(ub),
+            ObjEncoding::Weighted(enc, offset) => {
+                enc.enforce_ub(if ub >= *offset { ub - *offset } else { 0 })
+            }
+            ObjEncoding::Unweighted(enc, offset) => {
+                enc.enforce_ub(if ub >= *offset { ub - *offset } else { 0 })
+            }
             ObjEncoding::Constant => Ok(vec![]),
+        }
+    }
+
+    /// Gets a coarse upper bound
+    #[cfg(feature = "coarse-convergence")]
+    fn coarse_ub(&self, ub: usize) -> usize {
+        match self {
+            ObjEncoding::Weighted(enc, offset) => {
+                if ub >= *offset {
+                    enc.coarse_ub(ub - *offset) + offset
+                } else {
+                    ub
+                }
+            }
+            _ => ub,
         }
     }
 }

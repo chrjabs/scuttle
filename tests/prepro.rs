@@ -256,6 +256,39 @@ macro_rules! packup_3 {
     };
 }
 
+macro_rules! generate_biobj_tests {
+    ($mod:ident, $s:ty, $o:expr, $tech:expr) => {
+        mod $mod {
+            #[test]
+            fn small() {
+                small!($s, $o, $tech)
+            }
+
+            #[test]
+            fn medium_single() {
+                medium_single!($s, $o, $tech)
+            }
+
+            #[test]
+            fn parkinsons() {
+                parkinsons!($s, $o, $tech)
+            }
+
+            #[test]
+            #[ignore]
+            fn mushroom() {
+                mushroom!($s, $o, $tech)
+            }
+
+            #[test]
+            #[ignore]
+            fn set_cover() {
+                set_cover!($s, $o, $tech)
+            }
+        }
+    };
+}
+
 macro_rules! generate_tests {
     ($mod:ident, $s:ty, $o:expr, $tech:expr) => {
         mod $mod {
@@ -312,7 +345,15 @@ macro_rules! PMin {() => {scuttle::PMinimal<
     rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
-macro_rules! Lb {() => { scuttle::LowerBounding<
+macro_rules! PMinDpw {() => {scuttle::PMinimal<
+    rustsat::encodings::pb::DynamicPolyWatchdog,
+    rustsat::encodings::card::DefIncUpperBounding,
+    rustsat::instances::BasicVarManager,
+    fn(rustsat::types::Assignment) -> rustsat::types::Clause,
+    rustsat_cadical::CaDiCaL<'static, 'static>,
+>};}
+
+macro_rules! Bos {() => {scuttle::BiOptSat<
     rustsat::encodings::pb::DefIncUpperBounding,
     rustsat::encodings::card::DefIncUpperBounding,
     rustsat::instances::BasicVarManager,
@@ -320,10 +361,12 @@ macro_rules! Lb {() => { scuttle::LowerBounding<
     rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
-macro_rules! Tc {() => { scuttle::solver::tricore::TriCore<
+macro_rules! Lb {() => { scuttle::LowerBounding<
+    rustsat::encodings::pb::DefIncUpperBounding,
+    rustsat::encodings::card::DefIncUpperBounding,
     rustsat::instances::BasicVarManager,
-    rustsat_cadical::CaDiCaL<'static, 'static>,
     fn(rustsat::types::Assignment) -> rustsat::types::Clause,
+    rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
 macro_rules! Dc {() => { scuttle::solver::divcon::SeqDivCon<
@@ -340,6 +383,13 @@ generate_tests!(
 );
 
 generate_tests!(
+    pmin_dpw,
+    PMinDpw!(),
+    scuttle::KernelOptions::default(),
+    "[[uvsrgc]VRTG]"
+);
+
+generate_tests!(
     lb,
     Lb!(),
     scuttle::KernelOptions::default(),
@@ -347,20 +397,20 @@ generate_tests!(
 );
 
 generate_tests!(
-    tc,
-    Tc!(),
-    scuttle::KernelOptions::default(),
-    "[[uvsrgc]VRTG]"
-);
-
-generate_tests!(
-    dc,
+    divcon,
     Dc!(),
     scuttle::DivConOptions::default(),
     "[[uvsrgc]VRTG]"
 );
 
+generate_biobj_tests!(
+    bioptsat,
+    Bos!(),
+    scuttle::KernelOptions::default(),
+    "[[uvsrgc]VRTG]"
+);
+
 #[test]
 fn debug() {
-    parkinsons!(Dc!(), scuttle::DivConOptions::default(), "[[uvsrgc]VRTG]")
+    packup_3!(Dc!(), scuttle::DivConOptions::default(), "[[uvsrgc]VRTG]")
 }

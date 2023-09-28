@@ -248,6 +248,46 @@ macro_rules! packup_3 {
     };
 }
 
+macro_rules! generate_biobj_tests {
+    ($mod:ident, $s:ty, $o:expr) => {
+        mod $mod {
+            #[test]
+            fn small() {
+                small!($s, $o)
+            }
+
+            #[test]
+            fn medium_single() {
+                medium_single!($s, $o)
+            }
+
+            #[test]
+            fn medium_all() {
+                let mut opts = $o;
+                opts.set_enumeration(scuttle::options::EnumOptions::Solutions(None));
+                medium_all!($s, opts)
+            }
+
+            #[test]
+            fn parkinsons() {
+                parkinsons!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn mushroom() {
+                mushroom!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn set_cover() {
+                set_cover!($s, $o)
+            }
+        }
+    };
+}
+
 macro_rules! generate_tests {
     ($mod:ident, $s:ty, $o:expr) => {
         mod $mod {
@@ -319,7 +359,7 @@ macro_rules! PMinDpw {() => {scuttle::PMinimal<
     rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
-macro_rules! Lb {() => { scuttle::LowerBounding<
+macro_rules! Bos {() => {scuttle::BiOptSat<
     rustsat::encodings::pb::DefIncUpperBounding,
     rustsat::encodings::card::DefIncUpperBounding,
     rustsat::instances::BasicVarManager,
@@ -327,10 +367,12 @@ macro_rules! Lb {() => { scuttle::LowerBounding<
     rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
-macro_rules! Tc {() => { scuttle::solver::tricore::TriCore<
+macro_rules! Lb {() => { scuttle::LowerBounding<
+    rustsat::encodings::pb::DefIncUpperBounding,
+    rustsat::encodings::card::DefIncUpperBounding,
     rustsat::instances::BasicVarManager,
-    rustsat_cadical::CaDiCaL<'static, 'static>,
     fn(rustsat::types::Assignment) -> rustsat::types::Clause,
+    rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
 macro_rules! Dc {() => { scuttle::solver::divcon::SeqDivCon<
@@ -361,9 +403,9 @@ generate_tests!(pmin_other_sol_guided, PMin!(), {
     opts
 });
 
-generate_tests!(lb_default, Lb!(), scuttle::KernelOptions::default());
+generate_tests!(pmin_dpw, PMinDpw!(), scuttle::KernelOptions::default());
 
-generate_tests!(tc_default, Tc!(), scuttle::KernelOptions::default());
+generate_tests!(lb_default, Lb!(), scuttle::KernelOptions::default());
 
 generate_tests!(divcon_default, Dc!(), scuttle::DivConOptions::default());
 
@@ -373,7 +415,10 @@ generate_tests!(divcon_other_bioptsat, Dc!(), {
     opts
 });
 
+generate_biobj_tests!(bioptsat_default, Bos!(), scuttle::KernelOptions::default());
+
 #[test]
 fn debug() {
-    set_cover!(PMinDpw!(), scuttle::KernelOptions::default())
+    let opts = scuttle::DivConOptions::default();
+    packup_3!(Dc!(), opts)
 }

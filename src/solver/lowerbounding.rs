@@ -5,8 +5,8 @@
 //! ## References
 //!
 //! - \[1\] Joao Cortes and Ines Lynce and Vasco M. Maquinho: _New Core-Guided
-//!   and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
-//!   TACAS 2023.
+//! and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
+//! TACAS 2023.
 
 use rustsat::{
     encodings::{self, card, pb},
@@ -42,8 +42,8 @@ pub struct LowerBounding<PBE, CE, VM, BCG, O> {
 
 impl<PBE, CE, VM, O> LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, O>
 where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
     VM: ManageVars,
     O: SolveIncremental + SolveStats,
 {
@@ -64,8 +64,8 @@ where
 
 impl<PBE, CE, VM, BCG, O> LowerBounding<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
     O: SolveIncremental + SolveStats + Default,
@@ -82,8 +82,8 @@ where
 
 impl<PBE, CE, VM, O> LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, O>
 where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
     VM: ManageVars,
     O: SolveIncremental + SolveStats + Default,
 {
@@ -103,8 +103,8 @@ where
 
 impl<PBE, CE, VM, BCG, O> LowerBounding<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
     O: SolveIncremental + SolveStats,
@@ -146,11 +146,11 @@ where
                     s.unit_weight = Some(*unit_weight);
                 };
                 match enc {
-                    ObjEncoding::Weighted(enc) => {
+                    ObjEncoding::Weighted(enc, _) => {
                         s.n_vars = enc.n_vars();
                         s.n_clauses = enc.n_clauses()
                     }
-                    ObjEncoding::Unweighted(enc) => {
+                    ObjEncoding::Unweighted(enc, _) => {
                         s.n_vars = enc.n_vars();
                         s.n_clauses = enc.n_clauses()
                     }
@@ -164,8 +164,8 @@ where
 
 impl<PBE, CE, VM, BCG, O> LowerBounding<PBE, CE, VM, BCG, O>
 where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
     VM: ManageVars,
     O: SolveIncremental + SolveStats,
 {

@@ -19,6 +19,7 @@ pub use solver::Solve;
 // Reexport algorithms
 pub use solver::lowerbounding::LowerBounding;
 pub use solver::pminimal::PMinimal;
+pub use solver::bioptsat::BiOptSat;
 
 #[cfg(feature = "binary-deps")]
 pub mod cli;
@@ -112,6 +113,8 @@ pub enum Phase {
     Minimization,
     /// Enumeration of solutions at a Pareto point
     Enumeration,
+    /// Linsu sub algorithm
+    Linsu,
 }
 
 impl fmt::Display for Phase {
@@ -120,6 +123,7 @@ impl fmt::Display for Phase {
             Phase::OuterLoop => write!(f, "outer-loop"),
             Phase::Minimization => write!(f, "minimization"),
             Phase::Enumeration => write!(f, "enumeration"),
+            Phase::Linsu => write!(f, "linsu")
         }
     }
 }
@@ -139,6 +143,8 @@ pub struct Stats {
     pub n_oracle_calls: usize,
     /// The number of objectives in the solver
     pub n_objs: usize,
+    /// The number of non-constant objectives in the solver
+    pub n_real_objs: usize,
     /// The number of original clauses
     pub n_orig_clauses: usize,
 }

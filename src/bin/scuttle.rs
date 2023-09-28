@@ -15,7 +15,7 @@ use scuttle::{
     self,
     cli::{Algorithm, CardEncoding, Cli, FileFormat, PbEncoding},
     solver::{divcon::SeqDivCon, tricore::TriCore},
-    LoggerError, LowerBounding, PMinimal, Solve,
+    BiOptSat, LoggerError, LowerBounding, PMinimal, Solve,
 };
 
 macro_rules! handle_term {
@@ -68,6 +68,8 @@ type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
 type PMin<PBE, CE, VM> = PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
+/// BiOptSat Instantiation used
+type Bos<PBE, CE, VM> = BiOptSat<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
 /// Lower-bounding instantiation used
 type Lb<PBE, CE, VM> = LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
 /// Tri-core prototype used
@@ -124,7 +126,23 @@ fn main() -> Result<(), Error> {
             prepro,
             reindexer
         ),
-        Algorithm::BiOptSat(opts) => todo!(),
+        Algorithm::BiOptSat(opts) => {
+            if inst.n_objectives() != 2 {
+                cli.error("the bioptsat algorithm can only be run on bi-objective problems")?;
+                return Err(Error::InvalidInstance);
+            }
+            main_with_obj_encs!(
+                Bos,
+                cli.obj_pb_enc,
+                cli.obj_card_enc,
+                inst,
+                oracle,
+                opts,
+                cli,
+                prepro,
+                reindexer
+            )
+        }
         Algorithm::LowerBounding(opts) => main_with_obj_encs!(
             Lb,
             cli.obj_pb_enc,
@@ -263,6 +281,7 @@ enum Error {
     IO(std::io::Error),
     Logger(LoggerError),
     Oracle(SolverError),
+    InvalidInstance,
 }
 
 impl From<std::io::Error> for Error {
@@ -306,6 +325,7 @@ impl fmt::Debug for Error {
             Self::IO(err) => write!(f, "IO Error: {}", err),
             Self::Logger(err) => write!(f, "Logger Error: {}", err),
             Self::Oracle(err) => write!(f, "Oracle Error: {}", err),
+            Self::InvalidInstance => write!(f, "Invalid instance"),
         }
     }
 }

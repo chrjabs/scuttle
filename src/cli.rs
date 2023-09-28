@@ -52,6 +52,8 @@ enum AlgorithmCommand {
     Bioptsat {
         #[command(flatten)]
         shared: SharedArgs,
+        #[command(flatten)]
+        obj_encs: ObjEncArgs,
     },
     /// Lower-bounding search - Cortes et al. TACAS'23
     LowerBounding {
@@ -495,7 +497,30 @@ impl Cli {
                 logger_config: (&shared.log).into(),
                 alg: Algorithm::PMinimal(kernel_opts(shared)),
             },
-            AlgorithmCommand::Bioptsat { shared } => todo!(),
+            AlgorithmCommand::Bioptsat { shared, obj_encs } => Cli {
+                limits: (&shared.limits).into(),
+                file_format: shared.file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: shared.file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: shared.file.inst_path.clone(),
+                preprocessing: shared.prepro.preprocessing.into(),
+                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                reindexing: shared.prepro.reindexing.into(),
+                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                cadical_config: shared.cadical_config.into(),
+                obj_pb_enc: obj_encs.obj_pb_encoding,
+                obj_card_enc: obj_encs.obj_card_encoding,
+                stdout: stdout(shared.log.color),
+                stderr: stderr(shared.log.color),
+                print_solver_config: shared.log.print_solver_config,
+                print_solutions: shared.log.print_solutions,
+                print_stats: !shared.log.no_print_stats,
+                color: shared.log.color,
+                logger_config: (&shared.log).into(),
+                alg: Algorithm::BiOptSat(kernel_opts(shared)),
+            },
             AlgorithmCommand::LowerBounding {
                 shared,
                 obj_encs,

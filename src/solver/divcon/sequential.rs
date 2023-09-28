@@ -9,7 +9,7 @@ use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
     options::DivConOptions,
-    solver::{default_blocking_clause, SolverKernel},
+    solver::{default_blocking_clause, Objective, SolverKernel},
     types::ParetoFront,
     KernelFunctions, Limits, Solve, Termination,
 };
@@ -98,8 +98,11 @@ where
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> Result<(), Termination> {
         self.worker.kernel.log_routine_start("seq-div-con")?;
-        let all_objs: Vec<_> = (0..self.worker.kernel.stats.n_objs).collect();
-        self.solve_subproblem(&[], &all_objs)?;
+        let all_objs: Vec<_> = (0..self.worker.kernel.stats.n_objs)
+            .filter(|&oidx| !matches!(self.worker.kernel.objs[oidx], Objective::Constant { .. }))
+            .collect();
+        debug_assert_eq!(all_objs.len(), self.worker.kernel.stats.n_real_objs);
+        self.solve_subproblem(vec![0; self.worker.kernel.stats.n_objs], &[], &all_objs)?;
         self.worker.kernel.log_routine_end()?;
         return Ok(());
     }
@@ -107,20 +110,33 @@ where
     /// Recurses down into the subproblems and solves them
     fn solve_subproblem(
         &mut self,
+        mut ideal: Vec<usize>,
         base_assumps: &[Lit],
         obj_idxs: &[usize],
     ) -> Result<(), Termination> {
+        debug_assert_eq!(ideal.len(), self.worker.kernel.stats.n_objs);
         // TODO: filtering not just through cutting solutions to avoid unsat calls
         loop {
-            let mut ideal = vec![0; self.worker.kernel.stats.n_objs];
+            if obj_idxs.len() == 1 {
+                self.worker.linsu_yield(
+                    obj_idxs[0],
+                    base_assumps,
+                    None,
+                    Some(ideal[obj_idxs[0]]),
+                    &mut self.pareto_front,
+                )?;
+                self.cut_dominated()?;
+                return Ok(());
+            }
+
             if !self.worker.find_ideal(base_assumps, obj_idxs, &mut ideal)? {
                 break;
             }
-            if obj_idxs.len() == self.worker.kernel.stats.n_objs {
+            //if obj_idxs.len() == self.worker.kernel.stats.n_real_objs {
                 if let Some(logger) = &mut self.worker.kernel.logger {
                     logger.log_ideal(&ideal)?;
                 }
-            }
+            //}
 
             // TODO: use upper bound from ideal point computation
             if obj_idxs.len() == 2 && self.opts.bioptsat {
@@ -128,18 +144,8 @@ where
                     (obj_idxs[0], obj_idxs[1]),
                     base_assumps,
                     None,
+                    (Some(ideal[obj_idxs[0]]), Some(ideal[obj_idxs[1]])),
                     |_| None,
-                    &mut self.pareto_front,
-                )?;
-                self.cut_dominated()?;
-                return Ok(());
-            }
-            if obj_idxs.len() == 1 {
-                self.worker.linsu_yield(
-                    obj_idxs[0],
-                    base_assumps,
-                    None,
-                    None,
                     &mut self.pareto_front,
                 )?;
                 self.cut_dominated()?;
@@ -150,11 +156,10 @@ where
             for idx in 0..obj_idxs.len() {
                 let fixed_obj = obj_idxs[idx];
                 let mut subproblem = Vec::from(obj_idxs);
-                // TODO: consider using swap_remove here. using remove for now to make debugging less confusing.
-                subproblem.remove(idx);
+                subproblem.swap_remove(idx);
                 let mut assumps = Vec::from(base_assumps);
                 assumps.extend(self.worker.bound_objective(fixed_obj, ideal[fixed_obj]));
-                self.solve_subproblem(&assumps, &subproblem)?;
+                self.solve_subproblem(ideal.clone(), &assumps, &subproblem)?;
             }
         }
         Ok(())
