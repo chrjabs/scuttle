@@ -222,6 +222,7 @@ where
             // Find minimization starting point
             let res = self.kernel.solve()?;
             if SolverResult::Unsat == res {
+                self.kernel.log_routine_end()?;
                 return Ok(());
             }
             self.kernel.check_termination()?;
@@ -239,7 +240,7 @@ where
             self.kernel.phase_solution(solution.clone())?;
             let (costs, solution, block_switch) =
                 self.kernel
-                    .p_minimization(costs, solution, &mut self.obj_encs)?;
+                    .p_minimization(costs, solution, &[], &mut self.obj_encs)?;
 
             let assumps = self.kernel.enforce_dominating(&costs, &mut self.obj_encs);
             self.kernel

@@ -39,15 +39,15 @@ impl KernelOptions {
 #[derive(Clone, Copy)]
 pub struct DivConOptions {
     pub kernel: KernelOptions,
-    /// Using BiOptSat as recursion anchor in DivCon
-    pub bioptsat: bool,
+    /// The recursion anchor to use
+    pub anchor: DivConAnchor,
 }
 
 impl Default for DivConOptions {
     fn default() -> Self {
         Self {
             kernel: Default::default(),
-            bioptsat: true,
+            anchor: Default::default(),
         }
     }
 }
@@ -140,7 +140,7 @@ impl fmt::Display for HeurImprWhen {
     }
 }
 
-/// Limits for a call to [`Solver::solve`]
+/// Limits for a call to [`crate::Solve::solve`]
 #[derive(Clone, Copy, Default)]
 pub struct Limits {
     /// The maximum number of Pareto points to enumerate
@@ -161,6 +161,56 @@ impl Limits {
             sols: None,
             candidates: None,
             oracle_calls: None,
+        }
+    }
+}
+
+/// Possible recursion anchors for the divide and conquer algorithm
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub enum DivConAnchor {
+    /// Linear Sat-Unsat for single-objective subproblems
+    LinSu,
+    /// BiOptSat (Sat-Unsat) for bi-objective subproblems
+    #[default]
+    BiOptSat,
+    /// P-Minimal at subproblems of given size
+    PMinimal(SubProblemSize),
+}
+
+impl fmt::Display for DivConAnchor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DivConAnchor::LinSu => write!(f, "lin-su"),
+            DivConAnchor::BiOptSat => write!(f, "bioptsat"),
+            DivConAnchor::PMinimal(size) => write!(f, "p-minimal({})", size),
+        }
+    }
+}
+
+/// Specifying the size of a subproblem
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SubProblemSize {
+    /// An absolute subproblem size
+    Abs(usize),
+    /// A subproblem `x` smaller than the original problem
+    Smaller(usize),
+}
+
+impl SubProblemSize {
+    /// Calculates the absolute problem size given the original instance size
+    pub fn absolute(&self, prob_size: usize) -> usize {
+        match self {
+            SubProblemSize::Abs(abs) => *abs,
+            SubProblemSize::Smaller(smaller) => prob_size - *smaller,
+        }
+    }
+}
+
+impl fmt::Display for SubProblemSize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SubProblemSize::Abs(size) => write!(f, "+{}", size),
+            SubProblemSize::Smaller(size) => write!(f, "-{}", size),
         }
     }
 }

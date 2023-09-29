@@ -693,6 +693,7 @@ where
                 res
             } else {
                 // no solutions
+                self.log_routine_end()?;
                 return Ok(());
             };
             inc_lb = inc_cost + 1;
@@ -775,7 +776,8 @@ where
         &mut self,
         mut costs: Vec<usize>,
         mut solution: Assignment,
-        obj_encs: &mut Vec<ObjEncoding<PBE, CE>>,
+        base_assumps: &[Lit],
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
     ) -> Result<(Vec<usize>, Assignment, Option<Lit>), Termination>
     where
         PBE: pb::BoundUpperIncremental,
@@ -784,6 +786,7 @@ where
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.log_routine_start("p minimization")?;
         let mut block_switch = None;
+        let mut assumps = Vec::from(base_assumps);
         #[cfg(feature = "coarse-convergence")]
         let mut coarse = true;
         loop {
@@ -799,7 +802,8 @@ where
                 })
                 .collect();
             // Force next solution to dominate the current one
-            let mut assumps = self.enforce_dominating(&bound_costs, obj_encs);
+            assumps.drain(base_assumps.len()..);
+            assumps.extend(self.enforce_dominating(&bound_costs, obj_encs));
             // Block solutions dominated by the current one
             if self.opts.enumeration == EnumOptions::NoEnum {
                 // Block permanently since no enumeration at Pareto point
@@ -848,7 +852,7 @@ where
     fn enforce_dominating<PBE, CE>(
         &mut self,
         costs: &Vec<usize>,
-        obj_encs: &mut Vec<ObjEncoding<PBE, CE>>,
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
     ) -> Vec<Lit>
     where
         PBE: pb::BoundUpperIncremental,
@@ -869,7 +873,7 @@ where
     fn dominated_block_clause<PBE, CE>(
         &mut self,
         costs: &Vec<usize>,
-        obj_encs: &mut Vec<ObjEncoding<PBE, CE>>,
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
     ) -> Clause
     where
         PBE: pb::BoundUpperIncremental,
@@ -881,7 +885,7 @@ where
             .enumerate()
             .filter_map(|(idx, &cst)| {
                 // Don't block
-                if cst == 0 {
+                if cst <= obj_encs[idx].offset() {
                     return None;
                 }
                 let enc = &mut obj_encs[idx];
@@ -910,7 +914,7 @@ where
     fn tmp_block_dominated<PBE, CE>(
         &mut self,
         costs: &Vec<usize>,
-        obj_encs: &mut Vec<ObjEncoding<PBE, CE>>,
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
     ) -> Lit
     where
         PBE: pb::BoundUpperIncremental,
@@ -947,6 +951,7 @@ where
         } else {
             let res = self.solve_assumps(&assumps)?;
             if res == SolverResult::Unsat {
+                self.log_routine_end()?;
                 return Ok(None);
             }
             let mut sol = self.oracle.solution(self.max_orig_var)?;
@@ -1201,6 +1206,15 @@ where
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
 {
+    /// Gets the offset of the encoding
+    fn offset(&self) -> usize {
+        match self {
+            ObjEncoding::Weighted(_, offset) => *offset,
+            ObjEncoding::Unweighted(_, offset) => *offset,
+            ObjEncoding::Constant => 0,
+        }
+    }
+
     /// Gets the next higher objective value
     fn next_higher(&self, val: usize) -> usize {
         match self {

@@ -8,7 +8,7 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
-    options::DivConOptions,
+    options::{DivConAnchor, DivConOptions},
     solver::{default_blocking_clause, Objective, SolverKernel},
     types::ParetoFront,
     KernelFunctions, Limits, Solve, Termination,
@@ -118,6 +118,7 @@ where
         // TODO: filtering not just through cutting solutions to avoid unsat calls
         loop {
             if obj_idxs.len() == 1 {
+                debug_assert_eq!(self.opts.anchor, DivConAnchor::LinSu);
                 self.worker.linsu_yield(
                     obj_idxs[0],
                     base_assumps,
@@ -132,14 +133,14 @@ where
             if !self.worker.find_ideal(base_assumps, obj_idxs, &mut ideal)? {
                 break;
             }
-            //if obj_idxs.len() == self.worker.kernel.stats.n_real_objs {
+            if obj_idxs.len() == self.worker.kernel.stats.n_real_objs {
                 if let Some(logger) = &mut self.worker.kernel.logger {
                     logger.log_ideal(&ideal)?;
                 }
-            //}
+            }
 
             // TODO: use upper bound from ideal point computation
-            if obj_idxs.len() == 2 && self.opts.bioptsat {
+            if self.opts.anchor == DivConAnchor::BiOptSat && obj_idxs.len() == 2 {
                 self.worker.bioptsat(
                     (obj_idxs[0], obj_idxs[1]),
                     base_assumps,
@@ -150,6 +151,16 @@ where
                 )?;
                 self.cut_dominated()?;
                 return Ok(());
+            }
+
+            if let DivConAnchor::PMinimal(sub_size) = self.opts.anchor {
+                if obj_idxs.len() <= sub_size.absolute(self.worker.kernel.stats.n_real_objs)
+                    || obj_idxs.len() == 2
+                {
+                    self.worker
+                        .p_minimal(base_assumps, None, &mut self.pareto_front)?;
+                    return Ok(());
+                }
             }
 
             // recursion

@@ -16,7 +16,7 @@ use rustsat::{
         },
     },
     instances::ManageVars,
-    solvers::{SolveIncremental, SolveStats},
+    solvers::{SolveIncremental, SolveStats, SolverResult},
     types::{Assignment, Clause, Lit},
 };
 use scuttle_proc::oracle_bounds;
@@ -24,7 +24,7 @@ use scuttle_proc::oracle_bounds;
 mod sequential;
 pub use sequential::DivCon as SeqDivCon;
 
-use crate::{types::NonDomPoint, Termination};
+use crate::{types::NonDomPoint, Phase, Termination};
 
 use super::{
     coreguided::{OllReformulation, TotOutput},
@@ -189,6 +189,78 @@ where
             Some(lower_bound),
             collector,
         )
+    }
+
+    fn p_minimal<Col: Extend<NonDomPoint>>(
+        &mut self,
+        base_assumps: &[Lit],
+        mut starting_point: Option<Assignment>,
+        collector: &mut Col,
+    ) -> Result<(), Termination> {
+        self.kernel.log_routine_start("p-minimal")?;
+        (0..self.kernel.stats.n_objs).for_each(|oidx| {
+            if self.encodings[oidx].is_none() {
+                self.encodings[oidx] = Some(self.build_obj_encoding(oidx));
+            }
+        });
+        let tot_db_cell = RefCell::from(&mut self.tot_db);
+        let mut obj_encs: Vec<_> = self
+            .encodings
+            .iter()
+            .map(|enc| {
+                let enc = enc.as_ref().unwrap();
+                ObjEncoding::<_, card::DefIncUpperBounding>::Weighted(
+                    DynamicPolyWatchdogCell::new(Some(enc.structure.clone()), &tot_db_cell),
+                    enc.offset,
+                )
+            })
+            .collect();
+        let mut assumps = Vec::from(base_assumps);
+        loop {
+            // Find minimization starting point
+            let (costs, solution) = if let Some(mut sol) = starting_point.take() {
+                let costs: Vec<_> = (0..self.kernel.stats.n_objs)
+                    .map(|oidx| {
+                        self.kernel
+                            .get_cost_with_heuristic_improvements(oidx, &mut sol, false)
+                            .unwrap()
+                    })
+                    .collect();
+                (costs, sol)
+            } else {
+                let res = self.kernel.solve_assumps(&base_assumps)?;
+                if SolverResult::Unsat == res {
+                    self.kernel.log_routine_end()?;
+                    return Ok(());
+                }
+                self.kernel.check_termination()?;
+                self.kernel.get_solution_and_internal_costs(
+                    self.kernel
+                        .opts
+                        .heuristic_improvements
+                        .solution_tightening
+                        .wanted(Phase::OuterLoop),
+                )?
+            };
+
+            // Minimize solution
+            self.kernel.log_candidate(&costs, Phase::OuterLoop)?;
+            self.kernel.check_termination()?;
+            self.kernel.phase_solution(solution.clone())?;
+            let (costs, solution, block_switch) =
+                self.kernel
+                    .p_minimization(costs, solution, base_assumps, &mut obj_encs)?;
+
+            assumps.drain(base_assumps.len()..);
+            assumps.extend(self.kernel.enforce_dominating(&costs, &mut obj_encs));
+            self.kernel
+                .yield_solutions(costs, &assumps, solution, collector)?;
+
+            // Block last Pareto point, if temporarily blocked
+            if let Some(block_lit) = block_switch {
+                self.kernel.oracle.add_unit(block_lit)?;
+            }
+        }
     }
 
     /// Cuts away the areas dominated by the points in `self.discovered`

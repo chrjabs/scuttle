@@ -8,7 +8,7 @@ use std::{
     io::Write,
 };
 
-use crate::options::{DivConOptions, EnumOptions, HeurImprOptions, HeurImprWhen};
+use crate::options::{self, DivConOptions, EnumOptions, HeurImprOptions, HeurImprWhen};
 use crate::{
     types::{NonDomPoint, ParetoFront},
     EncodingStats, KernelOptions, Limits, Stats, WriteSolverLog,
@@ -77,9 +77,9 @@ enum AlgorithmCommand {
     DivCon {
         #[command(flatten)]
         shared: SharedArgs,
-        /// Use BiOptSat as the recursion anchor
-        #[arg(long, default_value_t = Bool::from(DivConOptions::default().bioptsat))]
-        bioptsat: Bool,
+        /// The divide and conquer recursion anchor to use
+        #[arg(long, default_value_t = DivConAnchor::from(DivConOptions::default().anchor))]
+        anchor: DivConAnchor,
         /// Log ideal and nadir points
         #[arg(long)]
         log_bound_points: bool,
@@ -270,6 +270,36 @@ impl fmt::Display for CardEncoding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CardEncoding::Tot => write!(f, "tot"),
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub enum DivConAnchor {
+    /// Linear Sat-Unsat for single-objective subproblems
+    LinSu,
+    /// BiOptSat (Sat-Unsat) for bi-objective subproblems
+    Bioptsat,
+    /// P-Minimal at subproblems of given size
+    PMinimal,
+}
+
+impl fmt::Display for DivConAnchor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DivConAnchor::LinSu => write!(f, "lin-su"),
+            DivConAnchor::Bioptsat => write!(f, "bioptsat"),
+            DivConAnchor::PMinimal => write!(f, "p-minimal"),
+        }
+    }
+}
+
+impl From<options::DivConAnchor> for DivConAnchor {
+    fn from(value: options::DivConAnchor) -> Self {
+        match value {
+            options::DivConAnchor::LinSu => DivConAnchor::LinSu,
+            options::DivConAnchor::BiOptSat => DivConAnchor::Bioptsat,
+            options::DivConAnchor::PMinimal(_) => DivConAnchor::PMinimal,
         }
     }
 }
@@ -586,7 +616,7 @@ impl Cli {
             },
             AlgorithmCommand::DivCon {
                 shared,
-                bioptsat,
+                anchor,
                 log_bound_points,
             } => Cli {
                 limits: (&shared.limits).into(),
@@ -616,7 +646,13 @@ impl Cli {
                 },
                 alg: Algorithm::DivCon(DivConOptions {
                     kernel: kernel_opts(shared),
-                    bioptsat: bioptsat.into(),
+                    anchor: match anchor {
+                        DivConAnchor::LinSu => options::DivConAnchor::LinSu,
+                        DivConAnchor::Bioptsat => options::DivConAnchor::BiOptSat,
+                        DivConAnchor::PMinimal => {
+                            options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(1))
+                        }
+                    },
                 }),
             },
         };
@@ -773,7 +809,7 @@ impl Cli {
                         "reserve-enc-vars",
                         opts.kernel.reserve_enc_vars,
                     )?;
-                    Self::print_parameter(&mut buffer, "bioptsat", opts.bioptsat)?;
+                    Self::print_parameter(&mut buffer, "anchor", opts.anchor)?;
                 }
             }
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;

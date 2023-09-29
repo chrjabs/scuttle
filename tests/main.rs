@@ -407,11 +407,29 @@ generate_tests!(pmin_dpw, PMinDpw!(), scuttle::KernelOptions::default());
 
 generate_tests!(lb_default, Lb!(), scuttle::KernelOptions::default());
 
-generate_tests!(divcon_default, Dc!(), scuttle::DivConOptions::default());
-
-generate_tests!(divcon_other_bioptsat, Dc!(), {
+generate_tests!(divcon_bioptsat, Dc!(), {
     let mut opts = scuttle::DivConOptions::default();
-    opts.bioptsat = !opts.bioptsat;
+    opts.anchor = scuttle::options::DivConAnchor::BiOptSat;
+    opts
+});
+
+generate_tests!(divcon_linsu, Dc!(), {
+    let mut opts = scuttle::DivConOptions::default();
+    opts.anchor = scuttle::options::DivConAnchor::LinSu;
+    opts
+});
+
+generate_tests!(divcon_pmin_smaller_0, Dc!(), {
+    let mut opts = scuttle::DivConOptions::default();
+    opts.anchor =
+        scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
+    opts
+});
+
+generate_tests!(divcon_pmin_smaller_1, Dc!(), {
+    let mut opts = scuttle::DivConOptions::default();
+    opts.anchor =
+        scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(1));
     opts
 });
 
