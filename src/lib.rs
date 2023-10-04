@@ -17,9 +17,9 @@ pub use solver::KernelFunctions;
 pub use solver::Solve;
 
 // Reexport algorithms
+pub use solver::bioptsat::BiOptSat;
 pub use solver::lowerbounding::LowerBounding;
 pub use solver::pminimal::PMinimal;
-pub use solver::bioptsat::BiOptSat;
 
 #[cfg(feature = "binary-deps")]
 pub mod cli;
@@ -123,7 +123,7 @@ impl fmt::Display for Phase {
             Phase::OuterLoop => write!(f, "outer-loop"),
             Phase::Minimization => write!(f, "minimization"),
             Phase::Enumeration => write!(f, "enumeration"),
-            Phase::Linsu => write!(f, "linsu")
+            Phase::Linsu => write!(f, "linsu"),
         }
     }
 }
@@ -191,6 +191,10 @@ pub trait WriteSolverLog {
     fn log_ideal(&mut self, ideal: &[usize]) -> Result<(), LoggerError>;
     /// Adds an updated nadir point to the log
     fn log_nadir(&mut self, nadir: &[usize]) -> Result<(), LoggerError>;
+    /// Adds an extracted core to the log
+    fn log_core(&mut self, weight: usize, len: usize, red_len: usize) -> Result<(), LoggerError>;
+    /// Adds a core exhaustion to the log
+    fn log_core_exhaustion(&mut self, exhausted: usize, weight: usize) -> Result<(), LoggerError>;
 }
 
 /// Error type for loggers

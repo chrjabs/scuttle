@@ -13,7 +13,7 @@ readme = "README.md"
 
 [dependencies]
 rustsat = { version = "0.3", path = "../rustsat/rustsat", features = ["multiopt", "internals"] }
-rustsat-cadical = { optional = true, version = "0.2", path = "../rustsat/cadical", features = ["v1-7-2", "safe"] }
+rustsat-cadical = { optional = true, version = "0.2", path = "../rustsat/cadical", features = ["v1-7-2"] }
 maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 cpu-time = { optional = true, version = "1.0.0" }
 clap = { optional = true, version = "4.2.4", features = ["derive", "cargo"] }
@@ -28,11 +28,12 @@ rustsat-cadical = { version = "0.2", path = "../rustsat/cadical", features = ["v
 maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 
 [features]
-default = ["binary-deps", "phasing", "sol-tightening", "interrupt-oracle", "coarse-convergence"]
+default = ["binary-deps", "phasing", "sol-tightening", "interrupt-oracle", "coarse-convergence", "limit-conflicts"]
 interrupt-oracle = ["scuttle-proc/interrupt-oracle"]
 phasing = ["scuttle-proc/phasing"]
 sol-tightening = ["scuttle-proc/sol-tightening"]
 coarse-convergence = []
+limit-conflicts = ["scuttle-proc/limit-conflicts"]
 binary-deps = [
   "dep:clap",
   "dep:concolor-clap",

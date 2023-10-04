@@ -150,6 +150,8 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
     let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
     #[cfg(feature = "sol-tightening")]
     let obounds = format!("{} O: rustsat::solvers::FlipLit,", obounds);
+    #[cfg(feature = "limit-conflicts")]
+    let obounds = format!("{} O: rustsat::solvers::LimitConflicts,", obounds);
     let obounds: TokenStream = obounds.parse().unwrap();
     let obounds: syn::WhereClause = parse_macro_input!(obounds);
     ast.generics
@@ -192,12 +194,6 @@ pub fn oracle_bounds(_attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 fn insert_oracle_bounds(mut impl_block: syn::ItemImpl) -> TokenStream {
-    //#[cfg(all(not(feature = "phasing"), not(feature = "sol-tightening")))]
-    //{
-    //    return quote! { #impl_block }.into()
-    //}
-    //#[cfg(any(feature = "phasing", feature = "sol-tightening"))]
-    //{
     // Check whether type has generic named O that is assumed to be the oracle
     let mut found_oracle = false;
     for gen in impl_block.generics.type_params() {
@@ -215,6 +211,8 @@ fn insert_oracle_bounds(mut impl_block: syn::ItemImpl) -> TokenStream {
     let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
     #[cfg(feature = "sol-tightening")]
     let obounds = format!("{} O: rustsat::solvers::FlipLit,", obounds);
+    #[cfg(feature = "limit-conflicts")]
+    let obounds = format!("{} O: rustsat::solvers::LimitConflicts,", obounds);
     let obounds: TokenStream = obounds.parse().unwrap();
     let obounds: syn::WhereClause = parse_macro_input!(obounds);
 

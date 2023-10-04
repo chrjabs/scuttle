@@ -97,6 +97,15 @@ struct SharedArgs {
     /// When to perform solution tightening
     #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening)]
     solution_tightening: HeurImprWhen,
+    /// Whether to perform core trimming in core-guided algorithms
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_trimming))]
+    core_trimming: Bool,
+    /// Whether to perform core trimming in core-guided algorithms
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_minimization))]
+    core_minimization: Bool,
+    /// Whether to perform core exhaustion in OLL
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_exhaustion))]
+    core_exhaustion: Bool,
     /// The CaDiCaL profile to use
     #[arg(long, default_value_t = CadicalConfig::Default)]
     cadical_config: CadicalConfig,
@@ -220,6 +229,9 @@ struct LogArgs {
     /// Log heuristic objective improvement
     #[arg(long)]
     log_heuristic_obj_improvement: bool,
+    /// Log extracted cores
+    #[arg(long)]
+    log_cores: bool,
     /// Log routine starts and ends till a given depth
     #[arg(long, default_value_t = 0)]
     log_routines: usize,
@@ -237,6 +249,7 @@ impl Into<LoggerConfig> for &LogArgs {
             log_fence: false,
             log_routines: std::cmp::max(self.log_routines, self.verbosity as usize * 2),
             log_bound_points: false,
+            log_cores: self.log_cores || self.verbosity >= 2,
         }
     }
 }
@@ -501,6 +514,9 @@ impl Cli {
                 solution_tightening: shared.solution_tightening,
             },
             solution_guided_search: shared.solution_guided_search.into(),
+            core_trimming: shared.core_trimming.into(),
+            core_minimization: shared.core_minimization.into(),
+            core_exhaustion: shared.core_exhaustion.into(),
         };
         let cli = match CliArgs::parse().command {
             AlgorithmCommand::PMinimal { shared, obj_encs } => Cli {
@@ -1070,6 +1086,7 @@ struct LoggerConfig {
     log_fence: bool,
     log_routines: usize,
     log_bound_points: bool,
+    log_cores: bool,
 }
 
 pub struct CliLogger {
@@ -1254,6 +1271,38 @@ impl WriteSolverLog for CliLogger {
                 ": costs: {}; cpu-time: {}",
                 VecPrinter::new(nadir),
                 DurPrinter::new(ProcessTime::now().as_duration()),
+            )?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
+
+    fn log_core(&mut self, weight: usize, len: usize, red_len: usize) -> Result<(), LoggerError> {
+        if self.config.log_cores {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
+            write!(buffer, "extracted core")?;
+            buffer.reset()?;
+            writeln!(
+                buffer,
+                ": weight: {}; original-len: {}; reduced-len: {}",
+                weight, len, red_len,
+            )?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
+
+    fn log_core_exhaustion(&mut self, exhausted: usize, weight: usize) -> Result<(), LoggerError> {
+        if self.config.log_cores {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
+            write!(buffer, "exhausted core")?;
+            buffer.reset()?;
+            writeln!(
+                buffer,
+                ": exhausted: {}; weight: {}",
+                exhausted, weight,
             )?;
             self.stdout.print(&buffer)?;
         }

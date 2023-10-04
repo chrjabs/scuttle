@@ -17,6 +17,12 @@ pub struct KernelOptions {
     pub heuristic_improvements: HeurImprOptions,
     /// Solution-guided search (aka phasing solutions)
     pub solution_guided_search: bool,
+    /// Core trimming (in core-guided algorithms)
+    pub core_trimming: bool,
+    /// Core minimization (in core-guided algorithms)
+    pub core_minimization: bool,
+    /// Core exhaustion (in OLL)
+    pub core_exhaustion: bool,
 }
 
 impl Default for KernelOptions {
@@ -26,6 +32,9 @@ impl Default for KernelOptions {
             reserve_enc_vars: false,
             heuristic_improvements: Default::default(),
             solution_guided_search: false,
+            core_trimming: false,
+            core_minimization: false,
+            core_exhaustion: false,
         }
     }
 }

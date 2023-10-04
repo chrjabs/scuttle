@@ -22,3 +22,4 @@ darling = "0.20"
 interrupt-oracle = []
 phasing = []
 sol-tightening = []
+limit-conflicts = []
