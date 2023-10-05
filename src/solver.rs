@@ -546,7 +546,14 @@ where
         solution = solution.truncate(self.max_orig_var);
 
         loop {
-            // TODO: add debug assert checking solution cost
+            let true_costs: Vec<_> = (0..self.stats.n_objs)
+                .map(|idx| {
+                    self.get_cost_with_heuristic_improvements(idx, &mut solution, false)
+                        .unwrap()
+                })
+                .collect();
+            debug_assert_eq!(true_costs, costs);
+
             non_dominated.add_sol(solution.clone());
             match self.log_solution() {
                 Ok(_) => (),

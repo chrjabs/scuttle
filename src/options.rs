@@ -50,6 +50,8 @@ pub struct DivConOptions {
     pub kernel: KernelOptions,
     /// The recursion anchor to use
     pub anchor: DivConAnchor,
+    /// When to build the objective encodings
+    pub build_encodings: BuildEncodings,
 }
 
 impl Default for DivConOptions {
@@ -57,6 +59,7 @@ impl Default for DivConOptions {
         Self {
             kernel: Default::default(),
             anchor: Default::default(),
+            build_encodings: Default::default(),
         }
     }
 }
@@ -192,6 +195,29 @@ impl fmt::Display for DivConAnchor {
             DivConAnchor::LinSu => write!(f, "lin-su"),
             DivConAnchor::BiOptSat => write!(f, "bioptsat"),
             DivConAnchor::PMinimal(size) => write!(f, "p-minimal({})", size),
+        }
+    }
+}
+
+/// Possible options for building objective encodings in divide and conquer
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "binary-deps", derive(clap::ValueEnum))]
+pub enum BuildEncodings {
+    /// Only once after the first ideal point
+    #[default]
+    Once,
+    /// Rebuild after each ideal point but don't restart the oracle
+    Rebuild,
+    /// Restart the oracle after each ideal point and rebuild the encodings
+    CleanRebuild,
+}
+
+impl fmt::Display for BuildEncodings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BuildEncodings::Once => write!(f, "once"),
+            BuildEncodings::Rebuild => write!(f, "rebuild"),
+            BuildEncodings::CleanRebuild => write!(f, "clean-rebuild"),
         }
     }
 }

@@ -8,7 +8,9 @@ use std::{
     io::Write,
 };
 
-use crate::options::{self, DivConOptions, EnumOptions, HeurImprOptions, HeurImprWhen};
+use crate::options::{
+    self, BuildEncodings, DivConOptions, EnumOptions, HeurImprOptions, HeurImprWhen,
+};
 use crate::{
     types::{NonDomPoint, ParetoFront},
     EncodingStats, KernelOptions, Limits, Stats, WriteSolverLog,
@@ -80,6 +82,9 @@ enum AlgorithmCommand {
         /// The divide and conquer recursion anchor to use
         #[arg(long, default_value_t = DivConAnchor::from(DivConOptions::default().anchor))]
         anchor: DivConAnchor,
+        /// When/how to (re)build the objective encodings for upper bounding search
+        #[arg(long, default_value_t = DivConOptions::default().build_encodings)]
+        build_encodings: BuildEncodings,
         /// Log ideal and nadir points
         #[arg(long)]
         log_bound_points: bool,
@@ -633,6 +638,7 @@ impl Cli {
             AlgorithmCommand::DivCon {
                 shared,
                 anchor,
+                build_encodings,
                 log_bound_points,
             } => Cli {
                 limits: (&shared.limits).into(),
@@ -669,6 +675,7 @@ impl Cli {
                             options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(1))
                         }
                     },
+                    build_encodings,
                 }),
             },
         };
@@ -1299,11 +1306,7 @@ impl WriteSolverLog for CliLogger {
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
             write!(buffer, "exhausted core")?;
             buffer.reset()?;
-            writeln!(
-                buffer,
-                ": exhausted: {}; weight: {}",
-                exhausted, weight,
-            )?;
+            writeln!(buffer, ": exhausted: {}; weight: {}", exhausted, weight)?;
             self.stdout.print(&buffer)?;
         }
         Ok(())

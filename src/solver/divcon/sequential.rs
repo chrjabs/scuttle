@@ -8,7 +8,7 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
-    options::{DivConAnchor, DivConOptions},
+    options::{BuildEncodings, DivConAnchor, DivConOptions},
     solver::{default_blocking_clause, Objective, SolverKernel},
     types::ParetoFront,
     KernelFunctions, Limits, Solve, Termination,
@@ -134,8 +134,16 @@ where
                 break;
             }
             if obj_idxs.len() == self.worker.kernel.stats.n_real_objs {
+                debug_assert!(base_assumps.is_empty());
+                // for master problem
                 if let Some(logger) = &mut self.worker.kernel.logger {
                     logger.log_ideal(&ideal)?;
+                }
+
+                if self.opts.build_encodings == BuildEncodings::Rebuild {
+                    for &oidx in obj_idxs {
+                        self.worker.encodings[oidx] = Some(self.worker.build_obj_encoding(oidx));
+                    }
                 }
             }
 
