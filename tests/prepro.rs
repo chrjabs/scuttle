@@ -345,14 +345,6 @@ macro_rules! PMin {() => {scuttle::PMinimal<
     rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
-macro_rules! PMinDpw {() => {scuttle::PMinimal<
-    rustsat::encodings::pb::DynamicPolyWatchdog,
-    rustsat::encodings::card::DefIncUpperBounding,
-    rustsat::instances::BasicVarManager,
-    fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    rustsat_cadical::CaDiCaL<'static, 'static>,
->};}
-
 macro_rules! Bos {() => {scuttle::BiOptSat<
     rustsat::encodings::pb::DefIncUpperBounding,
     rustsat::encodings::card::DefIncUpperBounding,
@@ -378,13 +370,6 @@ macro_rules! Dc {() => { scuttle::solver::divcon::SeqDivCon<
 generate_tests!(
     pmin,
     PMin!(),
-    scuttle::KernelOptions::default(),
-    "[[uvsrgc]VRTG]"
-);
-
-generate_tests!(
-    pmin_dpw,
-    PMinDpw!(),
     scuttle::KernelOptions::default(),
     "[[uvsrgc]VRTG]"
 );

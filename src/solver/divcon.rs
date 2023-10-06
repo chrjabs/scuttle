@@ -10,10 +10,7 @@ use rustsat::{
             dbtotalizer::{Node, TotDb},
         },
         nodedb::{NodeById, NodeCon, NodeLike},
-        pb::dpw::{
-            self,
-            referenced::{DynamicPolyWatchdog, DynamicPolyWatchdogCell},
-        },
+        pb::dbgte::referenced::{Gte, GteCell},
     },
     instances::ManageVars,
     solvers::{SolveIncremental, SolveStats, SolverResult},
@@ -33,8 +30,9 @@ use super::{
 
 #[derive(Clone)]
 struct ObjEncData {
-    structure: dpw::Structure,
+    root: NodeCon,
     offset: usize,
+    max_leaf_weight: usize,
 }
 
 struct Worker<VM, O, BCG> {
@@ -134,15 +132,17 @@ where
         let tot_db_cell = RefCell::from(&mut self.tot_db);
 
         let mut inc_enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
-            DynamicPolyWatchdogCell::new(
-                &self.encodings[inc_obj].as_ref().unwrap().structure,
+            GteCell::new(
+                self.encodings[inc_obj].as_ref().unwrap().root,
+                self.encodings[inc_obj].as_ref().unwrap().max_leaf_weight,
                 &tot_db_cell,
             ),
             self.encodings[inc_obj].as_ref().unwrap().offset,
         );
         let mut dec_enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
-            DynamicPolyWatchdogCell::new(
-                &self.encodings[dec_obj].as_ref().unwrap().structure,
+            GteCell::new(
+                self.encodings[dec_obj].as_ref().unwrap().root,
+                self.encodings[dec_obj].as_ref().unwrap().max_leaf_weight,
                 &tot_db_cell,
             ),
             self.encodings[dec_obj].as_ref().unwrap().offset,
@@ -172,8 +172,9 @@ where
         }
 
         let mut enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
-            DynamicPolyWatchdog::new(
-                &self.encodings[obj_idx].as_ref().unwrap().structure,
+            Gte::new(
+                self.encodings[obj_idx].as_ref().unwrap().root,
+                self.encodings[obj_idx].as_ref().unwrap().max_leaf_weight,
                 &mut self.tot_db,
             ),
             self.encodings[obj_idx].as_ref().unwrap().offset,
@@ -210,7 +211,7 @@ where
             .map(|enc| {
                 let enc = enc.as_ref().unwrap();
                 ObjEncoding::<_, card::DefIncUpperBounding>::Weighted(
-                    DynamicPolyWatchdogCell::new(&enc.structure, &tot_db_cell),
+                    GteCell::new(enc.root, enc.max_leaf_weight, &tot_db_cell),
                     enc.offset,
                 )
             })
@@ -277,7 +278,6 @@ where
                     if self.encodings[obj_idx].is_none() {
                         self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx));
                     }
-                    let enc = self.encodings[obj_idx].as_ref().unwrap();
                     let reform = &self.reforms[obj_idx];
                     if cost <= reform.offset {
                         // if reformulation has derived this lower bound, no
@@ -285,16 +285,8 @@ where
                         // be dropped from the clause
                         return None;
                     }
-                    dpw::encode_output(
-                        &enc.structure,
-                        (cost - enc.offset - 1) / (1 << enc.structure.output_power()),
-                        &mut self.tot_db,
-                        &mut self.kernel.oracle,
-                        &mut self.kernel.var_manager,
-                    );
-                    let units =
-                        dpw::enforce_ub(&enc.structure, cost - enc.offset - 1, &mut self.tot_db)
-                            .unwrap();
+                    let units = self.bound_objective(obj_idx, cost - 1);
+                    debug_assert!(!units.is_empty());
                     if units.len() == 1 {
                         Some(units[0])
                     } else {
@@ -326,20 +318,32 @@ where
         }
 
         let enc = self.encodings[obj_idx].as_ref().unwrap();
-        dpw::encode_output(
-            &enc.structure,
-            (bound - enc.offset) / (1 << enc.structure.output_power()),
-            &mut self.tot_db,
-            &mut self.kernel.oracle,
-            &mut self.kernel.var_manager,
-        );
-        dpw::enforce_ub(&enc.structure, bound - enc.offset, &mut self.tot_db).unwrap()
+        let bound = bound - enc.offset;
+        let mut assumps = vec![];
+        for val in self.tot_db[enc.root.id].vals(
+            enc.root.rev_map_round_up(bound + 1)..=enc.root.rev_map(bound + enc.max_leaf_weight),
+        ) {
+            assumps.push(
+                !self.tot_db
+                    .define_pos(
+                        enc.root.id,
+                        val,
+                        &mut self.kernel.oracle,
+                        &mut self.kernel.var_manager,
+                    )
+                    .unwrap(),
+            )
+        }
+        assumps
     }
 
+    /// Merges the current OLL reformulation into a GTE
     fn build_obj_encoding(&mut self, obj_idx: usize) -> ObjEncData {
         let reform = &self.reforms[obj_idx];
         let mut cons = vec![];
+        let mut max_leaf_weight = 0;
         for (lit, &weight) in &reform.inactives {
+            max_leaf_weight = std::cmp::max(weight, max_leaf_weight);
             if let Some(&TotOutput {
                 root,
                 oidx,
@@ -347,6 +351,7 @@ where
             }) = reform.outputs.get(lit)
             {
                 debug_assert_ne!(weight, 0);
+                max_leaf_weight = std::cmp::max(tot_weight, max_leaf_weight);
                 if tot_weight == weight {
                     cons.push(NodeCon {
                         id: root,
@@ -371,13 +376,45 @@ where
                 cons.push(NodeCon::weighted(node, weight));
             }
         }
+        cons.sort_unstable_by_key(|con| con.multiplier);
+        // Detect sequences of connections of equal weight and merge them
+        let mut seg_begin = 0;
+        let mut seg_end = 0;
+        let mut merged_cons = vec![];
+        loop {
+            seg_end += 1;
+            if seg_end < cons.len() && cons[seg_end].multiplier == cons[seg_begin].multiplier {
+                continue;
+            }
+            if seg_end > seg_begin + 1 {
+                // merge lits of equal weight
+                let mut seg: Vec<_> = cons[seg_begin..seg_end]
+                    .iter()
+                    .map(|&con| NodeCon {
+                        multiplier: 1,
+                        ..con
+                    })
+                    .collect();
+                seg.sort_unstable_by_key(|&con| self.tot_db.con_len(con));
+                let con = self.tot_db.merge_balanced(&seg);
+                debug_assert_eq!(con.multiplier, 1);
+                merged_cons.push(NodeCon {
+                    multiplier: cons[seg_begin].multiplier,
+                    ..con
+                });
+            } else {
+                merged_cons.push(cons[seg_begin])
+            }
+            seg_begin = seg_end;
+            if seg_end >= cons.len() {
+                break;
+            }
+        }
+        merged_cons.sort_unstable_by_key(|&con| self.tot_db.con_len(con));
         ObjEncData {
-            structure: dpw::build_structure(
-                cons.into_iter(),
-                &mut self.tot_db,
-                &mut self.kernel.var_manager,
-            ),
+            root: self.tot_db.merge_balanced(&merged_cons),
             offset: reform.offset,
+            max_leaf_weight,
         }
     }
 }

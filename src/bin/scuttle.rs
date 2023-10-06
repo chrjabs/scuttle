@@ -14,7 +14,7 @@ use rustsat_cadical::CaDiCaL;
 use scuttle::{
     self,
     cli::{Algorithm, CardEncoding, Cli, FileFormat, PbEncoding},
-    solver::{divcon::SeqDivCon, tricore::TriCore},
+    solver::divcon::SeqDivCon,
     BiOptSat, LoggerError, LowerBounding, PMinimal, Solve,
 };
 
@@ -39,7 +39,7 @@ macro_rules! main_with_obj_encs {
         match $pb {
             PbEncoding::Gte => match $card {
                 CardEncoding::Tot => {
-                    type T<VM> = $s<pb::GeneralizedTotalizer, card::Totalizer, VM>;
+                    type T<VM> = $s<pb::DbGte, card::DbTotalizer, VM>;
                     generic_main(
                         handle_term!(T::new_default_blocking($inst, $oracle, $opts), $cli),
                         $cli,
@@ -50,7 +50,7 @@ macro_rules! main_with_obj_encs {
             },
             PbEncoding::Dpw => match $card {
                 CardEncoding::Tot => {
-                    type T<VM> = $s<pb::DynamicPolyWatchdog, card::Totalizer, VM>;
+                    type T<VM> = $s<pb::DynamicPolyWatchdog, card::DbTotalizer, VM>;
                     generic_main(
                         handle_term!(T::new_default_blocking($inst, $oracle, $opts), $cli),
                         $cli,
@@ -67,13 +67,12 @@ macro_rules! main_with_obj_encs {
 type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
-type PMin<PBE, CE, VM> = PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
+type PMin<VM> =
+    PMinimal<pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause, Oracle>;
 /// BiOptSat Instantiation used
 type Bos<PBE, CE, VM> = BiOptSat<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
 /// Lower-bounding instantiation used
-type Lb<PBE, CE, VM> = LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
-/// Tri-core prototype used
-type Tc<VM> = TriCore<VM, Oracle, fn(Assignment) -> Clause>;
+type Lb<VM> = LowerBounding<pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause, Oracle>;
 /// Divide and Conquer prototype used
 type Dc<VM> = SeqDivCon<VM, Oracle, fn(Assignment) -> Clause>;
 
@@ -115,26 +114,21 @@ fn main() -> Result<(), Error> {
     };
 
     match cli.alg {
-        Algorithm::PMinimal(opts) => main_with_obj_encs!(
-            PMin,
-            cli.obj_pb_enc,
-            cli.obj_card_enc,
-            inst,
-            oracle,
-            opts,
+        Algorithm::PMinimal(opts) => generic_main(
+            handle_term!(PMin::new_default_blocking(inst, oracle, opts), cli),
             cli,
             prepro,
-            reindexer
+            reindexer,
         ),
-        Algorithm::BiOptSat(opts) => {
+        Algorithm::BiOptSat(opts, pb_enc, card_enc) => {
             if inst.n_objectives() != 2 {
                 cli.error("the bioptsat algorithm can only be run on bi-objective problems")?;
                 return Err(Error::InvalidInstance);
             }
             main_with_obj_encs!(
                 Bos,
-                cli.obj_pb_enc,
-                cli.obj_card_enc,
+                pb_enc,
+                card_enc,
                 inst,
                 oracle,
                 opts,
@@ -143,19 +137,8 @@ fn main() -> Result<(), Error> {
                 reindexer
             )
         }
-        Algorithm::LowerBounding(opts) => main_with_obj_encs!(
-            Lb,
-            cli.obj_pb_enc,
-            cli.obj_card_enc,
-            inst,
-            oracle,
-            opts,
-            cli,
-            prepro,
-            reindexer
-        ),
-        Algorithm::TriCore(opts) => generic_main(
-            handle_term!(Tc::new_default_blocking(inst, oracle, opts), cli),
+        Algorithm::LowerBounding(opts) => generic_main(
+            handle_term!(Lb::new_default_blocking(inst, oracle, opts), cli),
             cli,
             prepro,
             reindexer,

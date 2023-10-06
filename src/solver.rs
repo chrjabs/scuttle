@@ -26,7 +26,6 @@ pub mod bioptsat;
 pub mod divcon;
 pub mod lowerbounding;
 pub mod pminimal;
-pub mod tricore;
 
 mod coreguided;
 

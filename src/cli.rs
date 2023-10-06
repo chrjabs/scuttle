@@ -47,8 +47,6 @@ enum AlgorithmCommand {
     PMinimal {
         #[command(flatten)]
         shared: SharedArgs,
-        #[command(flatten)]
-        obj_encs: ObjEncArgs,
     },
     /// BiOptSat Linear Sat-Unsat - Jabs et al. SAT'22
     Bioptsat {
@@ -61,19 +59,9 @@ enum AlgorithmCommand {
     LowerBounding {
         #[command(flatten)]
         shared: SharedArgs,
-        #[command(flatten)]
-        obj_encs: ObjEncArgs,
         /// Log fence updates
         #[arg(long)]
         log_fence: bool,
-    },
-    /// Tri core prototype
-    TriCore {
-        #[command(flatten)]
-        shared: SharedArgs,
-        /// Log ideal and nadir points
-        #[arg(long)]
-        log_bound_points: bool,
     },
     /// Divide and conquer prototype
     DivCon {
@@ -444,8 +432,6 @@ pub struct Cli {
     pub reindexing: bool,
     pub maxpre_reindexing: bool,
     pub cadical_config: rustsat_cadical::Config,
-    pub obj_pb_enc: PbEncoding,
-    pub obj_card_enc: CardEncoding,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,
@@ -458,20 +444,18 @@ pub struct Cli {
 
 pub enum Algorithm {
     PMinimal(KernelOptions),
-    BiOptSat(KernelOptions),
+    BiOptSat(KernelOptions, PbEncoding, CardEncoding),
     LowerBounding(KernelOptions),
-    TriCore(KernelOptions),
     DivCon(DivConOptions),
 }
 
 impl fmt::Display for Algorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Algorithm::PMinimal(_) => write!(f, "p-pminimal"),
-            Algorithm::BiOptSat(_) => write!(f, "bioptsat"),
-            Algorithm::LowerBounding(_) => write!(f, "lower-bounding"),
-            Algorithm::TriCore(_) => write!(f, "tri-core"),
-            Algorithm::DivCon(_) => write!(f, "div-con"),
+            Algorithm::PMinimal(..) => write!(f, "p-pminimal"),
+            Algorithm::BiOptSat(..) => write!(f, "bioptsat"),
+            Algorithm::LowerBounding(..) => write!(f, "lower-bounding"),
+            Algorithm::DivCon(..) => write!(f, "div-con"),
         }
     }
 }
@@ -524,7 +508,7 @@ impl Cli {
             core_exhaustion: shared.core_exhaustion.into(),
         };
         let cli = match CliArgs::parse().command {
-            AlgorithmCommand::PMinimal { shared, obj_encs } => Cli {
+            AlgorithmCommand::PMinimal { shared } => Cli {
                 limits: (&shared.limits).into(),
                 file_format: shared.file.file_format,
                 opb_options: fio::opb::Options {
@@ -537,8 +521,6 @@ impl Cli {
                 reindexing: shared.prepro.reindexing.into(),
                 maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
                 cadical_config: shared.cadical_config.into(),
-                obj_pb_enc: obj_encs.obj_pb_encoding,
-                obj_card_enc: obj_encs.obj_card_encoding,
                 stdout: stdout(shared.log.color),
                 stderr: stderr(shared.log.color),
                 print_solver_config: shared.log.print_solver_config,
@@ -561,8 +543,6 @@ impl Cli {
                 reindexing: shared.prepro.reindexing.into(),
                 maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
                 cadical_config: shared.cadical_config.into(),
-                obj_pb_enc: obj_encs.obj_pb_encoding,
-                obj_card_enc: obj_encs.obj_card_encoding,
                 stdout: stdout(shared.log.color),
                 stderr: stderr(shared.log.color),
                 print_solver_config: shared.log.print_solver_config,
@@ -570,13 +550,9 @@ impl Cli {
                 print_stats: !shared.log.no_print_stats,
                 color: shared.log.color,
                 logger_config: (&shared.log).into(),
-                alg: Algorithm::BiOptSat(kernel_opts(shared)),
+                alg: Algorithm::BiOptSat(kernel_opts(shared), obj_encs.obj_pb_encoding, obj_encs.obj_card_encoding),
             },
-            AlgorithmCommand::LowerBounding {
-                shared,
-                obj_encs,
-                log_fence,
-            } => Cli {
+            AlgorithmCommand::LowerBounding { shared, log_fence } => Cli {
                 limits: (&shared.limits).into(),
                 file_format: shared.file.file_format,
                 opb_options: fio::opb::Options {
@@ -589,8 +565,6 @@ impl Cli {
                 reindexing: shared.prepro.reindexing.into(),
                 maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
                 cadical_config: shared.cadical_config.into(),
-                obj_pb_enc: obj_encs.obj_pb_encoding,
-                obj_card_enc: obj_encs.obj_card_encoding,
                 stdout: stdout(shared.log.color),
                 stderr: stderr(shared.log.color),
                 print_solver_config: shared.log.print_solver_config,
@@ -603,37 +577,6 @@ impl Cli {
                     conf
                 },
                 alg: Algorithm::LowerBounding(kernel_opts(shared)),
-            },
-            AlgorithmCommand::TriCore {
-                shared,
-                log_bound_points,
-            } => Cli {
-                limits: (&shared.limits).into(),
-                file_format: shared.file.file_format,
-                opb_options: fio::opb::Options {
-                    first_var_idx: shared.file.first_var_idx,
-                    ..Default::default()
-                },
-                inst_path: shared.file.inst_path.clone(),
-                preprocessing: shared.prepro.preprocessing.into(),
-                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                reindexing: shared.prepro.reindexing.into(),
-                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                cadical_config: shared.cadical_config.into(),
-                obj_pb_enc: Default::default(),
-                obj_card_enc: Default::default(),
-                stdout: stdout(shared.log.color),
-                stderr: stderr(shared.log.color),
-                print_solver_config: shared.log.print_solver_config,
-                print_solutions: shared.log.print_solutions,
-                print_stats: !shared.log.no_print_stats,
-                color: shared.log.color,
-                logger_config: {
-                    let mut conf: LoggerConfig = (&shared.log).into();
-                    conf.log_bound_points = log_bound_points || shared.log.verbosity >= 2;
-                    conf
-                },
-                alg: Algorithm::TriCore(kernel_opts(shared)),
             },
             AlgorithmCommand::DivCon {
                 shared,
@@ -653,8 +596,6 @@ impl Cli {
                 reindexing: shared.prepro.reindexing.into(),
                 maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
                 cadical_config: shared.cadical_config.into(),
-                obj_pb_enc: Default::default(),
-                obj_card_enc: Default::default(),
                 stdout: stdout(shared.log.color),
                 stderr: stderr(shared.log.color),
                 print_solver_config: shared.log.print_solver_config,
@@ -810,16 +751,16 @@ impl Cli {
                         EnumPrinter::new(opts.enumeration),
                     )?;
                     Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
-                    Self::print_parameter(&mut buffer, "obj-pb-encoding", self.obj_pb_enc)?;
-                    Self::print_parameter(&mut buffer, "obj-card-encoding", self.obj_card_enc)?;
                 }
-                Algorithm::BiOptSat(opts) | Algorithm::TriCore(opts) => {
+                Algorithm::BiOptSat(opts, pb_enc, card_enc) => {
                     Self::print_parameter(
                         &mut buffer,
                         "enumeration",
                         EnumPrinter::new(opts.enumeration),
                     )?;
                     Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
+                    Self::print_parameter(&mut buffer, "obj-pb-encoding", pb_enc)?;
+                    Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
                 }
                 Algorithm::DivCon(opts) => {
                     Self::print_parameter(

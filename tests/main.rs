@@ -248,6 +248,24 @@ macro_rules! packup_3 {
     };
 }
 
+macro_rules! ftp {
+    ($s:ty, $o:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            "./data/ftp.mcnf",
+            vec![
+                (vec![345, 6125], 1),
+                (vec![356, 4760], 1),
+                (vec![364, 4150], 1),
+                (vec![373, 3845], 1),
+                (vec![383, 3390], 1),
+                (vec![392, 2760], 1),
+            ]
+        )
+    };
+}
+
 macro_rules! generate_biobj_tests {
     ($mod:ident, $s:ty, $o:expr) => {
         mod $mod {
@@ -280,9 +298,13 @@ macro_rules! generate_biobj_tests {
             }
 
             #[test]
-            #[ignore]
             fn set_cover() {
                 set_cover!($s, $o)
+            }
+
+            #[test]
+            fn ftp() {
+                ftp!($s, $o)
             }
         }
     };
@@ -330,7 +352,6 @@ macro_rules! generate_tests {
             }
 
             #[test]
-            #[ignore]
             fn set_cover() {
                 set_cover!($s, $o)
             }
@@ -339,37 +360,34 @@ macro_rules! generate_tests {
             fn packup_3() {
                 packup_3!($s, $o)
             }
+
+            #[test]
+            fn ftp() {
+                ftp!($s, $o)
+            }
         }
     };
 }
 
 macro_rules! PMin {() => {scuttle::PMinimal<
-    rustsat::encodings::pb::DefIncUpperBounding,
-    rustsat::encodings::card::DefIncUpperBounding,
-    rustsat::instances::BasicVarManager,
-    fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    rustsat_cadical::CaDiCaL<'static, 'static>,
->};}
-
-macro_rules! PMinDpw {() => {scuttle::PMinimal<
-    rustsat::encodings::pb::DynamicPolyWatchdog,
-    rustsat::encodings::card::DefIncUpperBounding,
+    rustsat::encodings::pb::DbGte,
+    rustsat::encodings::card::DbTotalizer,
     rustsat::instances::BasicVarManager,
     fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
 macro_rules! Bos {() => {scuttle::BiOptSat<
-    rustsat::encodings::pb::DefIncUpperBounding,
-    rustsat::encodings::card::DefIncUpperBounding,
+    rustsat::encodings::pb::DbGte,
+    rustsat::encodings::card::DbTotalizer,
     rustsat::instances::BasicVarManager,
     fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     rustsat_cadical::CaDiCaL<'static, 'static>,
 >};}
 
 macro_rules! Lb {() => { scuttle::LowerBounding<
-    rustsat::encodings::pb::DefIncUpperBounding,
-    rustsat::encodings::card::DefIncUpperBounding,
+    rustsat::encodings::pb::DbGte,
+    rustsat::encodings::card::DbTotalizer,
     rustsat::instances::BasicVarManager,
     fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     rustsat_cadical::CaDiCaL<'static, 'static>,
@@ -403,8 +421,6 @@ generate_tests!(pmin_other_sol_guided, PMin!(), {
     opts
 });
 
-generate_tests!(pmin_dpw, PMinDpw!(), scuttle::KernelOptions::default());
-
 generate_tests!(lb_default, Lb!(), scuttle::KernelOptions::default());
 
 generate_tests!(divcon_bioptsat, Dc!(), {
@@ -437,6 +453,7 @@ generate_biobj_tests!(bioptsat_default, Bos!(), scuttle::KernelOptions::default(
 
 #[test]
 fn debug() {
-    let opts = scuttle::DivConOptions::default();
-    packup_3!(Dc!(), opts)
+    let mut opts = scuttle::DivConOptions::default();
+    opts.anchor = scuttle::options::DivConAnchor::BiOptSat;
+    set_cover!(Dc!(), opts)
 }

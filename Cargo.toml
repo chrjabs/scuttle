@@ -16,7 +16,7 @@ rustsat = { version = "0.3", path = "../rustsat/rustsat", features = ["multiopt"
 rustsat-cadical = { optional = true, version = "0.2", path = "../rustsat/cadical", features = ["v1-7-2"] }
 maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 cpu-time = { optional = true, version = "1.0.0" }
-clap = { optional = true, version = "4.2.4", features = ["derive", "cargo"] }
+clap = { optional = true, version = "4.4", features = ["derive", "cargo"] }
 concolor-clap = { optional = true, version = "0.1.0" }
 termcolor = { optional = true, version = "1.2.0" }
 atty = { optional = true, version = "0.2.14" }
@@ -28,7 +28,7 @@ rustsat-cadical = { version = "0.2", path = "../rustsat/cadical", features = ["v
 maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = ["multiopt"] }
 
 [features]
-default = ["binary-deps", "phasing", "sol-tightening", "interrupt-oracle", "coarse-convergence", "limit-conflicts"]
+default = ["binary-deps", "phasing", "sol-tightening", "interrupt-oracle", "limit-conflicts"]
 interrupt-oracle = ["scuttle-proc/interrupt-oracle"]
 phasing = ["scuttle-proc/phasing"]
 sol-tightening = ["scuttle-proc/sol-tightening"]
