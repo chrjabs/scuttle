@@ -124,7 +124,7 @@ where
                         }
                         if oidx < tot_db[root].len() {
                             let olit =
-                                tot_db.define_pos(root, oidx, &mut encs, &mut self.var_manager);
+                                tot_db.define_pos_tot(root, oidx, &mut encs, &mut self.var_manager);
                             reform.inactives.insert(olit, weight);
                             reform.outputs.insert(
                                 olit,
@@ -195,8 +195,12 @@ where
                             if oidx + 1 >= tot_db[root].len() {
                                 continue;
                             }
-                            let new_olit =
-                                tot_db.define_pos(root, oidx + 1, &mut encs, &mut self.var_manager);
+                            let new_olit = tot_db.define_pos_tot(
+                                root,
+                                oidx + 1,
+                                &mut encs,
+                                &mut self.var_manager,
+                            );
                             reform.inactives.insert(new_olit, tot_weight);
                             reform.outputs.insert(
                                 new_olit,
@@ -243,7 +247,7 @@ where
         let mut bound = 1;
         let core_len = tot_db[root].len();
         while bound < core_len {
-            let olit = tot_db.define_pos(root, bound, &mut self.oracle, &mut self.var_manager);
+            let olit = tot_db.define_pos_tot(root, bound, &mut self.oracle, &mut self.var_manager);
             #[cfg(feature = "limit-conflicts")]
             self.oracle.limit_conflicts(Some(50000))?;
             assumps[base_assumps.len()] = !olit;

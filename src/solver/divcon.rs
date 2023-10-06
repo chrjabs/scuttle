@@ -135,14 +135,14 @@ where
 
         let mut inc_enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
             DynamicPolyWatchdogCell::new(
-                Some(self.encodings[inc_obj].as_ref().unwrap().structure.clone()),
+                &self.encodings[inc_obj].as_ref().unwrap().structure,
                 &tot_db_cell,
             ),
             self.encodings[inc_obj].as_ref().unwrap().offset,
         );
         let mut dec_enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
             DynamicPolyWatchdogCell::new(
-                Some(self.encodings[dec_obj].as_ref().unwrap().structure.clone()),
+                &self.encodings[dec_obj].as_ref().unwrap().structure,
                 &tot_db_cell,
             ),
             self.encodings[dec_obj].as_ref().unwrap().offset,
@@ -173,7 +173,7 @@ where
 
         let mut enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
             DynamicPolyWatchdog::new(
-                Some(self.encodings[obj_idx].as_ref().unwrap().structure.clone()),
+                &self.encodings[obj_idx].as_ref().unwrap().structure,
                 &mut self.tot_db,
             ),
             self.encodings[obj_idx].as_ref().unwrap().offset,
@@ -210,7 +210,7 @@ where
             .map(|enc| {
                 let enc = enc.as_ref().unwrap();
                 ObjEncoding::<_, card::DefIncUpperBounding>::Weighted(
-                    DynamicPolyWatchdogCell::new(Some(enc.structure.clone()), &tot_db_cell),
+                    DynamicPolyWatchdogCell::new(&enc.structure, &tot_db_cell),
                     enc.offset,
                 )
             })
@@ -348,31 +348,27 @@ where
             {
                 debug_assert_ne!(weight, 0);
                 if tot_weight == weight {
-                    cons.push((
-                        NodeCon {
-                            id: root,
-                            offset: oidx,
-                            divisor: 1,
-                        },
-                        weight,
-                    ))
+                    cons.push(NodeCon {
+                        id: root,
+                        offset: oidx,
+                        divisor: 1,
+                        multiplier: weight,
+                    })
                 } else {
                     let node = self.tot_db.insert(Node::Leaf(*lit));
-                    cons.push((NodeCon::full(node), weight));
+                    cons.push(NodeCon::weighted(node, weight));
                     if oidx + 1 < self.tot_db[root].len() {
-                        cons.push((
-                            NodeCon {
-                                id: root,
-                                offset: oidx + 1,
-                                divisor: 1,
-                            },
-                            tot_weight,
-                        ))
+                        cons.push(NodeCon {
+                            id: root,
+                            offset: oidx + 1,
+                            divisor: 1,
+                            multiplier: tot_weight,
+                        })
                     }
                 }
             } else {
                 let node = self.tot_db.insert(Node::Leaf(*lit));
-                cons.push((NodeCon::full(node), weight));
+                cons.push(NodeCon::weighted(node, weight));
             }
         }
         ObjEncData {
