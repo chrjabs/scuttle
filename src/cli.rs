@@ -286,7 +286,7 @@ pub enum DivConAnchor {
     LinSu,
     /// BiOptSat (Sat-Unsat) for bi-objective subproblems
     Bioptsat,
-    /// P-Minimal at subproblems of given size
+    /// P-Minimal after the first ideal point was found
     PMinimal,
 }
 
@@ -613,7 +613,7 @@ impl Cli {
                         DivConAnchor::LinSu => options::DivConAnchor::LinSu,
                         DivConAnchor::Bioptsat => options::DivConAnchor::BiOptSat,
                         DivConAnchor::PMinimal => {
-                            options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(1))
+                            options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(0))
                         }
                     },
                     build_encodings,
