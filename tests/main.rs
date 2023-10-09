@@ -266,6 +266,31 @@ macro_rules! ftp {
     };
 }
 
+macro_rules! spot5 {
+    ($s:ty, $o:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            "./data/spot5.mcnf",
+            vec![
+                (vec![222, 33], 1),
+                (vec![223, 32], 1),
+                (vec![224, 31], 1),
+                (vec![226, 30], 1),
+                (vec![228, 29], 1),
+                (vec![230, 28], 1),
+                (vec![233, 27], 1),
+                (vec![235, 26], 1),
+                (vec![238, 25], 1),
+                (vec![240, 24], 1),
+                (vec![243, 23], 1),
+                (vec![248, 22], 1),
+                (vec![253, 21], 1),
+            ]
+        )
+    };
+}
+
 macro_rules! generate_biobj_tests {
     ($mod:ident, $s:ty, $o:expr) => {
         mod $mod {
@@ -305,6 +330,12 @@ macro_rules! generate_biobj_tests {
             #[test]
             fn ftp() {
                 ftp!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn spot5() {
+                spot5!($s, $o)
             }
         }
     };
@@ -364,6 +395,12 @@ macro_rules! generate_tests {
             #[test]
             fn ftp() {
                 ftp!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn spot5() {
+                spot5!($s, $o)
             }
         }
     };
