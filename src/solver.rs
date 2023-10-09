@@ -11,7 +11,7 @@ use std::{
 use rustsat::{
     encodings::{card, pb, CollectClauses},
     instances::{Cnf, ManageVars, MultiOptInstance},
-    solvers::{SolveIncremental, SolveStats, SolverResult},
+    solvers::{SolveIncremental, SolveStats, SolverResult, FreezeVar},
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
 };
 use scuttle_proc::oracle_bounds;
@@ -102,6 +102,7 @@ struct SolverKernel<VM, O, BCG> {
     term_flag: Arc<AtomicBool>,
 }
 
+#[oracle_bounds]
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     VM: ManageVars,
@@ -163,6 +164,13 @@ where
         oracle.reserve(var_manager.max_var().unwrap())?;
         oracle.add_cnf(cnf)?;
         oracle.add_cnf(obj_cnf)?;
+        #[cfg(feature = "sol-tightening")]
+        // Freeze objective variables so that they are not removed
+        for o in &objs {
+            for (l, _) in o.iter() {
+                oracle.freeze_var(l.var())?;
+            }
+        }
         let max_orig_var = var_manager.max_var().unwrap();
         Ok(Self {
             oracle,
@@ -521,7 +529,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     VM: ManageVars,
-    O: SolveIncremental,
+    O: SolveIncremental + FreezeVar,
     BCG: FnMut(Assignment) -> Clause,
 {
     /// Yields Pareto-optimal solutions. The given assumptions must only allow

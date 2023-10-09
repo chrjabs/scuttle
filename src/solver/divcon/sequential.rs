@@ -33,6 +33,7 @@ pub struct DivCon<VM, O, BCG> {
     opts: DivConOptions,
 }
 
+#[oracle_bounds]
 impl<VM, O> DivCon<VM, O, fn(Assignment) -> Clause>
 where
     VM: ManageVars,
@@ -53,6 +54,7 @@ where
     }
 }
 
+#[oracle_bounds]
 impl<VM, O> DivCon<VM, O, fn(Assignment) -> Clause>
 where
     VM: ManageVars,

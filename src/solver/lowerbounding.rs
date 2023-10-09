@@ -40,6 +40,7 @@ pub struct LowerBounding<PBE, CE, VM, BCG, O> {
     pareto_front: ParetoFront,
 }
 
+#[oracle_bounds]
 impl<PBE, CE, VM, O> LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, O>
 where
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
@@ -62,6 +63,7 @@ where
     }
 }
 
+#[oracle_bounds]
 impl<PBE, CE, VM, BCG, O> LowerBounding<PBE, CE, VM, BCG, O>
 where
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
@@ -80,6 +82,7 @@ where
     }
 }
 
+#[oracle_bounds]
 impl<PBE, CE, VM, O> LowerBounding<PBE, CE, VM, fn(Assignment) -> Clause, O>
 where
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
@@ -101,6 +104,7 @@ where
     }
 }
 
+#[oracle_bounds]
 impl<PBE, CE, VM, BCG, O> LowerBounding<PBE, CE, VM, BCG, O>
 where
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
