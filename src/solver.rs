@@ -11,7 +11,7 @@ use std::{
 use rustsat::{
     encodings::{card, pb, CollectClauses},
     instances::{Cnf, ManageVars, MultiOptInstance},
-    solvers::{SolveIncremental, SolveStats, SolverResult, FreezeVar},
+    solvers::{FreezeVar, SolveIncremental, SolveStats, SolverResult},
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
 };
 use scuttle_proc::oracle_bounds;
@@ -443,8 +443,13 @@ where
             }
         }
         if reduction > 0 {
+            debug_assert!(tightening);
             // get assignment from the solver again to trigger reconstruction stack
             *sol = self.oracle.solution(sol.max_var().unwrap())?;
+            debug_assert_eq!(
+                self.get_cost_with_heuristic_improvements(obj_idx, sol, false)?,
+                cost
+            );
         }
         if tightening {
             self.log_heuristic_obj_improvement(obj_idx, cost + reduction, cost)?;
@@ -553,13 +558,15 @@ where
         solution = solution.truncate(self.max_orig_var);
 
         loop {
-            let true_costs: Vec<_> = (0..self.stats.n_objs)
-                .map(|idx| {
-                    self.get_cost_with_heuristic_improvements(idx, &mut solution, false)
-                        .unwrap()
-                })
-                .collect();
-            debug_assert_eq!(true_costs, costs);
+            debug_assert_eq!(
+                (0..self.stats.n_objs)
+                    .map(|idx| {
+                        self.get_cost_with_heuristic_improvements(idx, &mut solution, false)
+                            .unwrap()
+                    })
+                    .collect::<Vec<_>>(),
+                costs
+            );
 
             non_dominated.add_sol(solution.clone());
             match self.log_solution() {
