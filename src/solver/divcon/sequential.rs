@@ -11,7 +11,7 @@ use crate::{
     options::{BuildEncodings, DivConAnchor, DivConOptions},
     solver::{default_blocking_clause, Objective, SolverKernel},
     types::ParetoFront,
-    KernelFunctions, Limits, Solve, Termination,
+    KernelFunctions, KernelOptions, Limits, Solve, Termination,
 };
 
 use super::Worker;
@@ -20,7 +20,7 @@ use super::Worker;
 #[kernel(kernel = "self.worker.kernel")]
 #[solve(bounds = "where VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats")]
+        O: SolveIncremental + SolveStats + Default")]
 pub struct DivCon<VM, O, BCG> {
     /// The single worker structure
     worker: Worker<VM, O, BCG>,
@@ -44,11 +44,16 @@ where
         oracle: O,
         opts: DivConOptions,
     ) -> Result<Self, Termination> {
+        let kernel_opts = KernelOptions {
+            store_cnf: opts.kernel.store_cnf
+                || opts.build_encodings == BuildEncodings::CleanRebuild,
+            ..opts.kernel
+        };
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             oracle,
             default_blocking_clause,
-            opts.kernel,
+            kernel_opts,
         )?;
         Ok(Self::init(kernel, opts))
     }
@@ -64,11 +69,16 @@ where
         inst: MultiOptInstance<VM>,
         opts: DivConOptions,
     ) -> Result<Self, Termination> {
+        let kernel_opts = KernelOptions {
+            store_cnf: opts.kernel.store_cnf
+                || opts.build_encodings == BuildEncodings::CleanRebuild,
+            ..opts.kernel
+        };
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             O::default(),
             default_blocking_clause,
-            opts.kernel,
+            kernel_opts,
         )?;
         Ok(Self::init(kernel, opts))
     }
@@ -95,7 +105,7 @@ impl<VM, O, BCG> DivCon<VM, O, BCG>
 where
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental + SolveStats,
+    O: SolveIncremental + SolveStats + Default,
 {
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> Result<(), Termination> {
@@ -120,7 +130,10 @@ where
         // TODO: filtering not just through cutting solutions to avoid unsat calls
         loop {
             if obj_idxs.len() == 1 {
-                debug_assert_eq!(self.opts.anchor, DivConAnchor::LinSu);
+                debug_assert!(matches!(
+                    self.opts.anchor,
+                    DivConAnchor::LinSu | DivConAnchor::NMinus(_)
+                ));
                 self.worker.linsu_yield(
                     obj_idxs[0],
                     base_assumps,
@@ -130,6 +143,31 @@ where
                 )?;
                 self.cut_dominated()?;
                 return Ok(());
+            }
+
+            if let DivConAnchor::NMinus(x) = self.opts.anchor {
+                if obj_idxs.len() <= self.worker.kernel.stats.n_real_objs - x {
+                    match obj_idxs.len() {
+                        0..=1 => panic!("should never have 0 or 1 objectives here"),
+                        2 => {
+                            self.worker.bioptsat(
+                                (obj_idxs[0], obj_idxs[1]),
+                                base_assumps,
+                                None,
+                                (Some(ideal[obj_idxs[0]]), Some(ideal[obj_idxs[1]])),
+                                |_| None,
+                                &mut self.pareto_front,
+                            )?;
+                            self.cut_dominated()?;
+                            return Ok(());
+                        }
+                        _ => {
+                            self.worker
+                                .p_minimal(base_assumps, None, &mut self.pareto_front)?;
+                            return Ok(());
+                        }
+                    }
+                }
             }
 
             if !self.worker.find_ideal(base_assumps, obj_idxs, &mut ideal)? {
@@ -142,10 +180,13 @@ where
                     logger.log_ideal(&ideal)?;
                 }
 
-                if self.opts.build_encodings == BuildEncodings::Rebuild {
-                    for &oidx in obj_idxs {
-                        self.worker.encodings[oidx] = Some(self.worker.build_obj_encoding(oidx));
-                    }
+                if matches!(
+                    self.opts.build_encodings,
+                    BuildEncodings::Rebuild | BuildEncodings::CleanRebuild
+                ) {
+                    self.worker.rebuild_obj_encodings(
+                        self.opts.build_encodings == BuildEncodings::CleanRebuild,
+                    )?
                 }
             }
 

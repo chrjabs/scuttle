@@ -88,6 +88,8 @@ struct SolverKernel<VM, O, BCG> {
     max_orig_var: Var,
     /// The objectives
     objs: Vec<Objective>,
+    /// The stored original clauses, if needed
+    orig_cnf: Option<Cnf>,
     /// Generator of blocking clauses
     block_clause_gen: BCG,
     /// Configuration options
@@ -157,6 +159,14 @@ where
                 Objective::Constant { .. } => stats.n_real_objs -= 1,
             }
         }
+        // Store original clauses, if needed
+        let orig_cnf = if opts.store_cnf {
+            let mut orig_cnf = cnf.clone();
+            orig_cnf.extend(obj_cnf.clone());
+            Some(orig_cnf)
+        } else {
+            None
+        };
         // Add hard clauses and relaxed soft clauses to oracle
         if var_manager.max_var().is_none() {
             return Err(Termination::NoVars);
@@ -178,6 +188,7 @@ where
             obj_lit_data,
             max_orig_var,
             objs,
+            orig_cnf,
             block_clause_gen: bcg,
             opts,
             stats,
@@ -696,7 +707,9 @@ where
             bound
         } else {
             let res = self.solve_assumps(&assumps)?;
-            debug_assert_eq!(res, SolverResult::Sat);
+            if res == SolverResult::Unsat {
+                return Ok(());
+            }
             let mut sol = self.oracle.solution(self.max_orig_var)?;
             let cost = self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
             (cost, sol)
@@ -1064,6 +1077,22 @@ where
         }
         self.log_oracle_call(res)?;
         Ok(res)
+    }
+}
+
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    O: SolveIncremental + Default,
+{
+    /// Resets the oracle and returns an error when the original [`Cnf`] was not stored.
+    fn reset_oracle(&mut self) -> Result<(), Termination> {
+        if !self.opts.store_cnf {
+            return Err(Termination::ResetWithoutCnf);
+        }
+        self.oracle = O::default();
+        self.oracle.reserve(self.max_orig_var)?;
+        self.oracle.add_cnf(self.orig_cnf.clone().unwrap())?;
+        Ok(())
     }
 }
 

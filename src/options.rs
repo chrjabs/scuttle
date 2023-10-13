@@ -23,6 +23,8 @@ pub struct KernelOptions {
     pub core_minimization: bool,
     /// Core exhaustion (in OLL)
     pub core_exhaustion: bool,
+    /// Store the original clauses
+    pub store_cnf: bool,
 }
 
 impl Default for KernelOptions {
@@ -35,6 +37,7 @@ impl Default for KernelOptions {
             core_trimming: false,
             core_minimization: false,
             core_exhaustion: false,
+            store_cnf: false,
         }
     }
 }
@@ -187,6 +190,9 @@ pub enum DivConAnchor {
     BiOptSat,
     /// P-Minimal at subproblems of given size
     PMinimal(SubProblemSize),
+    /// Run the appropriate anchor (Linear Sat-Unsat / BiOptSat / P-Minimal) at
+    /// subproblems of size `n-x`.
+    NMinus(usize),
 }
 
 impl fmt::Display for DivConAnchor {
@@ -195,6 +201,7 @@ impl fmt::Display for DivConAnchor {
             DivConAnchor::LinSu => write!(f, "lin-su"),
             DivConAnchor::BiOptSat => write!(f, "bioptsat"),
             DivConAnchor::PMinimal(size) => write!(f, "p-minimal({})", size),
+            DivConAnchor::NMinus(x) => write!(f, "n-minus({})", x),
         }
     }
 }

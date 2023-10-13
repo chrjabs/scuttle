@@ -288,6 +288,9 @@ pub enum DivConAnchor {
     Bioptsat,
     /// P-Minimal after the first ideal point was found
     PMinimal,
+    /// Run an appropriate anchor (Linear Sat-Unsat / BiOptSat / P-Minimal) at
+    /// subproblems of size `n-1`.
+    NMinusOne,
 }
 
 impl fmt::Display for DivConAnchor {
@@ -296,6 +299,7 @@ impl fmt::Display for DivConAnchor {
             DivConAnchor::LinSu => write!(f, "lin-su"),
             DivConAnchor::Bioptsat => write!(f, "bioptsat"),
             DivConAnchor::PMinimal => write!(f, "p-minimal"),
+            DivConAnchor::NMinusOne => write!(f, "n-minus-one"),
         }
     }
 }
@@ -306,6 +310,7 @@ impl From<options::DivConAnchor> for DivConAnchor {
             options::DivConAnchor::LinSu => DivConAnchor::LinSu,
             options::DivConAnchor::BiOptSat => DivConAnchor::Bioptsat,
             options::DivConAnchor::PMinimal(_) => DivConAnchor::PMinimal,
+            options::DivConAnchor::NMinus(_) => DivConAnchor::NMinusOne,
         }
     }
 }
@@ -506,6 +511,7 @@ impl Cli {
             core_trimming: shared.core_trimming.into(),
             core_minimization: shared.core_minimization.into(),
             core_exhaustion: shared.core_exhaustion.into(),
+            store_cnf: false,
         };
         let cli = match CliArgs::parse().command {
             AlgorithmCommand::PMinimal { shared } => Cli {
@@ -550,7 +556,11 @@ impl Cli {
                 print_stats: !shared.log.no_print_stats,
                 color: shared.log.color,
                 logger_config: (&shared.log).into(),
-                alg: Algorithm::BiOptSat(kernel_opts(shared), obj_encs.obj_pb_encoding, obj_encs.obj_card_encoding),
+                alg: Algorithm::BiOptSat(
+                    kernel_opts(shared),
+                    obj_encs.obj_pb_encoding,
+                    obj_encs.obj_card_encoding,
+                ),
             },
             AlgorithmCommand::LowerBounding { shared, log_fence } => Cli {
                 limits: (&shared.limits).into(),
@@ -615,6 +625,7 @@ impl Cli {
                         DivConAnchor::PMinimal => {
                             options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(0))
                         }
+                        DivConAnchor::NMinusOne => options::DivConAnchor::NMinus(1),
                     },
                     build_encodings,
                 }),
@@ -623,9 +634,8 @@ impl Cli {
         #[cfg(any(not(feature = "sol-tightening"), not(feature = "phasing")))]
         match &cli.alg {
             Algorithm::PMinimal(opts)
-            | Algorithm::PMinimalDpw(opts)
+            | Algorithm::BiOptSat(opts, ..)
             | Algorithm::LowerBounding(opts)
-            | Algorithm::TriCore(opts)
             | Algorithm::DivCon(DivConOptions { kernel: opts, .. }) => {
                 #[cfg(not(feature = "sol-tightening"))]
                 if opts.heuristic_improvements.solution_tightening != HeurImprWhen::Never {

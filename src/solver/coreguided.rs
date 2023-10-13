@@ -210,6 +210,9 @@ where
                                     tot_weight,
                                 },
                             );
+                            // remove old output to only have one entry per totalizer in outputs
+                            // map
+                            reform.outputs.remove(olit).unwrap();
                             assumps.push(!new_olit);
                         }
                     }

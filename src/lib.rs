@@ -51,6 +51,8 @@ pub enum Termination {
     Interrupted,
     /// An error occured in the oracle
     OracleError(SolverError),
+    /// Attempted to reset oracle without having stored the original CNF
+    ResetWithoutCnf,
 }
 
 impl Termination {
@@ -88,6 +90,10 @@ impl fmt::Display for Termination {
             Termination::OracleError(oe) => {
                 write!(f, "The SAT oracle returned an error: {}", oe)
             }
+            Termination::ResetWithoutCnf => write!(
+                f,
+                "Tried to reset the SAT oracle without having stored the original clauses"
+            ),
         }
     }
 }

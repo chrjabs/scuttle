@@ -149,7 +149,10 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
     #[cfg(feature = "phasing")]
     let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
     #[cfg(feature = "sol-tightening")]
-    let obounds = format!("{} O: rustsat::solvers::FlipLit + rustsat::solvers::FreezeVar,", obounds);
+    let obounds = format!(
+        "{} O: rustsat::solvers::FlipLit + rustsat::solvers::FreezeVar,",
+        obounds
+    );
     #[cfg(feature = "limit-conflicts")]
     let obounds = format!("{} O: rustsat::solvers::LimitConflicts,", obounds);
     let obounds: TokenStream = obounds.parse().unwrap();
@@ -210,7 +213,10 @@ fn insert_oracle_bounds(mut impl_block: syn::ItemImpl) -> TokenStream {
     #[cfg(feature = "phasing")]
     let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
     #[cfg(feature = "sol-tightening")]
-    let obounds = format!("{} O: rustsat::solvers::FlipLit + rustsat::solvers::FreezeVar,", obounds);
+    let obounds = format!(
+        "{} O: rustsat::solvers::FlipLit + rustsat::solvers::FreezeVar,",
+        obounds
+    );
     #[cfg(feature = "limit-conflicts")]
     let obounds = format!("{} O: rustsat::solvers::LimitConflicts,", obounds);
     let obounds: TokenStream = obounds.parse().unwrap();

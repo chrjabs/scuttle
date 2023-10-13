@@ -9,7 +9,7 @@ use rustsat::{
             self,
             dbtotalizer::{Node, TotDb},
         },
-        nodedb::{NodeById, NodeCon, NodeLike},
+        nodedb::{NodeById, NodeCon, NodeId, NodeLike},
         pb::dbgte::referenced::{Gte, GteCell},
     },
     instances::ManageVars,
@@ -28,11 +28,12 @@ use super::{
     ObjEncoding, Objective, SolverKernel,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct ObjEncData {
     root: NodeCon,
     offset: usize,
     max_leaf_weight: usize,
+    first_node: NodeId,
 }
 
 struct Worker<VM, O, BCG> {
@@ -53,6 +54,7 @@ impl<VM, O, BCG> Worker<VM, O, BCG> {
         reforms.shrink_to_fit();
         let mut encodings = vec![None; kernel.stats.n_objs];
         encodings.shrink_to_fit();
+        // Seed all objective literals into o
         Self {
             kernel,
             reforms,
@@ -67,7 +69,7 @@ impl<VM, O, BCG> Worker<VM, O, BCG>
 where
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental + SolveStats,
+    O: SolveIncremental + SolveStats + Default,
 {
     /// Finds the ideal point of the working instance under given assumptions for certain objectives by executing OLL
     /// single-objective optimization. Returns false if the entire pareto front
@@ -324,7 +326,8 @@ where
             enc.root.rev_map_round_up(bound + 1)..=enc.root.rev_map(bound + enc.max_leaf_weight),
         ) {
             assumps.push(
-                !self.tot_db
+                !self
+                    .tot_db
                     .define_pos(
                         enc.root.id,
                         val,
@@ -339,6 +342,7 @@ where
 
     /// Merges the current OLL reformulation into a GTE
     fn build_obj_encoding(&mut self, obj_idx: usize) -> ObjEncData {
+        self.kernel.log_routine_start("build-encoding").unwrap();
         let reform = &self.reforms[obj_idx];
         let mut cons = vec![];
         let mut max_leaf_weight = 0;
@@ -355,7 +359,7 @@ where
                 if tot_weight == weight {
                     cons.push(NodeCon {
                         id: root,
-                        offset: oidx,
+                        offset: oidx.try_into().unwrap(),
                         divisor: 1,
                         multiplier: weight,
                     })
@@ -365,7 +369,7 @@ where
                     if oidx + 1 < self.tot_db[root].len() {
                         cons.push(NodeCon {
                             id: root,
-                            offset: oidx + 1,
+                            offset: (oidx + 1).try_into().unwrap(),
                             divisor: 1,
                             multiplier: tot_weight,
                         })
@@ -377,6 +381,13 @@ where
             }
         }
         cons.sort_unstable_by_key(|con| con.multiplier);
+        debug_assert!(!cons.is_empty());
+        // Note: set first_node _after_ inserting new input literals
+        let first_node = if cons.len() == 1 {
+            cons[0].id
+        } else {
+            NodeId(self.tot_db.len())
+        };
         // Detect sequences of connections of equal weight and merge them
         let mut seg_begin = 0;
         let mut seg_end = 0;
@@ -411,10 +422,61 @@ where
             }
         }
         merged_cons.sort_unstable_by_key(|&con| self.tot_db.con_len(con));
-        ObjEncData {
+        let enc = ObjEncData {
             root: self.tot_db.merge_balanced(&merged_cons),
             offset: reform.offset,
             max_leaf_weight,
+            first_node,
+        };
+        self.kernel.log_routine_end().unwrap();
+        enc
+    }
+
+    /// Rebuilds all existing objective encodings. If `clean` is set, does so by
+    /// restarting the oracle.
+    fn rebuild_obj_encodings(&mut self, clean: bool) -> Result<(), Termination> {
+        debug_assert!(!clean || self.kernel.orig_cnf.is_some());
+        if clean {
+            // Drain encodings
+            let mut reform_offset = 0;
+            let mut encs: Vec<_> = self
+                .encodings
+                .iter()
+                .filter_map(|e| *e)
+                .filter(|e| e.first_node > e.root.id)
+                .collect();
+            if encs.is_empty() {
+                return Ok(());
+            }
+            encs.sort_unstable_by_key(|e| e.first_node);
+            for enc in encs.iter().rev() {
+                self.tot_db.drain(enc.first_node..=enc.root.id).unwrap();
+                reform_offset += enc.root.id + 1 - enc.first_node;
+            }
+            if reform_offset == 0 {
+                return Ok(());
+            }
+            // Adjust reformulations. Totalizers in the reformulation are either
+            // _before_ or _after_ all of the drained encodings (not in
+            // between), so we can do this once here rather than in the loop.
+            for reform in &mut self.reforms {
+                for (_, TotOutput { root, .. }) in &mut reform.outputs {
+                    if *root > encs[0].first_node {
+                        debug_assert!(*root > encs[encs.len() - 1].root.id);
+                        *root -= reform_offset;
+                    }
+                }
+            }
+            // TODO: figure out how to do use `self.tot_db.reset_vars();` here without breaking the reformulations
+            // Reset oracle
+            self.kernel.reset_oracle()?;
         }
+        for oidx in 0..self.encodings.len() {
+            if self.encodings[oidx].is_none() {
+                continue;
+            }
+            self.encodings[oidx] = Some(self.build_obj_encoding(oidx));
+        }
+        Ok(())
     }
 }

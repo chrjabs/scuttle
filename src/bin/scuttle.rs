@@ -67,8 +67,7 @@ macro_rules! main_with_obj_encs {
 type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
-type PMin<VM> =
-    PMinimal<pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause, Oracle>;
+type PMin<VM> = PMinimal<pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause, Oracle>;
 /// BiOptSat Instantiation used
 type Bos<PBE, CE, VM> = BiOptSat<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
 /// Lower-bounding instantiation used
@@ -125,17 +124,7 @@ fn main() -> Result<(), Error> {
                 cli.error("the bioptsat algorithm can only be run on bi-objective problems")?;
                 return Err(Error::InvalidInstance);
             }
-            main_with_obj_encs!(
-                Bos,
-                pb_enc,
-                card_enc,
-                inst,
-                oracle,
-                opts,
-                cli,
-                prepro,
-                reindexer
-            )
+            main_with_obj_encs!(Bos, pb_enc, card_enc, inst, oracle, opts, cli, prepro, reindexer)
         }
         Algorithm::LowerBounding(opts) => generic_main(
             handle_term!(Lb::new_default_blocking(inst, oracle, opts), cli),
