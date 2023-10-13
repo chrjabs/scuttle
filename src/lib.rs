@@ -57,11 +57,10 @@ pub enum Termination {
 
 impl Termination {
     pub fn is_error(&self) -> bool {
-        match self {
-            Termination::LoggerError(_) => true,
-            Termination::OracleError(_) => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Termination::LoggerError(_) | Termination::OracleError(_)
+        )
     }
 }
 

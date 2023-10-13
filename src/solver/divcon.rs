@@ -231,7 +231,7 @@ where
                     .collect();
                 (costs, sol)
             } else {
-                let res = self.kernel.solve_assumps(&base_assumps)?;
+                let res = self.kernel.solve_assumps(base_assumps)?;
                 if SolverResult::Unsat == res {
                     self.kernel.log_routine_end()?;
                     return Ok(());
@@ -270,7 +270,7 @@ where
     fn cut_dominated(&mut self, points: &[&[usize]]) -> Result<(), Termination> {
         for &cost in points {
             let clause = cost
-                .into_iter()
+                .iter()
                 .enumerate()
                 .filter_map(|(obj_idx, &cost)| {
                     if matches!(self.kernel.objs[obj_idx], Objective::Constant { .. }) {
@@ -460,7 +460,7 @@ where
             // _before_ or _after_ all of the drained encodings (not in
             // between), so we can do this once here rather than in the loop.
             for reform in &mut self.reforms {
-                for (_, TotOutput { root, .. }) in &mut reform.outputs {
+                for TotOutput { root, .. } in reform.outputs.values_mut() {
                     if *root > encs[0].first_node {
                         debug_assert!(*root > encs[encs.len() - 1].root.id);
                         *root -= reform_offset;

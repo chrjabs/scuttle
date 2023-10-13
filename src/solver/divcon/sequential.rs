@@ -116,7 +116,7 @@ where
         debug_assert_eq!(all_objs.len(), self.worker.kernel.stats.n_real_objs);
         self.solve_subproblem(vec![0; self.worker.kernel.stats.n_objs], &[], &all_objs)?;
         self.worker.kernel.log_routine_end()?;
-        return Ok(());
+        Ok(())
     }
 
     /// Recurses down into the subproblems and solves them

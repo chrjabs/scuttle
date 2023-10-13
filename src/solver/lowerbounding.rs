@@ -187,7 +187,7 @@ where
                         &mut kernel.var_manager,
                     ),
                     Objective::Unweighted { lits, .. } => ObjEncoding::<PBE, CE>::new_unweighted(
-                        lits.iter().map(|&l| l),
+                        lits.iter().copied(),
                         kernel.opts.reserve_enc_vars,
                         &mut kernel.var_manager,
                     ),

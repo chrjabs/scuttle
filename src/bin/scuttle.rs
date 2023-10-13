@@ -149,7 +149,7 @@ fn generic_main<S: Solve>(
 ) -> Result<(), Error> {
     // Set up signal handling
     let mut interrupter = solver.interrupter();
-    let mut signals = signal_hook::iterator::Signals::new(&[
+    let mut signals = signal_hook::iterator::Signals::new([
         signal_hook::consts::SIGTERM,
         signal_hook::consts::SIGINT,
         signal_hook::consts::SIGXCPU,

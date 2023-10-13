@@ -137,7 +137,7 @@ where
         for (idx, obj) in objs.iter().enumerate() {
             match obj {
                 Objective::Weighted { lits, .. } => {
-                    for (&olit, _) in lits {
+                    for &olit in lits.keys() {
                         match obj_lit_data.get_mut(&olit) {
                             Some(data) => data.objs.push(idx),
                             None => {
@@ -219,7 +219,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     fn externalize_internal_costs(&self, costs: &[usize]) -> Vec<isize> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         costs
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(idx, &cst)| match self.objs[idx] {
                 Objective::Weighted { offset, .. } => {
@@ -248,7 +248,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     fn internalize_external_costs(&self, costs: &[isize]) -> Vec<usize> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         costs
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(idx, &cst)| match self.objs[idx] {
                 Objective::Weighted { offset, .. } => (cst - offset)
@@ -778,7 +778,7 @@ where
             };
         }
         self.log_routine_end()?;
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -795,8 +795,6 @@ where
         &mut self,
         tightening: bool,
     ) -> Result<(Vec<usize>, Assignment), Termination> {
-        let mut costs = Vec::new();
-        costs.resize(self.stats.n_objs, 0);
         let mut sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
         let costs = (0..self.objs.len())
             .map(|idx| self.get_cost_with_heuristic_improvements(idx, &mut sol, tightening))

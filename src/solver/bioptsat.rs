@@ -135,7 +135,7 @@ where
         self.kernel
             .objs
             .iter()
-            .zip([&self.obj_encs.0, &self.obj_encs.1].into_iter())
+            .zip([&self.obj_encs.0, &self.obj_encs.1])
             .map(|(obj, enc)| {
                 let mut s = EncodingStats {
                     offset: obj.offset(),
@@ -179,7 +179,7 @@ where
                 &mut kernel.var_manager,
             ),
             Objective::Unweighted { lits, .. } => ObjEncoding::<PBE, CE>::new_unweighted(
-                lits.iter().map(|&l| l),
+                lits.iter().copied(),
                 kernel.opts.reserve_enc_vars,
                 &mut kernel.var_manager,
             ),
@@ -192,7 +192,7 @@ where
                 &mut kernel.var_manager,
             ),
             Objective::Unweighted { lits, .. } => ObjEncoding::<PBE, CE>::new_unweighted(
-                lits.iter().map(|&l| l),
+                lits.iter().copied(),
                 kernel.opts.reserve_enc_vars,
                 &mut kernel.var_manager,
             ),

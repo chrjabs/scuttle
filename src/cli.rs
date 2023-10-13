@@ -166,13 +166,13 @@ struct LimitArgs {
     oracle_call_limit: usize,
 }
 
-impl Into<Limits> for &LimitArgs {
-    fn into(self) -> Limits {
+impl From<&LimitArgs> for Limits {
+    fn from(value: &LimitArgs) -> Self {
         Limits {
-            pps: none_if_zero!(self.pp_limit),
-            sols: none_if_zero!(self.sol_limit),
-            candidates: none_if_zero!(self.candidate_limit),
-            oracle_calls: none_if_zero!(self.oracle_call_limit),
+            pps: none_if_zero!(value.pp_limit),
+            sols: none_if_zero!(value.sol_limit),
+            candidates: none_if_zero!(value.candidate_limit),
+            oracle_calls: none_if_zero!(value.oracle_call_limit),
         }
     }
 }
@@ -230,19 +230,19 @@ struct LogArgs {
     log_routines: usize,
 }
 
-impl Into<LoggerConfig> for &LogArgs {
-    fn into(self) -> LoggerConfig {
+impl From<&LogArgs> for LoggerConfig {
+    fn from(value: &LogArgs) -> Self {
         LoggerConfig {
-            log_candidates: self.log_candidates || self.verbosity >= 2,
-            log_solutions: self.log_solutions,
-            log_non_dom: self.log_non_dom || self.verbosity >= 1,
-            log_oracle_calls: self.log_oracle_calls || self.verbosity >= 3,
-            log_heuristic_obj_improvement: self.log_heuristic_obj_improvement
-                || self.verbosity >= 3,
+            log_candidates: value.log_candidates || value.verbosity >= 2,
+            log_solutions: value.log_solutions,
+            log_non_dom: value.log_non_dom || value.verbosity >= 1,
+            log_oracle_calls: value.log_oracle_calls || value.verbosity >= 3,
+            log_heuristic_obj_improvement: value.log_heuristic_obj_improvement
+                || value.verbosity >= 3,
             log_fence: false,
-            log_routines: std::cmp::max(self.log_routines, self.verbosity as usize * 2),
+            log_routines: std::cmp::max(value.log_routines, value.verbosity as usize * 2),
             log_bound_points: false,
-            log_cores: self.log_cores || self.verbosity >= 2,
+            log_cores: value.log_cores || value.verbosity >= 2,
         }
     }
 }
@@ -323,9 +323,9 @@ pub enum Bool {
     False,
 }
 
-impl Into<bool> for Bool {
-    fn into(self) -> bool {
-        self == Bool::True
+impl From<Bool> for bool {
+    fn from(val: Bool) -> Self {
+        val == Bool::True
     }
 }
 
@@ -815,13 +815,9 @@ impl Cli {
         buffer.set_color(ColorSpec::new().set_bold(true))?;
         writeln!(buffer, ": ")?;
         buffer.reset()?;
-        pareto_front.into_iter().fold(Ok(()), |res, pp| {
-            if res.is_ok() {
-                self.print_non_dom(&mut buffer, pp)
-            } else {
-                res
-            }
-        })?;
+        pareto_front
+            .into_iter()
+            .try_fold((), |_, pp| self.print_non_dom(&mut buffer, pp))?;
         Self::end_block(&mut buffer)?;
         self.stdout.print(&buffer)?;
         Ok(())
@@ -888,12 +884,8 @@ impl Cli {
             stats
                 .into_iter()
                 .enumerate()
-                .fold(Ok(()), |res, (idx, stats)| {
-                    if res.is_ok() {
-                        Self::print_enc_stats(&mut buffer, idx, stats)
-                    } else {
-                        res
-                    }
+                .try_fold((), |_, (idx, stats)| {
+                    Self::print_enc_stats(&mut buffer, idx, stats)
                 })?;
             Self::end_block(&mut buffer)?;
             self.stdout.print(&buffer)?;
@@ -975,13 +967,9 @@ impl Cli {
             non_dom.n_sols()
         )?;
         if self.print_solutions {
-            non_dom.into_iter().fold(Ok(()), |res, sol| {
-                if res.is_ok() {
-                    write!(buffer, "s {}", sol)
-                } else {
-                    res
-                }
-            })?
+            non_dom
+                .into_iter()
+                .try_fold((), |_, sol| write!(buffer, "s {}", sol))?
         }
         Self::end_block(buffer)?;
         Ok(())
@@ -1153,7 +1141,7 @@ impl WriteSolverLog for CliLogger {
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
             write!(buffer, "fence update")?;
             buffer.reset()?;
-            writeln!(buffer, ": {}", VecPrinter::new(&fence))?;
+            writeln!(buffer, ": {}", VecPrinter::new(fence))?;
             self.stdout.print(&buffer)?;
         }
         Ok(())
@@ -1299,16 +1287,12 @@ impl<'a, C> VecPrinter<'a, C> {
 impl<'a, C: fmt::Display> fmt::Display for VecPrinter<'a, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "(")?;
-        self.costs.iter().fold(Ok(true), |res, cost| {
-            if let Ok(first) = res {
-                if !first {
-                    write!(f, ", ")?
-                };
-                write!(f, "{}", cost)?;
-                Ok(false)
-            } else {
-                res
-            }
+        self.costs.iter().try_fold(true, |first, cost| {
+            if !first {
+                write!(f, ", ")?
+            };
+            write!(f, "{}", cost)?;
+            Ok(false)
         })?;
         write!(f, ")")
     }

@@ -48,23 +48,13 @@ impl KernelOptions {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct DivConOptions {
     pub kernel: KernelOptions,
     /// The recursion anchor to use
     pub anchor: DivConAnchor,
     /// When to build the objective encodings
     pub build_encodings: BuildEncodings,
-}
-
-impl Default for DivConOptions {
-    fn default() -> Self {
-        Self {
-            kernel: Default::default(),
-            anchor: Default::default(),
-            build_encodings: Default::default(),
-        }
-    }
 }
 
 impl DivConOptions {
