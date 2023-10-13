@@ -673,7 +673,7 @@ impl Cli {
         write!(buffer, ": ")?;
         buffer.reset()?;
         writeln!(buffer, "{}", msg)?;
-        self.stdout.print(&buffer)?;
+        self.stderr.print(&buffer)?;
         Ok(())
     }
 
@@ -686,7 +686,7 @@ impl Cli {
         write!(buffer, ": ")?;
         buffer.reset()?;
         writeln!(buffer, "{}", msg)?;
-        self.stdout.print(&buffer)?;
+        self.stderr.print(&buffer)?;
         Ok(())
     }
 
