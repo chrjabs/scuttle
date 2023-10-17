@@ -210,6 +210,8 @@ fn insert_oracle_bounds(mut impl_block: syn::ItemImpl) -> TokenStream {
     }
 
     let obounds = "where";
+    #[cfg(feature = "interrupt-oracle")]
+    let obounds = format!("{} O: rustsat::solvers::Interrupt,", obounds);
     #[cfg(feature = "phasing")]
     let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
     #[cfg(feature = "sol-tightening")]

@@ -472,7 +472,7 @@ impl Cli {
                 concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
                 concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
                 concolor_clap::ColorChoice::Auto => {
-                    if atty::is(atty::Stream::Stderr) {
+                    if atty::is(atty::Stream::Stdout) {
                         termcolor::ColorChoice::Auto
                     } else {
                         termcolor::ColorChoice::Never

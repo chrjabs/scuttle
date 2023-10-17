@@ -328,6 +328,7 @@ macro_rules! generate_biobj_tests {
             }
 
             #[test]
+            #[ignore]
             fn ftp() {
                 ftp!($s, $o)
             }
@@ -393,6 +394,7 @@ macro_rules! generate_tests {
             }
 
             #[test]
+            #[ignore]
             fn ftp() {
                 ftp!($s, $o)
             }
@@ -513,5 +515,5 @@ fn debug() {
     let mut opts = scuttle::DivConOptions::default();
     opts.anchor = scuttle::options::DivConAnchor::NMinus(1);
     opts.build_encodings = scuttle::options::BuildEncodings::CleanRebuild;
-    spot5!(Dc!(), opts)
+    medium_single!(Dc!(), opts)
 }

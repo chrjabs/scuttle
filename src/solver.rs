@@ -4,7 +4,7 @@ use std::{
     ops::{Not, Range},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
@@ -55,7 +55,7 @@ pub struct Interrupter {
     term_flag: Arc<AtomicBool>,
     /// The terminator of the underlying SAT oracle
     #[cfg(feature = "interrupt-oracle")]
-    oracle_interrupter: Box<dyn rustsat::solvers::InterruptSolver + Send>,
+    oracle_interrupter: Arc<Mutex<Box<dyn rustsat::solvers::InterruptSolver + Send>>>,
 }
 
 #[cfg(feature = "interrupt-oracle")]
@@ -63,7 +63,7 @@ impl Interrupter {
     /// Interrupts the solver asynchronously
     pub fn interrupt(&mut self) {
         self.term_flag.store(true, Ordering::Relaxed);
-        self.oracle_interrupter.interrupt();
+        self.oracle_interrupter.lock().unwrap().interrupt();
     }
 }
 
@@ -102,6 +102,9 @@ struct SolverKernel<VM, O, BCG> {
     logger: Option<Box<dyn WriteSolverLog>>,
     /// Termination flag
     term_flag: Arc<AtomicBool>,
+    /// The oracle interrupter
+    #[cfg(feature = "interrupt-oracle")]
+    oracle_interrupter: Arc<Mutex<Box<dyn rustsat::solvers::InterruptSolver + Send>>>,
 }
 
 #[oracle_bounds]
@@ -182,6 +185,8 @@ where
             }
         }
         let max_orig_var = var_manager.max_var().unwrap();
+        #[cfg(feature = "interrupt-oracle")]
+        let interrupter = oracle.interrupter();
         Ok(Self {
             oracle,
             var_manager,
@@ -195,6 +200,8 @@ where
             lims: Limits::none(),
             logger: None,
             term_flag: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "interrupt-oracle")]
+            oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
         })
     }
 }
@@ -406,7 +413,7 @@ where
     fn interrupter(&mut self) -> Interrupter {
         Interrupter {
             term_flag: self.term_flag.clone(),
-            oracle_interrupter: Box::new(self.oracle.interrupter()),
+            oracle_interrupter: self.oracle_interrupter.clone(),
         }
     }
 }
@@ -1008,6 +1015,7 @@ where
                     let mut thissol = self.oracle.solution(self.max_orig_var)?;
                     let new_cost =
                         self.get_cost_with_heuristic_improvements(obj_idx, &mut thissol, false)?;
+                    debug_assert!(new_cost < cost);
                     let costs = (0..self.stats.n_objs)
                         .map(|oidx| {
                             self.get_cost_with_heuristic_improvements(oidx, &mut thissol, false)
@@ -1015,7 +1023,6 @@ where
                         })
                         .collect();
                     self.log_candidate(&costs, Phase::Linsu)?;
-                    debug_assert!(new_cost < cost);
                     sol = Some(thissol);
                     cost = new_cost;
                     if cost == lower_bound {
@@ -1078,18 +1085,27 @@ where
     }
 }
 
+#[oracle_bounds]
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     O: SolveIncremental + Default,
+    VM: ManageVars,
 {
     /// Resets the oracle and returns an error when the original [`Cnf`] was not stored.
-    fn reset_oracle(&mut self) -> Result<(), Termination> {
+    fn reset_oracle(&mut self, include_var_manager: bool) -> Result<(), Termination> {
         if !self.opts.store_cnf {
             return Err(Termination::ResetWithoutCnf);
         }
         self.oracle = O::default();
         self.oracle.reserve(self.max_orig_var)?;
         self.oracle.add_cnf(self.orig_cnf.clone().unwrap())?;
+        #[cfg(feature = "interrupt-oracle")]
+        {
+            *self.oracle_interrupter.lock().unwrap() = Box::new(self.oracle.interrupter());
+        }
+        if include_var_manager {
+            self.var_manager.forget_from(self.max_orig_var + 1);
+        }
         Ok(())
     }
 }

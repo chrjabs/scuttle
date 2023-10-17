@@ -5,7 +5,7 @@ use rustsat::{
     encodings::{card, pb},
     instances::{
         fio::{self, ParsingError},
-        BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReinducingVarManager,
+        BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager,
     },
     solvers::SolverError,
     types::{Assignment, Clause},
@@ -97,7 +97,7 @@ fn main() -> Result<(), Error> {
 
     // Reindexing
     let (inst, reindexer) = if cli.reindexing {
-        let reindexer = ReinducingVarManager::default();
+        let reindexer = ReindexingVarManager::default();
         let (inst, reindexer) = inst
             .reindex(reindexer)
             .change_var_manager(|vm| BasicVarManager::from_next_free(vm.max_var().unwrap() + 1));
@@ -145,7 +145,7 @@ fn generic_main<S: Solve>(
     mut solver: S,
     cli: Cli,
     mut prepro: Option<MaxPre>,
-    reindexer: Option<ReinducingVarManager>,
+    reindexer: Option<ReindexingVarManager>,
 ) -> Result<(), Error> {
     // Set up signal handling
     let mut interrupter = solver.interrupter();

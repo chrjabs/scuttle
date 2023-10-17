@@ -33,7 +33,7 @@ struct ObjEncData {
     root: NodeCon,
     offset: usize,
     max_leaf_weight: usize,
-    first_node: NodeId,
+    first_node: Option<NodeId>,
 }
 
 struct Worker<VM, O, BCG> {
@@ -54,7 +54,6 @@ impl<VM, O, BCG> Worker<VM, O, BCG> {
         reforms.shrink_to_fit();
         let mut encodings = vec![None; kernel.stats.n_objs];
         encodings.shrink_to_fit();
-        // Seed all objective literals into o
         Self {
             kernel,
             reforms,
@@ -357,22 +356,11 @@ where
                 debug_assert_ne!(weight, 0);
                 max_leaf_weight = std::cmp::max(tot_weight, max_leaf_weight);
                 if tot_weight == weight {
-                    cons.push(NodeCon {
-                        id: root,
-                        offset: oidx.try_into().unwrap(),
-                        divisor: 1,
-                        multiplier: weight,
-                    })
+                    cons.push(NodeCon::offset_weighted(root, oidx, weight))
                 } else {
-                    let node = self.tot_db.insert(Node::Leaf(*lit));
-                    cons.push(NodeCon::weighted(node, weight));
+                    cons.push(NodeCon::single(root, oidx + 1, weight));
                     if oidx + 1 < self.tot_db[root].len() {
-                        cons.push(NodeCon {
-                            id: root,
-                            offset: (oidx + 1).try_into().unwrap(),
-                            divisor: 1,
-                            multiplier: tot_weight,
-                        })
+                        cons.push(NodeCon::offset_weighted(root, oidx + 1, tot_weight))
                     }
                 }
             } else {
@@ -380,13 +368,13 @@ where
                 cons.push(NodeCon::weighted(node, weight));
             }
         }
-        cons.sort_unstable_by_key(|con| con.multiplier);
+        cons.sort_unstable_by_key(|con| con.multiplier());
         debug_assert!(!cons.is_empty());
         // Note: set first_node _after_ inserting new input literals
         let first_node = if cons.len() == 1 {
-            cons[0].id
+            None
         } else {
-            NodeId(self.tot_db.len())
+            Some(NodeId(self.tot_db.len()))
         };
         // Detect sequences of connections of equal weight and merge them
         let mut seg_begin = 0;
@@ -394,25 +382,19 @@ where
         let mut merged_cons = vec![];
         loop {
             seg_end += 1;
-            if seg_end < cons.len() && cons[seg_end].multiplier == cons[seg_begin].multiplier {
+            if seg_end < cons.len() && cons[seg_end].multiplier() == cons[seg_begin].multiplier() {
                 continue;
             }
             if seg_end > seg_begin + 1 {
                 // merge lits of equal weight
                 let mut seg: Vec<_> = cons[seg_begin..seg_end]
                     .iter()
-                    .map(|&con| NodeCon {
-                        multiplier: 1,
-                        ..con
-                    })
+                    .map(|&con| con.reweight(1))
                     .collect();
                 seg.sort_unstable_by_key(|&con| self.tot_db.con_len(con));
                 let con = self.tot_db.merge_balanced(&seg);
-                debug_assert_eq!(con.multiplier, 1);
-                merged_cons.push(NodeCon {
-                    multiplier: cons[seg_begin].multiplier,
-                    ..con
-                });
+                debug_assert_eq!(con.multiplier(), 1);
+                merged_cons.push(con.reweight(cons[seg_begin].multiplier().try_into().unwrap()));
             } else {
                 merged_cons.push(cons[seg_begin])
             }
@@ -435,6 +417,7 @@ where
     /// Rebuilds all existing objective encodings. If `clean` is set, does so by
     /// restarting the oracle.
     fn rebuild_obj_encodings(&mut self, clean: bool) -> Result<(), Termination> {
+        self.kernel.log_routine_start("rebuilding encodings")?;
         debug_assert!(!clean || self.kernel.orig_cnf.is_some());
         if clean {
             // Drain encodings
@@ -443,33 +426,62 @@ where
                 .encodings
                 .iter()
                 .filter_map(|e| *e)
-                .filter(|e| e.first_node > e.root.id)
+                .filter(|e| e.first_node.is_some())
                 .collect();
             if encs.is_empty() {
                 return Ok(());
             }
             encs.sort_unstable_by_key(|e| e.first_node);
             for enc in encs.iter().rev() {
-                self.tot_db.drain(enc.first_node..=enc.root.id).unwrap();
-                reform_offset += enc.root.id + 1 - enc.first_node;
+                debug_assert!(enc.first_node.unwrap() <= enc.root.id);
+                self.tot_db
+                    .drain(enc.first_node.unwrap()..=enc.root.id)
+                    .unwrap();
+                reform_offset += enc.root.id + 1 - enc.first_node.unwrap();
             }
-            if reform_offset == 0 {
-                return Ok(());
-            }
+            // Reset oracle
+            self.kernel.reset_oracle(true)?;
+            self.tot_db.reset_vars();
             // Adjust reformulations. Totalizers in the reformulation are either
             // _before_ or _after_ all of the drained encodings (not in
             // between), so we can do this once here rather than in the loop.
             for reform in &mut self.reforms {
-                for TotOutput { root, .. } in reform.outputs.values_mut() {
-                    if *root > encs[0].first_node {
-                        debug_assert!(*root > encs[encs.len() - 1].root.id);
-                        *root -= reform_offset;
+                let outputs = reform.outputs.clone();
+                reform.outputs.clear();
+                for (
+                    old_olit,
+                    TotOutput {
+                        mut root,
+                        oidx,
+                        tot_weight,
+                    },
+                ) in outputs
+                {
+                    if root > encs[0].first_node.unwrap() {
+                        debug_assert!(root > encs[encs.len() - 1].root.id);
+                        root -= reform_offset;
                     }
+                    // Rebuild encoding for required outputs
+                    let olit = self.tot_db.define_pos_tot(
+                        root,
+                        oidx,
+                        &mut self.kernel.oracle,
+                        &mut self.kernel.var_manager,
+                    );
+                    // Update output map
+                    reform.outputs.insert(
+                        olit,
+                        TotOutput {
+                            root,
+                            oidx,
+                            tot_weight,
+                        },
+                    );
+                    // Update inactives
+                    reform.inactives.insert(olit, reform.inactives[&old_olit]);
+                    reform.inactives.remove(&old_olit);
                 }
             }
-            // TODO: figure out how to do use `self.tot_db.reset_vars();` here without breaking the reformulations
-            // Reset oracle
-            self.kernel.reset_oracle()?;
         }
         for oidx in 0..self.encodings.len() {
             if self.encodings[oidx].is_none() {
@@ -477,6 +489,7 @@ where
             }
             self.encodings[oidx] = Some(self.build_obj_encoding(oidx));
         }
+        self.kernel.log_routine_end()?;
         Ok(())
     }
 }

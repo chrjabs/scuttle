@@ -2,8 +2,8 @@
 
 use rustsat::{
     encodings::{
-        card::dbtotalizer::TotDb,
-        nodedb::{NodeById, NodeId, NodeLike},
+        card::dbtotalizer::{Node, TotDb},
+        nodedb::{NodeById, NodeCon, NodeId, NodeLike},
     },
     instances::{Cnf, ManageVars},
     solvers::{
@@ -82,7 +82,7 @@ where
 
         // cores not yet reformulated (because of WCE)
         let mut unreform_cores = vec![];
-        let mut core_lits = vec![];
+        let mut core_cons = vec![];
 
         let mut assumps = Vec::from(base_assumps);
         // sort base assumptions for filtering them out efficiently
@@ -114,7 +114,10 @@ where
                     // Reformulate cores
                     let mut encs = Cnf::new();
                     for CoreData { idx, len, weight } in unreform_cores.drain(..) {
-                        let root = tot_db.lit_tree(&core_lits[idx..idx + len]);
+                        let con = tot_db.merge(&core_cons[idx..idx + len]);
+                        debug_assert_eq!(con.offset(), 0);
+                        debug_assert_eq!(con.multiplier(), 1);
+                        let root = con.id;
                         let oidx = self.exhaust_core(root, base_assumps, tot_db)?;
                         if oidx > 1 {
                             reform.offset += (oidx - 1) * weight;
@@ -138,7 +141,7 @@ where
                         }
                     }
                     self.oracle.add_cnf(encs)?;
-                    core_lits.clear();
+                    core_cons.clear();
                 }
                 Unsat => {
                     let mut core = self.oracle.core()?;
@@ -178,20 +181,28 @@ where
                     }
                     // Extend tot if output in core
                     let mut encs = Cnf::new();
+                    let mut cons = Vec::with_capacity(core.len());
                     for olit in &core {
-                        if let Some(inact_weight) = reform.inactives.get_mut(olit) {
-                            *inact_weight -= core_weight;
-                            if *inact_weight > 0 {
-                                continue;
-                            }
-                        }
-                        debug_assert!(reform.inactives.contains_key(olit));
+                        let inact_weight =
+                            if let Some(inact_weight) = reform.inactives.get_mut(olit) {
+                                *inact_weight -= core_weight;
+                                *inact_weight
+                            } else {
+                                panic!("literal in core that is not inactive")
+                            };
                         if let Some(&TotOutput {
                             root,
                             oidx,
                             tot_weight,
                         }) = reform.outputs.get(olit)
                         {
+                            cons.push(NodeCon::single(root, oidx + 1, 1));
+                            if inact_weight > 0 {
+                                continue;
+                            }
+                            // remove old output to only have one entry per totalizer in outputs
+                            // map
+                            reform.outputs.remove(olit);
                             if oidx + 1 >= tot_db[root].len() {
                                 continue;
                             }
@@ -210,21 +221,22 @@ where
                                     tot_weight,
                                 },
                             );
-                            // remove old output to only have one entry per totalizer in outputs
-                            // map
-                            reform.outputs.remove(olit).unwrap();
                             assumps.push(!new_olit);
+                        } else {
+                            let id = tot_db.insert(Node::Leaf(*olit));
+                            cons.push(NodeCon::full(id));
                         }
                     }
+                    debug_assert_eq!(core.len(), cons.len());
                     self.oracle.add_cnf(encs)?;
-                    if core.len() > 1 {
+                    if cons.len() > 1 {
                         // Save core for reformulation
                         unreform_cores.push(CoreData {
-                            idx: core_lits.len(),
-                            len: core.len(),
+                            idx: core_cons.len(),
+                            len: cons.len(),
                             weight: core_weight,
                         });
-                        core_lits.extend(core);
+                        core_cons.extend(cons);
                     }
                 }
             }
