@@ -276,15 +276,15 @@ where
                         debug_assert_eq!(cost, 0);
                         return None;
                     }
-                    if self.encodings[obj_idx].is_none() {
-                        self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx));
-                    }
                     let reform = &self.reforms[obj_idx];
                     if cost <= reform.offset {
                         // if reformulation has derived this lower bound, no
                         // solutions will ever be <= cost and this literal can
                         // be dropped from the clause
                         return None;
+                    }
+                    if self.encodings[obj_idx].is_none() {
+                        self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx));
                     }
                     let units = self.bound_objective(obj_idx, cost - 1);
                     debug_assert!(!units.is_empty());
@@ -354,6 +354,7 @@ where
             }) = reform.outputs.get(lit)
             {
                 debug_assert_ne!(weight, 0);
+                debug_assert!(oidx < self.tot_db[root].len());
                 max_leaf_weight = std::cmp::max(tot_weight, max_leaf_weight);
                 if tot_weight == weight {
                     cons.push(NodeCon::offset_weighted(root, oidx, weight))
@@ -429,6 +430,7 @@ where
                 .filter(|e| e.first_node.is_some())
                 .collect();
             if encs.is_empty() {
+                self.kernel.log_routine_end()?;
                 return Ok(());
             }
             encs.sort_unstable_by_key(|e| e.first_node);
@@ -447,7 +449,9 @@ where
             // between), so we can do this once here rather than in the loop.
             for reform in &mut self.reforms {
                 let outputs = reform.outputs.clone();
+                let inactives = reform.inactives.clone();
                 reform.outputs.clear();
+                reform.inactives.retain(|lit, _| !outputs.contains_key(lit));
                 for (
                     old_olit,
                     TotOutput {
@@ -478,8 +482,7 @@ where
                         },
                     );
                     // Update inactives
-                    reform.inactives.insert(olit, reform.inactives[&old_olit]);
-                    reform.inactives.remove(&old_olit);
+                    reform.inactives.insert(olit, inactives[&old_olit]);
                 }
             }
         }

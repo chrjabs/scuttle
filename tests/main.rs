@@ -515,5 +515,5 @@ fn debug() {
     let mut opts = scuttle::DivConOptions::default();
     opts.anchor = scuttle::options::DivConAnchor::NMinus(1);
     opts.build_encodings = scuttle::options::BuildEncodings::CleanRebuild;
-    medium_single!(Dc!(), opts)
+    spot5!(Dc!(), opts)
 }
