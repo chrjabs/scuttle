@@ -1103,6 +1103,13 @@ where
         {
             *self.oracle_interrupter.lock().unwrap() = Box::new(self.oracle.interrupter());
         }
+        #[cfg(feature = "sol-tightening")]
+        // Freeze objective variables so that they are not removed
+        for o in &self.objs {
+            for (l, _) in o.iter() {
+                self.oracle.freeze_var(l.var())?;
+            }
+        }
         if include_var_manager {
             self.var_manager.forget_from(self.max_orig_var + 1);
         }
