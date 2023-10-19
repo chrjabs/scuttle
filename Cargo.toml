@@ -34,6 +34,7 @@ phasing = ["scuttle-proc/phasing"]
 sol-tightening = ["scuttle-proc/sol-tightening"]
 coarse-convergence = []
 limit-conflicts = ["scuttle-proc/limit-conflicts"]
+check-non-dominance = []
 binary-deps = [
   "dep:clap",
   "dep:concolor-clap",

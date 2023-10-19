@@ -88,6 +88,40 @@ where
     S: Clone + Eq,
 {
     fn extend<T: IntoIterator<Item = NonDomPoint<S>>>(&mut self, iter: T) {
+        #[cfg(all(debug_assertions, feature = "check-non-dominance"))]
+        {
+            let cost_set = rustsat::types::RsHashSet::from_iter(
+                self.ndoms.iter().map(|nd| nd.costs().clone()),
+            );
+            let check_dominated = |c1: &Vec<isize>, c2: &Vec<isize>| -> bool {
+                let mut dom = 0;
+                for (c1, c2) in c1.iter().zip(c2.iter()) {
+                    if c1 < c2 {
+                        if dom <= 0 {
+                            dom = -1;
+                        } else {
+                            return false;
+                        }
+                    } else if c2 < c1 {
+                        if dom >= 0 {
+                            dom = 1;
+                        } else {
+                            return false;
+                        }
+                    }
+                }
+                return dom != 0
+            };
+            for ndom in iter.into_iter() {
+                for cost in &cost_set {
+                    debug_assert!(!check_dominated(ndom.costs(), cost));
+                }
+                debug_assert!(!cost_set.contains(ndom.costs()));
+                self.ndoms.push(ndom);
+            }
+            return;
+        }
+        #[cfg(not(all(debug_assertions, feature = "check-non-dominance")))]
         self.ndoms.extend(iter)
     }
 }
