@@ -110,7 +110,7 @@ where
                         }
                     }
                 }
-                return dom != 0
+                return dom != 0;
             };
             for ndom in iter.into_iter() {
                 for cost in &cost_set {
@@ -176,6 +176,11 @@ where
     /// Gets the costs of the non-dominated point
     pub fn costs(&self) -> &Vec<isize> {
         &self.costs
+    }
+
+    /// Gets an iterator over references to the solutions
+    pub fn iter(&self) -> impl Iterator<Item = &S> {
+        self.sols.iter()
     }
 }
 

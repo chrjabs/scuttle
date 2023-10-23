@@ -1,7 +1,7 @@
 //! # Sequential Divide and Conquer
 
 use rustsat::{
-    instances::{ManageVars, MultiOptInstance},
+    instances::{BasicVarManager, ManageVars, MultiOptInstance},
     solvers::{SolveIncremental, SolveStats},
     types::{Assignment, Clause, Lit},
 };
@@ -21,7 +21,11 @@ use super::Worker;
 #[solve(bounds = "where VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
         O: SolveIncremental + SolveStats + Default")]
-pub struct DivCon<VM, O, BCG> {
+pub struct DivCon<
+    VM = BasicVarManager,
+    O = rustsat_cadical::CaDiCaL<'static, 'static>,
+    BCG = fn(Assignment) -> Clause,
+> {
     /// The single worker structure
     worker: Worker<VM, O, BCG>,
     /// The index of the last non-dominated point in the Pareto front that has

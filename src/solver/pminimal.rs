@@ -22,11 +22,15 @@ use crate::{
 };
 use rustsat::{
     encodings,
-    encodings::{card, pb},
-    instances::{ManageVars, MultiOptInstance},
+    encodings::{
+        card::{self, DbTotalizer},
+        pb::{self, DbGte},
+    },
+    instances::{BasicVarManager, ManageVars, MultiOptInstance},
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit},
 };
+use rustsat_cadical::CaDiCaL;
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use super::{default_blocking_clause, Objective, SolverKernel};
@@ -40,7 +44,13 @@ use super::{default_blocking_clause, Objective, SolverKernel};
         VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
         O: SolveIncremental + SolveStats")]
-pub struct PMinimal<PBE, CE, VM, BCG, O> {
+pub struct PMinimal<
+    PBE = DbGte,
+    CE = DbTotalizer,
+    VM = BasicVarManager,
+    BCG = fn(Assignment) -> Clause,
+    O = CaDiCaL<'static, 'static>,
+> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
