@@ -124,10 +124,10 @@ where
         Col: Extend<NonDomPoint>,
     {
         if self.encodings[inc_obj].is_none() {
-            self.encodings[inc_obj] = Some(self.build_obj_encoding(inc_obj));
+            self.encodings[inc_obj] = Some(self.build_obj_encoding(inc_obj)?);
         }
         if self.encodings[dec_obj].is_none() {
-            self.encodings[dec_obj] = Some(self.build_obj_encoding(dec_obj));
+            self.encodings[dec_obj] = Some(self.build_obj_encoding(dec_obj)?);
         }
 
         let tot_db_cell = RefCell::from(&mut self.tot_db);
@@ -169,7 +169,7 @@ where
         collector: &mut Col,
     ) -> Result<Option<usize>, Termination> {
         if self.encodings[obj_idx].is_none() {
-            self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx));
+            self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx)?);
         }
 
         let mut enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
@@ -200,11 +200,12 @@ where
         collector: &mut Col,
     ) -> Result<(), Termination> {
         self.kernel.log_routine_start("p-minimal")?;
-        (0..self.kernel.stats.n_objs).for_each(|oidx| {
+        for oidx in 0..self.kernel.stats.n_objs {
             if self.encodings[oidx].is_none() {
-                self.encodings[oidx] = Some(self.build_obj_encoding(oidx));
+                self.encodings[oidx] = Some(self.build_obj_encoding(oidx)?);
+                self.kernel.check_termination()?;
             }
-        });
+        }
         let tot_db_cell = RefCell::from(&mut self.tot_db);
         let mut obj_encs: Vec<_> = self
             .encodings
@@ -284,38 +285,44 @@ where
                         return None;
                     }
                     if self.encodings[obj_idx].is_none() {
-                        self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx));
+                        match self.build_obj_encoding(obj_idx) {
+                            Ok(enc) => self.encodings[obj_idx] = Some(enc),
+                            Err(term) => return Some(Err(term)),
+                        }
                     }
-                    let units = self.bound_objective(obj_idx, cost - 1);
+                    let units = match self.bound_objective(obj_idx, cost - 1) {
+                        Ok(units) => units,
+                        Err(term) => return Some(Err(term)),
+                    };
                     debug_assert!(!units.is_empty());
                     if units.len() == 1 {
-                        Some(units[0])
+                        Some(Ok(units[0]))
                     } else {
                         let and_lit = self.kernel.var_manager.new_var().pos_lit();
                         self.kernel
                             .oracle
                             .extend(atomics::lit_impl_cube(and_lit, &units));
-                        Some(and_lit)
+                        Some(Ok(and_lit))
                     }
                 })
-                .collect();
+                .collect::<Result<Clause, Termination>>()?;
             self.kernel.oracle.add_clause(clause)?;
         }
         Ok(())
     }
 
     /// Bounds an objective at `<= bound`
-    fn bound_objective(&mut self, obj_idx: usize, bound: usize) -> Vec<Lit> {
+    fn bound_objective(&mut self, obj_idx: usize, bound: usize) -> Result<Vec<Lit>, Termination> {
         debug_assert!(bound >= self.reforms[obj_idx].offset);
         if bound == self.reforms[obj_idx].offset {
-            return self.reforms[obj_idx]
+            return Ok(self.reforms[obj_idx]
                 .inactives
                 .iter()
                 .map(|(&l, _)| !l)
-                .collect();
+                .collect());
         }
         if self.encodings[obj_idx].is_none() {
-            self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx));
+            self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx)?);
         }
 
         let enc = self.encodings[obj_idx].as_ref().unwrap();
@@ -336,11 +343,11 @@ where
                     .unwrap(),
             )
         }
-        assumps
+        Ok(assumps)
     }
 
     /// Merges the current OLL reformulation into a GTE
-    fn build_obj_encoding(&mut self, obj_idx: usize) -> ObjEncData {
+    fn build_obj_encoding(&mut self, obj_idx: usize) -> Result<ObjEncData, Termination> {
         self.kernel.log_routine_start("build-encoding").unwrap();
         let reform = &self.reforms[obj_idx];
         let mut cons = vec![];
@@ -369,6 +376,7 @@ where
                 cons.push(NodeCon::weighted(node, weight));
             }
         }
+        self.kernel.check_termination()?;
         cons.sort_unstable_by_key(|con| con.multiplier());
         debug_assert!(!cons.is_empty());
         // Note: set first_node _after_ inserting new input literals
@@ -404,7 +412,9 @@ where
                 break;
             }
         }
+        self.kernel.check_termination()?;
         merged_cons.sort_unstable_by_key(|&con| self.tot_db.con_len(con));
+        self.kernel.check_termination()?;
         let enc = ObjEncData {
             root: self.tot_db.merge_balanced(&merged_cons),
             offset: reform.offset,
@@ -412,7 +422,7 @@ where
             first_node,
         };
         self.kernel.log_routine_end().unwrap();
-        enc
+        Ok(enc)
     }
 
     /// Rebuilds all existing objective encodings. If `clean` is set, does so by
@@ -444,6 +454,7 @@ where
             // Reset oracle
             self.kernel.reset_oracle(true)?;
             self.tot_db.reset_vars();
+            self.kernel.check_termination()?;
             // Adjust reformulations. Totalizers in the reformulation are either
             // _before_ or _after_ all of the drained encodings (not in
             // between), so we can do this once here rather than in the loop.
@@ -484,13 +495,15 @@ where
                     // Update inactives
                     reform.inactives.insert(olit, inactives[&old_olit]);
                 }
+                self.kernel.check_termination()?;
             }
         }
         for oidx in 0..self.encodings.len() {
             if self.encodings[oidx].is_none() {
                 continue;
             }
-            self.encodings[oidx] = Some(self.build_obj_encoding(oidx));
+            self.encodings[oidx] = Some(self.build_obj_encoding(oidx)?);
+            self.kernel.check_termination()?;
         }
         self.kernel.log_routine_end()?;
         Ok(clean)

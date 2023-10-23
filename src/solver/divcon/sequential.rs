@@ -236,7 +236,7 @@ where
                 subproblem.remove(idx);
                 //subproblem.swap_remove(idx);
                 let mut assumps = Vec::from(base_assumps);
-                assumps.extend(self.worker.bound_objective(fixed_obj, ideal[fixed_obj]));
+                assumps.extend(self.worker.bound_objective(fixed_obj, ideal[fixed_obj])?);
                 self.solve_subproblem(ideal.clone(), &assumps, &subproblem)?;
             }
         }
