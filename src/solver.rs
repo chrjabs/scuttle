@@ -1339,10 +1339,18 @@ where
     fn enforce_ub(&mut self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::Error> {
         match self {
             ObjEncoding::Weighted(enc, offset) => {
-                enc.enforce_ub(if ub >= *offset { ub - *offset } else { 0 })
+                if ub >= *offset {
+                    enc.enforce_ub(ub - *offset)
+                } else {
+                    Ok(vec![])
+                }
             }
             ObjEncoding::Unweighted(enc, offset) => {
-                enc.enforce_ub(if ub >= *offset { ub - *offset } else { 0 })
+                if ub >= *offset {
+                    enc.enforce_ub(ub - *offset)
+                } else {
+                    Ok(vec![])
+                }
             }
             ObjEncoding::Constant => Ok(vec![]),
         }

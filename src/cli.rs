@@ -291,6 +291,8 @@ pub enum DivConAnchor {
     /// Run an appropriate anchor (Linear Sat-Unsat / BiOptSat / P-Minimal) at
     /// subproblems of size `n-1`.
     NMinusOne,
+    /// Run P-Minimal at subproblems of size `n-1`.
+    PMinNMinusOne,
 }
 
 impl fmt::Display for DivConAnchor {
@@ -300,6 +302,7 @@ impl fmt::Display for DivConAnchor {
             DivConAnchor::Bioptsat => write!(f, "bioptsat"),
             DivConAnchor::PMinimal => write!(f, "p-minimal"),
             DivConAnchor::NMinusOne => write!(f, "n-minus-one"),
+            DivConAnchor::PMinNMinusOne => write!(f, "p-min-n-minus-once"),
         }
     }
 }
@@ -309,7 +312,13 @@ impl From<options::DivConAnchor> for DivConAnchor {
         match value {
             options::DivConAnchor::LinSu => DivConAnchor::LinSu,
             options::DivConAnchor::BiOptSat => DivConAnchor::Bioptsat,
-            options::DivConAnchor::PMinimal(_) => DivConAnchor::PMinimal,
+            options::DivConAnchor::PMinimal(size) => match size {
+                options::SubProblemSize::Abs(_) => DivConAnchor::PMinimal,
+                options::SubProblemSize::Smaller(x) => match x {
+                    1 => DivConAnchor::PMinNMinusOne,
+                    _ => DivConAnchor::PMinimal,
+                },
+            },
             options::DivConAnchor::NMinus(_) => DivConAnchor::NMinusOne,
         }
     }
@@ -626,6 +635,9 @@ impl Cli {
                             options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(0))
                         }
                         DivConAnchor::NMinusOne => options::DivConAnchor::NMinus(1),
+                        DivConAnchor::PMinNMinusOne => {
+                            options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(1))
+                        }
                     },
                     build_encodings,
                 }),

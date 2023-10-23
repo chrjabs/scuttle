@@ -136,7 +136,7 @@ where
             if obj_idxs.len() == 1 {
                 debug_assert!(matches!(
                     self.opts.anchor,
-                    DivConAnchor::LinSu | DivConAnchor::NMinus(_)
+                    DivConAnchor::LinSu | DivConAnchor::NMinus(_) | DivConAnchor::PMinimal(_)
                 ));
                 self.worker.linsu_yield(
                     obj_idxs[0],
@@ -174,6 +174,16 @@ where
                 }
             }
 
+            if let DivConAnchor::PMinimal(sub_size) = self.opts.anchor {
+                if obj_idxs.len() < self.worker.kernel.stats.n_real_objs
+                    && obj_idxs.len() <= sub_size.absolute(self.worker.kernel.stats.n_real_objs)
+                {
+                    self.worker
+                        .p_minimal(base_assumps, None, &mut self.pareto_front)?;
+                    return Ok(());
+                }
+            }
+
             if !self.worker.find_ideal(base_assumps, obj_idxs, &mut ideal)? {
                 break;
             }
@@ -188,9 +198,12 @@ where
                     self.opts.build_encodings,
                     BuildEncodings::Rebuild | BuildEncodings::CleanRebuild
                 ) {
-                    self.worker.rebuild_obj_encodings(
+                    if self.worker.rebuild_obj_encodings(
                         self.opts.build_encodings == BuildEncodings::CleanRebuild,
-                    )?
+                    )? {
+                        self.last_blocked = 0;
+                        self.cut_dominated()?;
+                    }
                 }
             }
 
@@ -209,9 +222,7 @@ where
             }
 
             if let DivConAnchor::PMinimal(sub_size) = self.opts.anchor {
-                if obj_idxs.len() <= sub_size.absolute(self.worker.kernel.stats.n_real_objs)
-                    || obj_idxs.len() == 2
-                {
+                if obj_idxs.len() <= sub_size.absolute(self.worker.kernel.stats.n_real_objs) {
                     self.worker
                         .p_minimal(base_assumps, None, &mut self.pareto_front)?;
                     return Ok(());
@@ -222,7 +233,8 @@ where
             for idx in 0..obj_idxs.len() {
                 let fixed_obj = obj_idxs[idx];
                 let mut subproblem = Vec::from(obj_idxs);
-                subproblem.swap_remove(idx);
+                subproblem.remove(idx);
+                //subproblem.swap_remove(idx);
                 let mut assumps = Vec::from(base_assumps);
                 assumps.extend(self.worker.bound_objective(fixed_obj, ideal[fixed_obj]));
                 self.solve_subproblem(ideal.clone(), &assumps, &subproblem)?;

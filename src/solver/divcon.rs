@@ -416,8 +416,8 @@ where
     }
 
     /// Rebuilds all existing objective encodings. If `clean` is set, does so by
-    /// restarting the oracle.
-    fn rebuild_obj_encodings(&mut self, clean: bool) -> Result<(), Termination> {
+    /// restarting the oracle. Returns `true` if the oracle was restarted.
+    fn rebuild_obj_encodings(&mut self, clean: bool) -> Result<bool, Termination> {
         self.kernel.log_routine_start("rebuilding encodings")?;
         debug_assert!(!clean || self.kernel.orig_cnf.is_some());
         if clean {
@@ -431,7 +431,7 @@ where
                 .collect();
             if encs.is_empty() {
                 self.kernel.log_routine_end()?;
-                return Ok(());
+                return Ok(false);
             }
             encs.sort_unstable_by_key(|e| e.first_node);
             for enc in encs.iter().rev() {
@@ -493,6 +493,6 @@ where
             self.encodings[oidx] = Some(self.build_obj_encoding(oidx));
         }
         self.kernel.log_routine_end()?;
-        Ok(())
+        Ok(clean)
     }
 }
