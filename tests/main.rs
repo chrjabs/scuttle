@@ -291,6 +291,31 @@ macro_rules! spot5 {
     };
 }
 
+macro_rules! set_cover_3 {
+    ($s:ty, $o:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            "./data/set-cover-3.mcnf",
+            vec![
+                (vec![67, 221, 130], 1),
+                (vec![229, 54, 151], 1),
+                (vec![136, 169, 28], 1),
+                (vec![75, 214, 149], 1),
+                (vec![223, 64, 152], 1),
+                (vec![230, 160, 49], 1),
+                (vec![90, 139, 63], 1),
+                (vec![198, 72, 152], 1),
+                (vec![101, 255, 59], 1),
+                (vec![102, 135, 99], 1),
+                (vec![154, 77, 93], 1),
+                (vec![207, 114, 87], 1),
+                (vec![158, 109, 92], 1),
+            ]
+        )
+    };
+}
+
 macro_rules! generate_biobj_tests {
     ($mod:ident, $s:ty, $o:expr) => {
         mod $mod {
@@ -403,6 +428,11 @@ macro_rules! generate_tests {
             #[ignore]
             fn spot5() {
                 spot5!($s, $o)
+            }
+
+            #[test]
+            fn set_cover_3() {
+                set_cover_3!($s, $o)
             }
         }
     };
