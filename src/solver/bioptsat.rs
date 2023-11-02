@@ -6,11 +6,16 @@
 //! Järvisalo: _MaxSAT-Based Bi-Objective Boolean Optimization_, SAT 2022.
 
 use rustsat::{
-    encodings::{self, card, pb},
-    instances::{ManageVars, MultiOptInstance},
+    encodings::{
+        self,
+        card::{self, DbTotalizer},
+        pb::{self, DbGte},
+    },
+    instances::{BasicVarManager, ManageVars, MultiOptInstance},
     solvers::{SolveIncremental, SolveStats, SolverStats},
     types::{Assignment, Clause, Lit},
 };
+use rustsat_cadical::CaDiCaL;
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
@@ -26,7 +31,13 @@ use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
         VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
         O: SolveIncremental + SolveStats")]
-pub struct BiOptSat<PBE, CE, VM, BCG, O> {
+pub struct BiOptSat<
+    PBE = DbGte,
+    CE = DbTotalizer,
+    VM = BasicVarManager,
+    BCG = fn(Assignment) -> Clause,
+    O = CaDiCaL<'static, 'static>,
+> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective

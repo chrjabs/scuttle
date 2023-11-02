@@ -9,11 +9,16 @@
 //! TACAS 2023.
 
 use rustsat::{
-    encodings::{self, card, pb},
-    instances::{Cnf, ManageVars, MultiOptInstance},
+    encodings::{
+        self,
+        card::{self, DbTotalizer},
+        pb::{self, DbGte},
+    },
+    instances::{BasicVarManager, Cnf, ManageVars, MultiOptInstance},
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit},
 };
+use rustsat_cadical::CaDiCaL;
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
@@ -29,7 +34,13 @@ use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
         VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
         O: SolveIncremental + SolveStats")]
-pub struct LowerBounding<PBE, CE, VM, BCG, O> {
+pub struct LowerBounding<
+    PBE = DbGte,
+    CE = DbTotalizer,
+    VM = BasicVarManager,
+    BCG = fn(Assignment) -> Clause,
+    O = CaDiCaL<'static, 'static>,
+> {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
