@@ -2,7 +2,9 @@
 
 use std::cell::RefCell;
 
+use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
+    clause,
     encodings::{
         atomics,
         card::{
@@ -14,7 +16,7 @@ use rustsat::{
     },
     instances::ManageVars,
     solvers::{SolveIncremental, SolveStats, SolverResult},
-    types::{Assignment, Clause, Lit},
+    types::{Assignment, Clause, Lit, RsHashMap},
 };
 use scuttle_proc::oracle_bounds;
 
@@ -201,7 +203,9 @@ where
     ) -> Result<(), Termination> {
         self.kernel.log_routine_start("p-minimal")?;
         for oidx in 0..self.kernel.stats.n_objs {
-            if self.encodings[oidx].is_none() {
+            if self.encodings[oidx].is_none()
+                && matches!(self.kernel.objs[oidx], Objective::Constant { .. })
+            {
                 self.encodings[oidx] = Some(self.build_obj_encoding(oidx)?);
                 self.kernel.check_termination()?;
             }
@@ -210,12 +214,12 @@ where
         let mut obj_encs: Vec<_> = self
             .encodings
             .iter()
-            .map(|enc| {
-                let enc = enc.as_ref().unwrap();
-                ObjEncoding::<_, card::DefIncUpperBounding>::Weighted(
+            .map(|enc| match enc.as_ref() {
+                Some(enc) => ObjEncoding::<_, card::DefIncUpperBounding>::Weighted(
                     GteCell::new(enc.root, enc.max_leaf_weight, &tot_db_cell),
                     enc.offset,
-                )
+                ),
+                None => ObjEncoding::Constant,
             })
             .collect();
         let mut assumps = Vec::from(base_assumps);
@@ -348,7 +352,7 @@ where
 
     /// Merges the current OLL reformulation into a GTE
     fn build_obj_encoding(&mut self, obj_idx: usize) -> Result<ObjEncData, Termination> {
-        self.kernel.log_routine_start("build-encoding").unwrap();
+        self.kernel.log_routine_start("build-encoding")?;
         let reform = &self.reforms[obj_idx];
         let mut cons = vec![];
         let mut max_leaf_weight = 0;
@@ -421,7 +425,7 @@ where
             max_leaf_weight,
             first_node,
         };
-        self.kernel.log_routine_end().unwrap();
+        self.kernel.log_routine_end()?;
         Ok(enc)
     }
 
@@ -507,5 +511,228 @@ where
         }
         self.kernel.log_routine_end()?;
         Ok(clean)
+    }
+
+    fn inpro_and_reset(&mut self, techniques: &str) -> Result<(), Termination> {
+        if !self.kernel.opts.store_cnf {
+            return Err(Termination::ResetWithoutCnf);
+        }
+        // Reset oracle
+        self.kernel.oracle = O::default();
+        #[cfg(feature = "interrupt-oracle")]
+        {
+            *self.kernel.oracle_interrupter.lock().unwrap() =
+                Box::new(self.kernel.oracle.interrupter());
+        }
+        // Collect instance with reformulated objectives
+        let mut orig_cnf = self.kernel.orig_cnf.clone().unwrap();
+        self.tot_db.reset_encoded();
+        let mut all_outputs: Vec<_> = self
+            .reforms
+            .iter()
+            .map(|reform| reform.outputs.clone())
+            .collect();
+        let objs: Vec<(Vec<_>, isize)> = self
+            .reforms
+            .iter()
+            .enumerate()
+            .map(|(obj_idx, reform)| {
+                (
+                    reform
+                        .inactives
+                        .iter()
+                        .flat_map(|(lit, weight)| {
+                            let lits: Vec<_> = if let Some(TotOutput {
+                                root,
+                                oidx,
+                                tot_weight,
+                            }) = reform.outputs.get(lit)
+                            {
+                                (*oidx..self.tot_db[*root].len())
+                                    .map(|idx| {
+                                        let olit = self.tot_db.define_pos_tot(
+                                            *root,
+                                            idx,
+                                            &mut orig_cnf,
+                                            &mut self.kernel.var_manager,
+                                        );
+                                        if idx == *oidx {
+                                            (clause![!olit], *weight)
+                                        } else {
+                                            all_outputs[obj_idx].insert(
+                                                olit,
+                                                TotOutput {
+                                                    root: *root,
+                                                    oidx: idx,
+                                                    tot_weight: *tot_weight,
+                                                },
+                                            );
+                                            (clause![!olit], *tot_weight)
+                                        }
+                                    })
+                                    .collect()
+                            } else {
+                                (0..1).map(|_| (clause![!*lit], *weight)).collect()
+                            };
+                            lits.into_iter()
+                        })
+                        .collect(),
+                    0,
+                )
+            })
+            .collect();
+        // Inprocess
+        self.kernel.log_routine_start("inprocessing")?;
+        let cls_before = orig_cnf.len() + objs.iter().fold(0, |cnt, (obj, _)| cnt + obj.len());
+        let mut ranges: Vec<_> = objs
+            .iter()
+            .map(|(obj, _)| (obj.iter().fold(0, |rng, (_, w)| rng + w), 0))
+            .collect();
+        let mut inpro = MaxPre::new(orig_cnf, objs, true);
+        inpro.preprocess(techniques, 0, 1e9);
+        let (inpro_cnf, inpro_objs) = inpro.prepro_instance();
+        inpro_objs
+            .iter()
+            .zip(ranges.iter_mut())
+            .for_each(|((obj, _), (_, after))| *after = obj.iter().fold(0, |rng, (_, w)| rng + w));
+        self.kernel.log_routine_end()?;
+        if let Some(logger) = self.kernel.logger.as_mut() {
+            logger.log_inprocessing(
+                (cls_before, inpro.n_prepro_clauses() as usize),
+                inpro.n_prepro_fixed_lits() as usize,
+                ranges,
+            )?;
+        }
+        self.kernel.inpro = Some(inpro);
+        self.kernel.check_termination()?;
+        // Reinit oracle
+        self.kernel
+            .oracle
+            .reserve(self.kernel.var_manager.max_var().unwrap())?;
+        self.kernel.oracle.add_cnf(inpro_cnf)?;
+        #[cfg(feature = "sol-tightening")]
+        // Freeze objective variables so that they are not removed
+        for (o, _) in &inpro_objs {
+            for (cl, _) in o.iter() {
+                debug_assert_eq!(cl.len(), 1);
+                self.kernel.oracle.freeze_var(cl[0].var())?;
+            }
+        }
+        self.kernel.check_termination()?;
+        // Build encodings
+        for (idx, (softs, offset)) in inpro_objs.iter().enumerate() {
+            debug_assert!(*offset >= 0);
+            let reform = &mut self.reforms[idx];
+            let outputs = &all_outputs[idx];
+            let mut tots_to_add: RsHashMap<NodeId, (Vec<bool>, usize)> = RsHashMap::default();
+            let mut cons = vec![];
+            reform.offset += *offset as usize;
+            if softs.is_empty() {
+                self.kernel.objs[idx] = Objective::Constant {
+                    offset: self.kernel.objs[idx].offset() + reform.offset as isize,
+                };
+                continue;
+            }
+            let mut max_leaf_weight = 0;
+            for (cl, w) in softs {
+                debug_assert_eq!(cl.len(), 1);
+                max_leaf_weight = std::cmp::max(*w, max_leaf_weight);
+                let olit = !cl[0];
+                if let Some(TotOutput {
+                    root,
+                    oidx,
+                    tot_weight,
+                }) = outputs.get(&olit)
+                {
+                    if *w < *tot_weight {
+                        cons.push(NodeCon::single(*root, oidx + 1, *w));
+                        continue;
+                    }
+                    if let Some((tot_data, _)) = tots_to_add.get_mut(root) {
+                        debug_assert!(!tot_data[*oidx]);
+                        tot_data[*oidx] = true;
+                    } else {
+                        let mut dat = vec![false; self.tot_db[*root].len()];
+                        dat[*oidx] = true;
+                        tots_to_add.insert(*root, (dat, *tot_weight));
+                    }
+                } else {
+                    // original obj literal or introduced by inprocessing
+                    let node = self.tot_db.insert(Node::Leaf(olit));
+                    cons.push(NodeCon::weighted(node, *w));
+                }
+            }
+            // actually build the encoding
+            self.kernel.log_routine_start("build-encoding")?;
+            for (root, (data, weight)) in tots_to_add {
+                let mut offset = usize::MAX;
+                let mut len = None;
+                for (oidx, active) in data.into_iter().enumerate() {
+                    if active && oidx < offset {
+                        offset = oidx;
+                    }
+                    if !active && oidx > offset {
+                        len = Some(oidx - offset)
+                    }
+                    if active && len.is_some() {
+                        panic!("found gap in totalizer")
+                    }
+                }
+                if let Some(len) = len {
+                    cons.push(NodeCon::limited(root, offset, len, weight));
+                } else {
+                    cons.push(NodeCon::offset_weighted(root, offset, weight));
+                }
+            }
+            self.kernel.check_termination()?;
+            cons.sort_unstable_by_key(|con| con.multiplier());
+            debug_assert!(!cons.is_empty());
+            let first_node = if cons.len() == 1 {
+                None
+            } else {
+                Some(NodeId(self.tot_db.len()))
+            };
+            // Detect sequences of connections of equal weight and merge them
+            let mut seg_begin = 0;
+            let mut seg_end = 0;
+            let mut merged_cons = vec![];
+            loop {
+                seg_end += 1;
+                if seg_end < cons.len()
+                    && cons[seg_end].multiplier() == cons[seg_begin].multiplier()
+                {
+                    continue;
+                }
+                if seg_end > seg_begin + 1 {
+                    // merge lits of equal weight
+                    let mut seg: Vec<_> = cons[seg_begin..seg_end]
+                        .iter()
+                        .map(|&con| con.reweight(1))
+                        .collect();
+                    seg.sort_unstable_by_key(|&con| self.tot_db.con_len(con));
+                    let con = self.tot_db.merge_balanced(&seg);
+                    debug_assert_eq!(con.multiplier(), 1);
+                    merged_cons
+                        .push(con.reweight(cons[seg_begin].multiplier().try_into().unwrap()));
+                } else {
+                    merged_cons.push(cons[seg_begin])
+                }
+                seg_begin = seg_end;
+                if seg_end >= cons.len() {
+                    break;
+                }
+            }
+            self.kernel.check_termination()?;
+            merged_cons.sort_unstable_by_key(|&con| self.tot_db.con_len(con));
+            self.kernel.check_termination()?;
+            self.encodings[idx] = Some(ObjEncData {
+                root: self.tot_db.merge_balanced(&merged_cons),
+                offset: reform.offset,
+                max_leaf_weight,
+                first_node,
+            });
+            self.kernel.log_routine_end()?;
+        }
+        Ok(())
     }
 }

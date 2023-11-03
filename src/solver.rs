@@ -8,6 +8,7 @@ use std::{
     },
 };
 
+use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::{card, pb, CollectClauses},
     instances::{Cnf, ManageVars, MultiOptInstance},
@@ -98,6 +99,8 @@ struct SolverKernel<VM, O, BCG> {
     stats: Stats,
     /// Limits for the current solving run
     lims: Limits,
+    /// An optional inprocessor that has been run at some stage
+    inpro: Option<MaxPre>,
     /// Logger to log with
     logger: Option<Box<dyn WriteSolverLog>>,
     /// Termination flag
@@ -198,6 +201,7 @@ where
             opts,
             stats,
             lims: Limits::none(),
+            inpro: None,
             logger: None,
             term_flag: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "interrupt-oracle")]
@@ -439,20 +443,29 @@ where
         &mut self,
         obj_idx: usize,
         sol: &mut Assignment,
-        tightening: bool,
+        mut tightening: bool,
     ) -> Result<usize, Termination> {
         debug_assert!(obj_idx < self.stats.n_objs);
         let mut reduction = 0;
         // TODO: iterate over objective literals by weight
         let mut cost = 0;
+        let mut used_sol = sol;
+        let mut rec_sol;
+        if let Some(inpro) = &mut self.inpro {
+            // TODO: don't reconstruct every time
+            // since tightening is done in the solver, cannot do this with inprocessing
+            tightening = false;
+            rec_sol = inpro.reconstruct(used_sol.clone());
+            used_sol = &mut rec_sol;
+        }
         for (l, w) in self.objs[obj_idx].iter() {
-            let val = sol.lit_value(l);
+            let val = used_sol.lit_value(l);
             if val == TernaryVal::True {
                 if tightening && !self.obj_lit_data.contains_key(&!l) {
                     // If tightening and the negated literal does not appear in
                     // any objective
                     if self.oracle.flip_lit(!l)? {
-                        sol.assign_lit(!l);
+                        used_sol.assign_lit(!l);
                         reduction += w;
                         continue;
                     }
@@ -463,9 +476,9 @@ where
         if reduction > 0 {
             debug_assert!(tightening);
             // get assignment from the solver again to trigger reconstruction stack
-            *sol = self.oracle.solution(sol.max_var().unwrap())?;
+            *used_sol = self.oracle.solution(used_sol.max_var().unwrap())?;
             debug_assert_eq!(
-                self.get_cost_with_heuristic_improvements(obj_idx, sol, false)?,
+                self.get_cost_with_heuristic_improvements(obj_idx, used_sol, false)?,
                 cost
             );
         }
@@ -572,9 +585,6 @@ where
         // Create Pareto point
         let mut non_dominated = NonDomPoint::new(self.externalize_internal_costs(&costs));
 
-        // Truncate internal solution to only include original variables
-        solution = solution.truncate(self.max_orig_var);
-
         loop {
             debug_assert_eq!(
                 (0..self.stats.n_objs)
@@ -585,6 +595,9 @@ where
                     .collect::<Vec<_>>(),
                 costs
             );
+
+            // Truncate internal solution to only include original variables
+            solution = solution.truncate(self.max_orig_var);
 
             non_dominated.add_sol(solution.clone());
             match self.log_solution() {
@@ -628,7 +641,7 @@ where
                 return pp_term;
             }
             self.check_termination()?;
-            solution = self.oracle.solution(self.max_orig_var)?;
+            solution = self.oracle.solution(self.var_manager.max_var().unwrap())?;
         }
     }
 }

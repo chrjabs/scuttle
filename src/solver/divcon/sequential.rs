@@ -50,7 +50,8 @@ where
     ) -> Result<Self, Termination> {
         let kernel_opts = KernelOptions {
             store_cnf: opts.kernel.store_cnf
-                || opts.build_encodings == BuildEncodings::CleanRebuild,
+                || opts.build_encodings == BuildEncodings::CleanRebuild
+                || opts.inpro.is_some(),
             ..opts.kernel
         };
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
@@ -75,7 +76,8 @@ where
     ) -> Result<Self, Termination> {
         let kernel_opts = KernelOptions {
             store_cnf: opts.kernel.store_cnf
-                || opts.build_encodings == BuildEncodings::CleanRebuild,
+                || opts.build_encodings == BuildEncodings::CleanRebuild
+                || opts.inpro.is_some(),
             ..opts.kernel
         };
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
@@ -223,6 +225,9 @@ where
 
             if let DivConAnchor::PMinimal(sub_size) = self.opts.anchor {
                 if obj_idxs.len() <= sub_size.absolute(self.worker.kernel.stats.n_real_objs) {
+                    if let Some(techs) = &self.opts.inpro {
+                        self.worker.inpro_and_reset(techs)?;
+                    }
                     self.worker
                         .p_minimal(base_assumps, None, &mut self.pareto_front)?;
                     return Ok(());

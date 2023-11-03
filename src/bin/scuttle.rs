@@ -132,8 +132,8 @@ fn main() -> Result<(), Error> {
             prepro,
             reindexer,
         ),
-        Algorithm::DivCon(opts) => generic_main(
-            handle_term!(Dc::new_default_blocking(inst, oracle, opts), cli),
+        Algorithm::DivCon(ref opts) => generic_main(
+            handle_term!(Dc::new_default_blocking(inst, oracle, opts.clone()), cli),
             cli,
             prepro,
             reindexer,

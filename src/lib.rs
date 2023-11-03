@@ -200,6 +200,13 @@ pub trait WriteSolverLog {
     fn log_core(&mut self, weight: usize, len: usize, red_len: usize) -> Result<(), LoggerError>;
     /// Adds a core exhaustion to the log
     fn log_core_exhaustion(&mut self, exhausted: usize, weight: usize) -> Result<(), LoggerError>;
+    /// Adds an inprocessing step to the log
+    fn log_inprocessing(
+        &mut self,
+        cls_before_after: (usize, usize),
+        fixed_lits: usize,
+        obj_range_before_after: Vec<(usize, usize)>,
+    ) -> Result<(), LoggerError>;
 }
 
 /// Error type for loggers

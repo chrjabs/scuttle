@@ -48,13 +48,15 @@ impl KernelOptions {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub struct DivConOptions {
     pub kernel: KernelOptions,
     /// The recursion anchor to use
     pub anchor: DivConAnchor,
     /// When to build the objective encodings
     pub build_encodings: BuildEncodings,
+    /// Whether to do inprocessing and with which techniques
+    pub inpro: Option<String>,
 }
 
 impl DivConOptions {

@@ -73,9 +73,15 @@ enum AlgorithmCommand {
         /// When/how to (re)build the objective encodings for upper bounding search
         #[arg(long, default_value_t = DivConOptions::default().build_encodings)]
         build_encodings: BuildEncodings,
+        /// Whether to perform inprocessing after finding the first ideal point
+        #[arg(long, default_value_t = DivConOptions::default().inpro.is_some().into())]
+        inprocessing: Bool,
         /// Log ideal and nadir points
         #[arg(long)]
         log_bound_points: bool,
+        /// Log inprocessing
+        #[arg(long)]
+        log_inprocessing: bool,
     },
 }
 
@@ -243,6 +249,7 @@ impl From<&LogArgs> for LoggerConfig {
             log_routines: std::cmp::max(value.log_routines, value.verbosity as usize * 2),
             log_bound_points: false,
             log_cores: value.log_cores || value.verbosity >= 2,
+            log_inpro: value.verbosity >= 1,
         }
     }
 }
@@ -590,10 +597,9 @@ impl Cli {
                 print_solutions: shared.log.print_solutions,
                 print_stats: !shared.log.no_print_stats,
                 color: shared.log.color,
-                logger_config: {
-                    let mut conf: LoggerConfig = (&shared.log).into();
-                    conf.log_fence = log_fence || shared.log.verbosity >= 2;
-                    conf
+                logger_config: LoggerConfig {
+                    log_fence: log_fence || shared.log.verbosity >= 2,
+                    ..(&shared.log).into()
                 },
                 alg: Algorithm::LowerBounding(kernel_opts(shared)),
             },
@@ -601,47 +607,57 @@ impl Cli {
                 shared,
                 anchor,
                 build_encodings,
+                inprocessing,
                 log_bound_points,
-            } => Cli {
-                limits: (&shared.limits).into(),
-                file_format: shared.file.file_format,
-                opb_options: fio::opb::Options {
-                    first_var_idx: shared.file.first_var_idx,
-                    ..Default::default()
-                },
-                inst_path: shared.file.inst_path.clone(),
-                preprocessing: shared.prepro.preprocessing.into(),
-                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                reindexing: shared.prepro.reindexing.into(),
-                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                cadical_config: shared.cadical_config.into(),
-                stdout: stdout(shared.log.color),
-                stderr: stderr(shared.log.color),
-                print_solver_config: shared.log.print_solver_config,
-                print_solutions: shared.log.print_solutions,
-                print_stats: !shared.log.no_print_stats,
-                color: shared.log.color,
-                logger_config: {
-                    let mut conf: LoggerConfig = (&shared.log).into();
-                    conf.log_bound_points = log_bound_points || shared.log.verbosity >= 2;
-                    conf
-                },
-                alg: Algorithm::DivCon(DivConOptions {
-                    kernel: kernel_opts(shared),
-                    anchor: match anchor {
-                        DivConAnchor::LinSu => options::DivConAnchor::LinSu,
-                        DivConAnchor::Bioptsat => options::DivConAnchor::BiOptSat,
-                        DivConAnchor::PMinimal => {
-                            options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(0))
-                        }
-                        DivConAnchor::NMinusOne => options::DivConAnchor::NMinus(1),
-                        DivConAnchor::PMinNMinusOne => {
-                            options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(1))
-                        }
+                log_inprocessing,
+            } => {
+                let inpro = if inprocessing.into() {
+                    Some(shared.prepro.maxpre_techniques.clone())
+                } else {
+                    None
+                };
+                Cli {
+                    limits: (&shared.limits).into(),
+                    file_format: shared.file.file_format,
+                    opb_options: fio::opb::Options {
+                        first_var_idx: shared.file.first_var_idx,
+                        ..Default::default()
                     },
-                    build_encodings,
-                }),
-            },
+                    inst_path: shared.file.inst_path.clone(),
+                    preprocessing: shared.prepro.preprocessing.into(),
+                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                    reindexing: shared.prepro.reindexing.into(),
+                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                    cadical_config: shared.cadical_config.into(),
+                    stdout: stdout(shared.log.color),
+                    stderr: stderr(shared.log.color),
+                    print_solver_config: shared.log.print_solver_config,
+                    print_solutions: shared.log.print_solutions,
+                    print_stats: !shared.log.no_print_stats,
+                    color: shared.log.color,
+                    logger_config: LoggerConfig {
+                        log_bound_points: log_bound_points || shared.log.verbosity >= 2,
+                        log_inpro: log_inprocessing || shared.log.verbosity >= 1,
+                        ..(&shared.log).into()
+                    },
+                    alg: Algorithm::DivCon(DivConOptions {
+                        kernel: kernel_opts(shared),
+                        anchor: match anchor {
+                            DivConAnchor::LinSu => options::DivConAnchor::LinSu,
+                            DivConAnchor::Bioptsat => options::DivConAnchor::BiOptSat,
+                            DivConAnchor::PMinimal => {
+                                options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(0))
+                            }
+                            DivConAnchor::NMinusOne => options::DivConAnchor::NMinus(1),
+                            DivConAnchor::PMinNMinusOne => {
+                                options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(1))
+                            }
+                        },
+                        build_encodings,
+                        inpro,
+                    }),
+                }
+            }
         };
         #[cfg(any(not(feature = "sol-tightening"), not(feature = "phasing")))]
         match &cli.alg {
@@ -765,7 +781,7 @@ impl Cli {
             buffer.set_color(ColorSpec::new().set_bold(true))?;
             writeln!(buffer, ": ")?;
             buffer.reset()?;
-            match self.alg {
+            match &self.alg {
                 Algorithm::PMinimal(opts) | Algorithm::LowerBounding(opts) => {
                     Self::print_parameter(
                         &mut buffer,
@@ -1045,6 +1061,7 @@ struct LoggerConfig {
     log_routines: usize,
     log_bound_points: bool,
     log_cores: bool,
+    log_inpro: bool,
 }
 
 pub struct CliLogger {
@@ -1258,6 +1275,44 @@ impl WriteSolverLog for CliLogger {
             write!(buffer, "exhausted core")?;
             buffer.reset()?;
             writeln!(buffer, ": exhausted: {}; weight: {}", exhausted, weight)?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
+
+    fn log_inprocessing(
+        &mut self,
+        cls_before_after: (usize, usize),
+        fixed_lits: usize,
+        obj_range_before_after: Vec<(usize, usize)>,
+    ) -> Result<(), LoggerError> {
+        if self.config.log_inpro {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
+            write!(buffer, "inprocessing")?;
+            buffer.reset()?;
+            writeln!(
+                buffer,
+                ": cls_before: {}; cls_after: {}; fixed_lits: {}",
+                cls_before_after.0, cls_before_after.1, fixed_lits
+            )?;
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
+            write!(buffer, "inprocessing")?;
+            buffer.reset()?;
+            let ranges_before: Vec<_> = obj_range_before_after
+                .iter()
+                .map(|(before, _)| *before)
+                .collect();
+            let ranges_after: Vec<_> = obj_range_before_after
+                .iter()
+                .map(|(_, after)| *after)
+                .collect();
+            writeln!(
+                buffer,
+                ": obj_ranges_before: {}; obj_ranges_after: {}",
+                VecPrinter::new(&ranges_before),
+                VecPrinter::new(&ranges_after)
+            )?;
             self.stdout.print(&buffer)?;
         }
         Ok(())

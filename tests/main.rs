@@ -511,6 +511,14 @@ generate_tests!(divcon_pmin_smaller_0, Dc!(), {
     opts
 });
 
+generate_tests!(divcon_pmin_smaller_0_inpro, Dc!(), {
+    let mut opts = scuttle::DivConOptions::default();
+    opts.anchor =
+        scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
+    opts.inpro = Some(String::from("[[uvsrgc]VRTG]"));
+    opts
+});
+
 generate_tests!(divcon_pmin_smaller_1, Dc!(), {
     let mut opts = scuttle::DivConOptions::default();
     opts.anchor =
