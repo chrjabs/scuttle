@@ -82,6 +82,7 @@ where
         ideal: &mut [usize],
     ) -> Result<bool, Termination> {
         self.kernel.log_routine_start("find_ideal")?;
+        let mut cont = true;
         for &obj_idx in obj_idxs {
             let mut tmp_reform;
             let reform = if assumps.is_empty() {
@@ -93,13 +94,16 @@ where
             };
             match self.kernel.oll(reform, assumps, &mut self.tot_db)? {
                 Some(_) => (),
-                None => return Ok(false),
+                None => {
+                    cont = false;
+                    break;
+                }
             };
             // TODO: maybe make use of solution?
             ideal[obj_idx] = reform.offset;
         }
         self.kernel.log_routine_end()?;
-        Ok(true)
+        Ok(cont)
     }
 
     /// Solves a bi-objective subproblem with the BiOptSat algorithm. This is
