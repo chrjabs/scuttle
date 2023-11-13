@@ -204,7 +204,7 @@ where
         self.kernel.log_routine_start("p-minimal")?;
         for oidx in 0..self.kernel.stats.n_objs {
             if self.encodings[oidx].is_none()
-                && matches!(self.kernel.objs[oidx], Objective::Constant { .. })
+                && !matches!(self.kernel.objs[oidx], Objective::Constant { .. })
             {
                 self.encodings[oidx] = Some(self.build_obj_encoding(oidx)?);
                 self.kernel.check_termination()?;
