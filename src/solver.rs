@@ -1109,6 +1109,7 @@ where
         if !self.opts.store_cnf {
             return Err(Termination::ResetWithoutCnf);
         }
+        self.log_routine_start("reset-oracle")?;
         self.oracle = O::default();
         self.oracle.reserve(self.max_orig_var)?;
         self.oracle.add_cnf(self.orig_cnf.clone().unwrap())?;
@@ -1126,6 +1127,7 @@ where
         if include_var_manager {
             self.var_manager.forget_from(self.max_orig_var + 1);
         }
+        self.log_routine_end()?;
         Ok(())
     }
 }

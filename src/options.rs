@@ -55,6 +55,8 @@ pub struct DivConOptions {
     pub anchor: DivConAnchor,
     /// When to build the objective encodings
     pub build_encodings: BuildEncodings,
+    /// Reset the oracle after each global ideal point
+    pub reset_after_global_ideal: bool,
     /// Whether to do inprocessing and with which techniques
     pub inpro: Option<String>,
 }

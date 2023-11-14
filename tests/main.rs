@@ -519,6 +519,14 @@ generate_tests!(divcon_pmin_smaller_0_inpro, Dc!(), {
     opts
 });
 
+generate_tests!(divcon_pmin_smaller_0_reset, Dc!(), {
+    let mut opts = scuttle::DivConOptions::default();
+    opts.anchor =
+        scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
+    opts.reset_after_global_ideal = true;
+    opts
+});
+
 generate_tests!(divcon_pmin_smaller_1, Dc!(), {
     let mut opts = scuttle::DivConOptions::default();
     opts.anchor =

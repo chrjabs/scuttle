@@ -51,7 +51,8 @@ where
         let kernel_opts = KernelOptions {
             store_cnf: opts.kernel.store_cnf
                 || opts.build_encodings == BuildEncodings::CleanRebuild
-                || opts.inpro.is_some(),
+                || opts.inpro.is_some()
+                || opts.reset_after_global_ideal,
             ..opts.kernel
         };
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
@@ -77,7 +78,8 @@ where
         let kernel_opts = KernelOptions {
             store_cnf: opts.kernel.store_cnf
                 || opts.build_encodings == BuildEncodings::CleanRebuild
-                || opts.inpro.is_some(),
+                || opts.inpro.is_some()
+                || opts.reset_after_global_ideal,
             ..opts.kernel
         };
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
@@ -196,6 +198,7 @@ where
                     logger.log_ideal(&ideal)?;
                 }
 
+                let mut reset = false;
                 if matches!(
                     self.opts.build_encodings,
                     BuildEncodings::Rebuild | BuildEncodings::CleanRebuild
@@ -203,9 +206,15 @@ where
                     if self.worker.rebuild_obj_encodings(
                         self.opts.build_encodings == BuildEncodings::CleanRebuild,
                     )? {
+                        reset = true;
                         self.last_blocked = 0;
                         self.cut_dominated()?;
                     }
+                }
+                if !reset && self.opts.reset_after_global_ideal {
+                    self.worker.reset_oracle()?;
+                    self.last_blocked = 0;
+                    self.cut_dominated()?;
                 }
             }
 

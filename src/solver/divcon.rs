@@ -432,6 +432,15 @@ where
         self.kernel.log_routine_end()?;
         Ok(enc)
     }
+    
+    /// Resets the oracle
+    fn reset_oracle(&mut self) -> Result<(), Termination> {
+        debug_assert!(self.kernel.orig_cnf.is_some());
+        self.kernel.reset_oracle(true)?;
+        self.tot_db.reset_vars();
+        self.kernel.check_termination()?;
+        Ok(())
+    }
 
     /// Rebuilds all existing objective encodings. If `clean` is set, does so by
     /// restarting the oracle. Returns `true` if the oracle was restarted.
