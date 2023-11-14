@@ -997,7 +997,7 @@ impl Cli {
         if self.print_solutions {
             non_dom
                 .into_iter()
-                .try_fold((), |_, sol| write!(buffer, "s {}", sol))?
+                .try_fold((), |_, sol| writeln!(buffer, "s {}", sol))?
         }
         Self::end_block(buffer)?;
         Ok(())
