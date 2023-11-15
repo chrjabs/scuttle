@@ -1138,7 +1138,7 @@ fn absorb_objective<VM: ManageVars>(
     blits: &mut RsHashMap<Clause, Lit>,
     vm: &mut VM,
 ) -> Objective {
-    if obj.is_empty() {
+    if obj.constant() {
         return Objective::Constant {
             offset: obj.offset(),
         };
