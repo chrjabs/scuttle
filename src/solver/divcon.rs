@@ -477,7 +477,7 @@ where
             // between), so we can do this once here rather than in the loop.
             for reform in &mut self.reforms {
                 let outputs = reform.outputs.clone();
-                let inactives = reform.inactives.clone();
+                let inactives = reform.inactives.clone().as_map();
                 reform.outputs.clear();
                 reform.inactives.retain(|lit, _| !outputs.contains_key(lit));
                 for (

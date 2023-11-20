@@ -10,7 +10,7 @@ use rustsat::{
         SolveIncremental, SolveStats,
         SolverResult::{Interrupted, Sat, Unsat},
     },
-    types::{Assignment, Lit, RsHashMap},
+    types::{Assignment, Lit, RsHashMap, RsHashSet},
 };
 use scuttle_proc::oracle_bounds;
 
@@ -26,9 +26,127 @@ pub struct TotOutput {
 }
 
 #[derive(Default, Clone)]
+pub enum Inactives {
+    Weighted(RsHashMap<Lit, usize>),
+    Unweighted {
+        lits: Vec<Lit>,
+        active: RsHashSet<Lit>,
+    },
+    #[default]
+    Constant,
+}
+
+impl Inactives {
+    pub fn iter(&self) -> InactIter {
+        self.into()
+    }
+
+    pub fn cleanup(&mut self) {
+        match self {
+            Inactives::Weighted(map) => map.retain(|_, w| *w > 0),
+            Inactives::Unweighted { lits, active } => {
+                lits.retain(|l| !active.contains(l));
+                active.clear();
+            }
+            Inactives::Constant => (),
+        }
+    }
+
+    pub fn insert(&mut self, lit: Lit, weight: usize) {
+        match self {
+            Inactives::Weighted(map) => {
+                map.insert(lit, weight);
+            }
+            Inactives::Unweighted { lits, .. } => {
+                debug_assert_eq!(weight, 1);
+                lits.push(lit);
+            }
+            Inactives::Constant => panic!(),
+        }
+    }
+
+    pub fn relax(&mut self, lit: Lit, core_weight: usize) -> usize {
+        match self {
+            Inactives::Weighted(map) => {
+                if let Some(lit_weight) = map.get_mut(&lit) {
+                    *lit_weight -= core_weight;
+                    *lit_weight
+                } else {
+                    panic!()
+                }
+            }
+            Inactives::Unweighted { active, .. } => {
+                debug_assert_eq!(core_weight, 1);
+                active.insert(lit);
+                0
+            }
+            Inactives::Constant => panic!(),
+        }
+    }
+
+    pub fn as_map(mut self) -> RsHashMap<Lit, usize> {
+        self.cleanup();
+        match self {
+            Inactives::Weighted(map) => map,
+            Inactives::Unweighted { lits, .. } => lits.into_iter().map(|l| (l, 1)).collect(),
+            Inactives::Constant => RsHashMap::default(),
+        }
+    }
+
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&Lit, &usize) -> bool,
+    {
+        match self {
+            Inactives::Weighted(map) => map.retain(|l, w| f(l, w)),
+            Inactives::Unweighted { lits, .. } => lits.retain(|l| f(l, &1)),
+            Inactives::Constant => (),
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a Inactives {
+    type Item = (&'a Lit, &'a usize);
+
+    type IntoIter = InactIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+pub enum InactIter<'a> {
+    Weighted(std::collections::hash_map::Iter<'a, Lit, usize>),
+    Unweighted(std::slice::Iter<'a, Lit>),
+    Constant,
+}
+
+impl<'a> From<&'a Inactives> for InactIter<'a> {
+    fn from(value: &'a Inactives) -> Self {
+        match value {
+            Inactives::Weighted(map) => Self::Weighted(map.iter()),
+            Inactives::Unweighted { lits, .. } => Self::Unweighted(lits.iter()),
+            Inactives::Constant => Self::Constant,
+        }
+    }
+}
+
+impl<'a> Iterator for InactIter<'a> {
+    type Item = (&'a Lit, &'a usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            InactIter::Weighted(iter) => iter.next(),
+            InactIter::Unweighted(iter) => iter.next().map(|l| (l, &1)),
+            InactIter::Constant => None,
+        }
+    }
+}
+
+#[derive(Default, Clone)]
 pub struct OllReformulation {
     /// Inactive literals, aka the reformulated objective
-    pub inactives: RsHashMap<Lit, usize>,
+    pub inactives: Inactives,
     /// Mapping totalizer output assumption to totalizer data
     pub outputs: RsHashMap<Lit, TotOutput>,
     /// The constant offset derived by the reformulation
@@ -39,11 +157,14 @@ impl From<&Objective> for OllReformulation {
     fn from(value: &Objective) -> Self {
         match value {
             Objective::Weighted { lits, .. } => OllReformulation {
-                inactives: lits.clone(),
+                inactives: Inactives::Weighted(lits.clone()),
                 ..Default::default()
             },
             Objective::Unweighted { lits, .. } => OllReformulation {
-                inactives: lits.iter().map(|l| (*l, 1)).collect(),
+                inactives: Inactives::Unweighted {
+                    lits: lits.clone(),
+                    active: Default::default(),
+                },
                 ..Default::default()
             },
             Objective::Constant { .. } => OllReformulation {
@@ -78,6 +199,17 @@ where
         base_assumps: &[Lit],
         tot_db: &mut TotDb,
     ) -> Result<Option<Assignment>, Termination> {
+        if matches!(reform.inactives, Inactives::Constant) {
+            match self.solve_assumps(base_assumps)? {
+                Sat => {
+                    return Ok(Some(
+                        self.oracle.solution(self.var_manager.max_var().unwrap())?,
+                    ))
+                }
+                Unsat => return Ok(None),
+                Interrupted => panic!(),
+            }
+        }
         self.log_routine_start("oll")?;
 
         // cores not yet reformulated (because of WCE)
@@ -90,14 +222,24 @@ where
         assumps.extend(reform.inactives.iter().map(|(&l, _)| !l));
 
         loop {
-            // Build assumptions sorted by weight
-            assumps[base_assumps.len()..]
-                .sort_unstable_by_key(|&l| -(reform.inactives[&!l] as isize));
-            // Remove assumptions that turned active
-            while assumps.len() > base_assumps.len()
-                && reform.inactives[&!assumps[assumps.len() - 1]] == 0
-            {
-                assumps.pop();
+            match &mut reform.inactives {
+                Inactives::Weighted(inacts) => {
+                    // Build assumptions sorted by weight
+                    assumps[base_assumps.len()..]
+                        .sort_unstable_by_key(|&l| -(inacts[&!l] as isize));
+                    // Remove assumptions that turned active
+                    while assumps.len() > base_assumps.len()
+                        && inacts[&!assumps[assumps.len() - 1]] == 0
+                    {
+                        assumps.pop();
+                    }
+                }
+                Inactives::Unweighted { .. } => {
+                    reform.inactives.cleanup();
+                    assumps.drain(base_assumps.len()..);
+                    assumps.extend(reform.inactives.iter().map(|(&l, _)| !l));
+                }
+                Inactives::Constant => panic!(),
             }
 
             match self.solve_assumps(&assumps)? {
@@ -105,8 +247,7 @@ where
                 Sat => {
                     if unreform_cores.is_empty() {
                         let sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
-                        // Cleanup: remove literals that turned active from inactives
-                        reform.inactives.retain(|_, w| *w > 0);
+                        reform.inactives.cleanup();
                         self.log_routine_end()?;
                         return Ok(Some(sol));
                     }
@@ -171,9 +312,13 @@ where
                     let orig_len = core.len();
                     core = self.minimize_core(core, base_assumps)?;
                     core = self.trim_core(core, base_assumps)?;
-                    let core_weight = core
-                        .iter()
-                        .fold(usize::MAX, |cw, l| std::cmp::min(cw, reform.inactives[l]));
+                    let core_weight = match &reform.inactives {
+                        Inactives::Weighted(inact) => core
+                            .iter()
+                            .fold(usize::MAX, |cw, l| std::cmp::min(cw, inact[l])),
+                        Inactives::Unweighted { .. } => 1,
+                        Inactives::Constant => panic!(),
+                    };
                     reform.offset += core_weight;
                     // Log core
                     if let Some(log) = &mut self.logger {
@@ -183,13 +328,7 @@ where
                     let mut encs = Cnf::new();
                     let mut cons = Vec::with_capacity(core.len());
                     for olit in &core {
-                        let inact_weight =
-                            if let Some(inact_weight) = reform.inactives.get_mut(olit) {
-                                *inact_weight -= core_weight;
-                                *inact_weight
-                            } else {
-                                panic!("literal in core that is not inactive")
-                            };
+                        let inact_weight = reform.inactives.relax(*olit, core_weight);
                         if let Some(&TotOutput {
                             root,
                             oidx,
