@@ -73,6 +73,9 @@ enum AlgorithmCommand {
         /// When/how to (re)build the objective encodings for upper bounding search
         #[arg(long, default_value_t = DivConOptions::default().build_encodings)]
         build_encodings: BuildEncodings,
+        /// If true, don't merge OLL totalizers into GTE but ignore the totalizer structure.
+        #[arg(long, default_value_t = DivConOptions::default().rebase_encodings.into())]
+        rebase_encodings: Bool,
         /// Whether to reset the oracle after finding a global ideal point, i.e., core boosting
         #[arg(long, default_value_t = DivConOptions::default().reset_after_global_ideal.into())]
         reset_after_cb: Bool,
@@ -610,6 +613,7 @@ impl Cli {
                 shared,
                 anchor,
                 build_encodings,
+                rebase_encodings,
                 reset_after_cb,
                 inprocessing,
                 log_bound_points,
@@ -658,6 +662,7 @@ impl Cli {
                             }
                         },
                         build_encodings,
+                        rebase_encodings: rebase_encodings.into(),
                         reset_after_global_ideal: reset_after_cb.into(),
                         inpro,
                     }),

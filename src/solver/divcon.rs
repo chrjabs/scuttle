@@ -124,16 +124,17 @@ where
         (inc_lb, dec_lb): (Option<usize>, Option<usize>),
         lookup: Lookup,
         collector: &mut Col,
+        rebase_encodings: bool,
     ) -> Result<(), Termination>
     where
         Lookup: Fn(usize) -> Option<usize>,
         Col: Extend<NonDomPoint>,
     {
         if self.encodings[inc_obj].is_none() {
-            self.encodings[inc_obj] = Some(self.build_obj_encoding(inc_obj)?);
+            self.encodings[inc_obj] = Some(self.build_obj_encoding(inc_obj, rebase_encodings)?);
         }
         if self.encodings[dec_obj].is_none() {
-            self.encodings[dec_obj] = Some(self.build_obj_encoding(dec_obj)?);
+            self.encodings[dec_obj] = Some(self.build_obj_encoding(dec_obj, rebase_encodings)?);
         }
 
         let tot_db_cell = RefCell::from(&mut self.tot_db);
@@ -173,9 +174,10 @@ where
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
         collector: &mut Col,
+        rebase_encodings: bool,
     ) -> Result<Option<usize>, Termination> {
         if self.encodings[obj_idx].is_none() {
-            self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx)?);
+            self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx, rebase_encodings)?);
         }
 
         let mut enc: ObjEncoding<_, card::DefIncUpperBounding> = ObjEncoding::Weighted(
@@ -204,13 +206,14 @@ where
         base_assumps: &[Lit],
         mut starting_point: Option<Assignment>,
         collector: &mut Col,
+        rebase_encodings: bool,
     ) -> Result<(), Termination> {
         self.kernel.log_routine_start("p-minimal")?;
         for oidx in 0..self.kernel.stats.n_objs {
             if self.encodings[oidx].is_none()
                 && !matches!(self.kernel.objs[oidx], Objective::Constant { .. })
             {
-                self.encodings[oidx] = Some(self.build_obj_encoding(oidx)?);
+                self.encodings[oidx] = Some(self.build_obj_encoding(oidx, rebase_encodings)?);
                 self.kernel.check_termination()?;
             }
         }
@@ -275,7 +278,11 @@ where
     }
 
     /// Cuts away the areas dominated by the points in `self.discovered`
-    fn cut_dominated(&mut self, points: &[&[usize]]) -> Result<(), Termination> {
+    fn cut_dominated(
+        &mut self,
+        points: &[&[usize]],
+        rebase_encodings: bool,
+    ) -> Result<(), Termination> {
         for &cost in points {
             let clause = cost
                 .iter()
@@ -293,12 +300,12 @@ where
                         return None;
                     }
                     if self.encodings[obj_idx].is_none() {
-                        match self.build_obj_encoding(obj_idx) {
+                        match self.build_obj_encoding(obj_idx, rebase_encodings) {
                             Ok(enc) => self.encodings[obj_idx] = Some(enc),
                             Err(term) => return Some(Err(term)),
                         }
                     }
-                    let units = match self.bound_objective(obj_idx, cost - 1) {
+                    let units = match self.bound_objective(obj_idx, cost - 1, rebase_encodings) {
                         Ok(units) => units,
                         Err(term) => return Some(Err(term)),
                     };
@@ -320,7 +327,12 @@ where
     }
 
     /// Bounds an objective at `<= bound`
-    fn bound_objective(&mut self, obj_idx: usize, bound: usize) -> Result<Vec<Lit>, Termination> {
+    fn bound_objective(
+        &mut self,
+        obj_idx: usize,
+        bound: usize,
+        rebase_encodings: bool,
+    ) -> Result<Vec<Lit>, Termination> {
         debug_assert!(bound >= self.reforms[obj_idx].offset);
         if bound == self.reforms[obj_idx].offset {
             return Ok(self.reforms[obj_idx]
@@ -330,7 +342,7 @@ where
                 .collect());
         }
         if self.encodings[obj_idx].is_none() {
-            self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx)?);
+            self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx, rebase_encodings)?);
         }
 
         let enc = self.encodings[obj_idx].as_ref().unwrap();
@@ -354,8 +366,14 @@ where
         Ok(assumps)
     }
 
-    /// Merges the current OLL reformulation into a GTE
-    fn build_obj_encoding(&mut self, obj_idx: usize) -> Result<ObjEncData, Termination> {
+    /// Merges the current OLL reformulation into a GTE. If `rebase` is true,
+    /// does not perform a merge but uses all totalizer outputs as individual
+    /// input literals to the GTE.
+    fn build_obj_encoding(
+        &mut self,
+        obj_idx: usize,
+        rebase: bool,
+    ) -> Result<ObjEncData, Termination> {
         self.kernel.log_routine_start("build-encoding")?;
         let reform = &self.reforms[obj_idx];
         let mut cons = vec![];
@@ -371,12 +389,21 @@ where
                 debug_assert_ne!(weight, 0);
                 debug_assert!(oidx < self.tot_db[root].len());
                 max_leaf_weight = std::cmp::max(tot_weight, max_leaf_weight);
-                if tot_weight == weight {
-                    cons.push(NodeCon::offset_weighted(root, oidx, weight))
-                } else {
+                if rebase {
+                    // ignore totalizer structure
                     cons.push(NodeCon::single(root, oidx + 1, weight));
-                    if oidx + 1 < self.tot_db[root].len() {
-                        cons.push(NodeCon::offset_weighted(root, oidx + 1, tot_weight))
+                    for idx in oidx + 1..self.tot_db[root].len() {
+                        cons.push(NodeCon::single(root, idx + 1, tot_weight));
+                    }
+                } else {
+                    // preserve totalizer structure
+                    if tot_weight == weight {
+                        cons.push(NodeCon::offset_weighted(root, oidx, weight))
+                    } else {
+                        cons.push(NodeCon::single(root, oidx + 1, weight));
+                        if oidx + 1 < self.tot_db[root].len() {
+                            cons.push(NodeCon::offset_weighted(root, oidx + 1, tot_weight))
+                        }
                     }
                 }
             } else {
@@ -432,7 +459,7 @@ where
         self.kernel.log_routine_end()?;
         Ok(enc)
     }
-    
+
     /// Resets the oracle
     fn reset_oracle(&mut self) -> Result<(), Termination> {
         debug_assert!(self.kernel.orig_cnf.is_some());
@@ -444,7 +471,7 @@ where
 
     /// Rebuilds all existing objective encodings. If `clean` is set, does so by
     /// restarting the oracle. Returns `true` if the oracle was restarted.
-    fn rebuild_obj_encodings(&mut self, clean: bool) -> Result<bool, Termination> {
+    fn rebuild_obj_encodings(&mut self, clean: bool, rebase: bool) -> Result<bool, Termination> {
         self.kernel.log_routine_start("rebuilding encodings")?;
         debug_assert!(!clean || self.kernel.orig_cnf.is_some());
         if clean {
@@ -519,7 +546,7 @@ where
             if self.encodings[oidx].is_none() {
                 continue;
             }
-            self.encodings[oidx] = Some(self.build_obj_encoding(oidx)?);
+            self.encodings[oidx] = Some(self.build_obj_encoding(oidx, rebase)?);
             self.kernel.check_termination()?;
         }
         self.kernel.log_routine_end()?;

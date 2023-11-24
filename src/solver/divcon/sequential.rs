@@ -148,6 +148,7 @@ where
                     None,
                     Some(ideal[obj_idxs[0]]),
                     &mut self.pareto_front,
+                    self.opts.rebase_encodings,
                 )?;
                 self.cut_dominated()?;
                 return Ok(());
@@ -165,13 +166,18 @@ where
                                 (Some(ideal[obj_idxs[0]]), Some(ideal[obj_idxs[1]])),
                                 |_| None,
                                 &mut self.pareto_front,
+                                self.opts.rebase_encodings,
                             )?;
                             self.cut_dominated()?;
                             return Ok(());
                         }
                         _ => {
-                            self.worker
-                                .p_minimal(base_assumps, None, &mut self.pareto_front)?;
+                            self.worker.p_minimal(
+                                base_assumps,
+                                None,
+                                &mut self.pareto_front,
+                                self.opts.rebase_encodings,
+                            )?;
                             return Ok(());
                         }
                     }
@@ -182,8 +188,12 @@ where
                 if obj_idxs.len() < self.worker.kernel.stats.n_real_objs
                     && obj_idxs.len() <= sub_size.absolute(self.worker.kernel.stats.n_real_objs)
                 {
-                    self.worker
-                        .p_minimal(base_assumps, None, &mut self.pareto_front)?;
+                    self.worker.p_minimal(
+                        base_assumps,
+                        None,
+                        &mut self.pareto_front,
+                        self.opts.rebase_encodings,
+                    )?;
                     return Ok(());
                 }
             }
@@ -205,6 +215,7 @@ where
                 ) {
                     if self.worker.rebuild_obj_encodings(
                         self.opts.build_encodings == BuildEncodings::CleanRebuild,
+                        self.opts.rebase_encodings,
                     )? {
                         reset = true;
                         self.last_blocked = 0;
@@ -227,6 +238,7 @@ where
                     (Some(ideal[obj_idxs[0]]), Some(ideal[obj_idxs[1]])),
                     |_| None,
                     &mut self.pareto_front,
+                    self.opts.rebase_encodings,
                 )?;
                 self.cut_dominated()?;
                 return Ok(());
@@ -237,8 +249,12 @@ where
                     if let Some(techs) = &self.opts.inpro {
                         self.worker.inpro_and_reset(techs)?;
                     }
-                    self.worker
-                        .p_minimal(base_assumps, None, &mut self.pareto_front)?;
+                    self.worker.p_minimal(
+                        base_assumps,
+                        None,
+                        &mut self.pareto_front,
+                        self.opts.rebase_encodings,
+                    )?;
                     return Ok(());
                 }
             }
@@ -250,7 +266,11 @@ where
                 subproblem.remove(idx);
                 //subproblem.swap_remove(idx);
                 let mut assumps = Vec::from(base_assumps);
-                assumps.extend(self.worker.bound_objective(fixed_obj, ideal[fixed_obj])?);
+                assumps.extend(self.worker.bound_objective(
+                    fixed_obj,
+                    ideal[fixed_obj],
+                    self.opts.rebase_encodings,
+                )?);
                 self.solve_subproblem(ideal.clone(), &assumps, &subproblem)?;
             }
         }
@@ -270,7 +290,8 @@ where
         for start_idx in (0..costs.len()).step_by(self.worker.kernel.stats.n_objs) {
             points.push(&costs[start_idx..start_idx + self.worker.kernel.stats.n_objs]);
         }
-        self.worker.cut_dominated(&points)?;
+        self.worker
+            .cut_dominated(&points, self.opts.rebase_encodings)?;
         self.last_blocked = self.pareto_front.len();
         Ok(())
     }

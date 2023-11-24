@@ -527,6 +527,14 @@ generate_tests!(divcon_pmin_smaller_0_reset, Dc!(), {
     opts
 });
 
+generate_tests!(divcon_pmin_smaller_0_rebase, Dc!(), {
+    let mut opts = scuttle::DivConOptions::default();
+    opts.anchor =
+        scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
+    opts.rebase_encodings = true;
+    opts
+});
+
 generate_tests!(divcon_pmin_smaller_1, Dc!(), {
     let mut opts = scuttle::DivConOptions::default();
     opts.anchor =
@@ -559,7 +567,8 @@ generate_biobj_tests!(bioptsat_default, Bos!(), scuttle::KernelOptions::default(
 #[test]
 fn debug() {
     let mut opts = scuttle::DivConOptions::default();
-    opts.anchor = scuttle::options::DivConAnchor::NMinus(1);
-    opts.build_encodings = scuttle::options::BuildEncodings::CleanRebuild;
-    spot5!(Dc!(), opts)
+    opts.anchor =
+        scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
+    opts.rebase_encodings = true;
+    parkinsons!(Dc!(), opts)
 }
