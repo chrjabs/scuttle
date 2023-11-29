@@ -511,6 +511,13 @@ generate_tests!(divcon_pmin_smaller_0, Dc!(), {
     opts
 });
 
+generate_tests!(divcon_lb_smaller_0, Dc!(), {
+    let mut opts = scuttle::DivConOptions::default();
+    opts.anchor =
+        scuttle::options::DivConAnchor::LowerBounding(scuttle::options::SubProblemSize::Smaller(0));
+    opts
+});
+
 generate_tests!(divcon_pmin_smaller_0_inpro, Dc!(), {
     let mut opts = scuttle::DivConOptions::default();
     opts.anchor =
@@ -542,6 +549,13 @@ generate_tests!(divcon_pmin_smaller_1, Dc!(), {
     opts
 });
 
+generate_tests!(divcon_lb_smaller_1, Dc!(), {
+    let mut opts = scuttle::DivConOptions::default();
+    opts.anchor =
+        scuttle::options::DivConAnchor::LowerBounding(scuttle::options::SubProblemSize::Smaller(1));
+    opts
+});
+
 generate_tests!(divcon_n_minus_1, Dc!(), {
     let mut opts = scuttle::DivConOptions::default();
     opts.anchor = scuttle::options::DivConAnchor::NMinus(1);
@@ -568,7 +582,6 @@ generate_biobj_tests!(bioptsat_default, Bos!(), scuttle::KernelOptions::default(
 fn debug() {
     let mut opts = scuttle::DivConOptions::default();
     opts.anchor =
-        scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
-    opts.rebase_encodings = true;
-    parkinsons!(Dc!(), opts)
+        scuttle::options::DivConAnchor::LowerBounding(scuttle::options::SubProblemSize::Smaller(0));
+    small!(Dc!(), opts)
 }

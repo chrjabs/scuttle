@@ -140,7 +140,10 @@ where
             if obj_idxs.len() == 1 {
                 debug_assert!(matches!(
                     self.opts.anchor,
-                    DivConAnchor::LinSu | DivConAnchor::NMinus(_) | DivConAnchor::PMinimal(_)
+                    DivConAnchor::LinSu
+                        | DivConAnchor::NMinus(_)
+                        | DivConAnchor::PMinimal(_)
+                        | DivConAnchor::LowerBounding(_)
                 ));
                 self.worker.linsu_yield(
                     obj_idxs[0],
@@ -191,6 +194,19 @@ where
                     self.worker.p_minimal(
                         base_assumps,
                         None,
+                        &mut self.pareto_front,
+                        self.opts.rebase_encodings,
+                    )?;
+                    return Ok(());
+                }
+            }
+
+            if let DivConAnchor::LowerBounding(sub_size) = self.opts.anchor {
+                if obj_idxs.len() < self.worker.kernel.stats.n_real_objs
+                    && obj_idxs.len() <= sub_size.absolute(self.worker.kernel.stats.n_real_objs)
+                {
+                    self.worker.lower_bounding(
+                        base_assumps,
                         &mut self.pareto_front,
                         self.opts.rebase_encodings,
                     )?;
@@ -252,6 +268,20 @@ where
                     self.worker.p_minimal(
                         base_assumps,
                         None,
+                        &mut self.pareto_front,
+                        self.opts.rebase_encodings,
+                    )?;
+                    return Ok(());
+                }
+            }
+
+            if let DivConAnchor::LowerBounding(sub_size) = self.opts.anchor {
+                if obj_idxs.len() <= sub_size.absolute(self.worker.kernel.stats.n_real_objs) {
+                    if let Some(techs) = &self.opts.inpro {
+                        self.worker.inpro_and_reset(techs)?;
+                    }
+                    self.worker.lower_bounding(
+                        base_assumps,
                         &mut self.pareto_front,
                         self.opts.rebase_encodings,
                     )?;

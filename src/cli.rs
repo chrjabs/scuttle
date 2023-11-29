@@ -301,6 +301,8 @@ pub enum DivConAnchor {
     Bioptsat,
     /// P-Minimal after the first ideal point was found
     PMinimal,
+    /// Lower-bounding search after the first ideal point was found
+    LowerBounding,
     /// Run an appropriate anchor (Linear Sat-Unsat / BiOptSat / P-Minimal) at
     /// subproblems of size `n-1`.
     NMinusOne,
@@ -314,6 +316,7 @@ impl fmt::Display for DivConAnchor {
             DivConAnchor::LinSu => write!(f, "lin-su"),
             DivConAnchor::Bioptsat => write!(f, "bioptsat"),
             DivConAnchor::PMinimal => write!(f, "p-minimal"),
+            DivConAnchor::LowerBounding => write!(f, "lower-bounding"),
             DivConAnchor::NMinusOne => write!(f, "n-minus-one"),
             DivConAnchor::PMinNMinusOne => write!(f, "p-min-n-minus-once"),
         }
@@ -325,6 +328,7 @@ impl From<options::DivConAnchor> for DivConAnchor {
         match value {
             options::DivConAnchor::LinSu => DivConAnchor::LinSu,
             options::DivConAnchor::BiOptSat => DivConAnchor::Bioptsat,
+            options::DivConAnchor::LowerBounding(_) => DivConAnchor::LowerBounding,
             options::DivConAnchor::PMinimal(size) => match size {
                 options::SubProblemSize::Abs(_) => DivConAnchor::PMinimal,
                 options::SubProblemSize::Smaller(x) => match x {
@@ -656,6 +660,9 @@ impl Cli {
                             DivConAnchor::PMinimal => {
                                 options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(0))
                             }
+                            DivConAnchor::LowerBounding => options::DivConAnchor::LowerBounding(
+                                options::SubProblemSize::Smaller(0),
+                            ),
                             DivConAnchor::NMinusOne => options::DivConAnchor::NMinus(1),
                             DivConAnchor::PMinNMinusOne => {
                                 options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(1))

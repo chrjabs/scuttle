@@ -307,6 +307,7 @@ where
                     }
                     if core.is_empty() {
                         // unsat
+                        self.log_routine_end()?;
                         return Ok(None);
                     }
                     let orig_len = core.len();

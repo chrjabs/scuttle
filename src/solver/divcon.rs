@@ -14,7 +14,7 @@ use rustsat::{
         nodedb::{NodeById, NodeCon, NodeId, NodeLike},
         pb::dbgte::referenced::{Gte, GteCell},
     },
-    instances::ManageVars,
+    instances::{Cnf, ManageVars},
     solvers::{SolveIncremental, SolveStats, SolverResult},
     types::{Assignment, Clause, Lit, RsHashMap},
 };
@@ -27,6 +27,7 @@ use crate::{types::NonDomPoint, Phase, Termination};
 
 use super::{
     coreguided::{OllReformulation, TotOutput},
+    lowerbounding::Fence,
     ObjEncoding, Objective, SolverKernel,
 };
 
@@ -273,6 +274,103 @@ where
             // Block last Pareto point, if temporarily blocked
             if let Some(block_lit) = block_switch {
                 self.kernel.oracle.add_unit(block_lit)?;
+            }
+        }
+    }
+
+    fn lower_bounding<Col: Extend<NonDomPoint>>(
+        &mut self,
+        base_assumps: &[Lit],
+        collector: &mut Col,
+        rebase_encodings: bool,
+    ) -> Result<(), Termination> {
+        self.kernel.log_routine_start("lower-bounding")?;
+
+        for oidx in 0..self.kernel.stats.n_objs {
+            if self.encodings[oidx].is_none()
+                && !matches!(self.kernel.objs[oidx], Objective::Constant { .. })
+            {
+                self.encodings[oidx] = Some(self.build_obj_encoding(oidx, rebase_encodings)?);
+                self.kernel.check_termination()?;
+            }
+        }
+        let tot_db_cell = RefCell::from(&mut self.tot_db);
+        let (mut obj_encs, fence_data): (Vec<_>, _) = self
+            .encodings
+            .iter()
+            .map(|enc| {
+                let (mut enc, offset) = match enc.as_ref() {
+                    Some(enc) => (
+                        ObjEncoding::<_, card::DefIncUpperBounding>::Weighted(
+                            GteCell::new(enc.root, enc.max_leaf_weight, &tot_db_cell),
+                            enc.offset,
+                        ),
+                        enc.offset,
+                    ),
+                    None => (ObjEncoding::Constant, 0),
+                };
+                enc.encode_ub_change(
+                    offset..offset + 1,
+                    &mut self.kernel.oracle,
+                    &mut self.kernel.var_manager,
+                );
+                let assumps = enc.enforce_ub(offset).unwrap();
+                let assump = if assumps.is_empty() {
+                    None
+                } else if 1 == assumps.len() {
+                    Some(assumps[0])
+                } else {
+                    let mut and_impl = Cnf::new();
+                    let and_lit = self.kernel.var_manager.new_var().pos_lit();
+                    and_impl.add_lit_impl_cube(and_lit, &assumps);
+                    self.kernel.oracle.add_cnf(and_impl).unwrap();
+                    Some(and_lit)
+                };
+                (enc, (offset, assump))
+            })
+            .unzip();
+        let mut fence = Fence { data: fence_data };
+
+        let mut assumps = Vec::from(base_assumps);
+        // sort base assumptions for filtering them out efficiently
+        assumps.sort_unstable();
+        loop {
+            assumps.drain(base_assumps.len()..);
+            assumps.extend(fence.assumps());
+            let res = self.kernel.solve_assumps(&assumps)?;
+            match res {
+                SolverResult::Sat => {
+                    self.kernel
+                        .harvest(&fence, &mut obj_encs, base_assumps, collector)?
+                }
+                SolverResult::Unsat => {
+                    let mut core = self.kernel.oracle.core()?;
+                    if !base_assumps.is_empty() {
+                        // filter out base assumptions
+                        // !!! Note: this relies on the fact that the core is in the same order as the
+                        // assumptions going into the solver
+                        let mut base_assumps_idx = 0;
+                        core.retain(|&lit| {
+                            while base_assumps_idx < base_assumps.len()
+                                && assumps[base_assumps_idx] < !lit
+                            {
+                                base_assumps_idx += 1;
+                            }
+                            if base_assumps_idx >= base_assumps.len()
+                                || !lit != assumps[base_assumps_idx]
+                            {
+                                return true;
+                            }
+                            false
+                        });
+                    }
+                    if core.is_empty() {
+                        self.kernel.log_routine_end()?;
+                        return Ok(());
+                    }
+                    self.kernel.update_fence(&mut fence, core, &mut obj_encs)?;
+                }
+                SolverResult::Interrupted => panic!("should have errored before"),
             }
         }
     }

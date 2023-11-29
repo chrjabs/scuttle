@@ -23,6 +23,8 @@ use crate::{
     KernelOptions, Limits, Phase, Stats, Termination, WriteSolverLog,
 };
 
+use self::lowerbounding::Fence;
+
 pub mod bioptsat;
 pub mod divcon;
 pub mod lowerbounding;
@@ -1064,6 +1066,111 @@ where
         }
         self.log_routine_end()?;
         Ok(Some((cost, sol.unwrap())))
+    }
+
+    fn update_fence<PBE, CE>(
+        &mut self,
+        fence: &mut Fence,
+        core: Vec<Lit>,
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
+    ) -> Result<(), Termination>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        'core: for clit in core {
+            for (obj_idx, (bound, olit)) in fence.data.iter_mut().enumerate() {
+                if let Some(alit) = &olit {
+                    if !*alit == clit {
+                        // update bound
+                        let enc = &mut obj_encs[obj_idx];
+                        *bound = enc.next_higher(*bound);
+                        enc.encode_ub_change(
+                            *bound..*bound + 1,
+                            &mut self.oracle,
+                            &mut self.var_manager,
+                        );
+                        let assumps = enc.enforce_ub(*bound).unwrap();
+                        *olit = if assumps.is_empty() {
+                            None
+                        } else if 1 == assumps.len() {
+                            Some(assumps[0])
+                        } else {
+                            let mut and_impl = Cnf::new();
+                            let and_lit = self.var_manager.new_var().pos_lit();
+                            and_impl.add_lit_impl_cube(and_lit, &assumps);
+                            self.oracle.add_cnf(and_impl).unwrap();
+                            Some(and_lit)
+                        };
+                        continue 'core;
+                    }
+                }
+            }
+            panic!("should never encounter clit that is not in fence");
+        }
+        if let Some(logger) = &mut self.logger {
+            logger.log_fence(&fence.bounds())?
+        }
+        Ok(())
+    }
+}
+
+
+#[oracle_bounds]
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    VM: ManageVars,
+    O: SolveIncremental + SolveStats,
+    BCG: FnMut(Assignment) -> Clause,
+{
+    /// Runs the P-Minimal algorithm within the fence to harvest solutions
+    fn harvest<PBE, CE, Col>(
+        &mut self,
+        fence: &Fence,
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
+        base_assumps: &[Lit],
+        collector: &mut Col,
+    ) -> Result<(), Termination>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+        Col: Extend<NonDomPoint<Assignment>>,
+    {
+        debug_assert_eq!(obj_encs.len(), self.stats.n_objs);
+        self.log_routine_start("harvest")?;
+        let mut assumps = Vec::from(base_assumps);
+        loop {
+            assumps.drain(base_assumps.len()..);
+            // Find minimization starting point
+            assumps.extend(fence.assumps());
+            let res = self.solve_assumps(&assumps)?;
+            if SolverResult::Unsat == res {
+                self.log_routine_end()?;
+                return Ok(());
+            }
+            self.check_termination()?;
+
+            // Minimize solution
+            let (costs, solution) = self.get_solution_and_internal_costs(
+                self.opts
+                    .heuristic_improvements
+                    .solution_tightening
+                    .wanted(Phase::OuterLoop),
+            )?;
+            self.log_candidate(&costs, Phase::OuterLoop)?;
+            self.check_termination()?;
+            self.phase_solution(solution.clone())?;
+            let (costs, solution, block_switch) =
+                self.p_minimization(costs, solution, base_assumps, obj_encs)?;
+
+            let assumps = self.enforce_dominating(&costs, obj_encs);
+            self.yield_solutions(costs, &assumps, solution, collector)?;
+
+            // Block last Pareto point, if temporarily blocked
+            if let Some(block_lit) = block_switch {
+                self.oracle.add_unit(block_lit)?;
+            }
+        }
     }
 }
 

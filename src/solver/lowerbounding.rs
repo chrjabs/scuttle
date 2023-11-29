@@ -23,7 +23,7 @@ use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
     types::ParetoFront, EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
-    Phase, Solve, Termination,
+    Solve, Termination,
 };
 
 use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
@@ -245,111 +245,40 @@ where
         loop {
             let res = self.kernel.solve_assumps(&self.fence.assumps())?;
             match res {
-                SolverResult::Sat => self.harvest()?,
+                SolverResult::Sat => {
+                    self.kernel
+                        .harvest(&self.fence, &mut self.obj_encs, &[], &mut self.pareto_front)?
+                }
                 SolverResult::Unsat => {
                     let core = self.kernel.oracle.core()?;
                     if core.is_empty() {
+                        self.kernel.log_routine_end()?;
                         return Ok(());
                     }
-                    self.update_fence(core)?;
+                    self.kernel
+                        .update_fence(&mut self.fence, core, &mut self.obj_encs)?;
                 }
                 SolverResult::Interrupted => panic!("should have errored before"),
-            }
-        }
-    }
-
-    fn update_fence(&mut self, core: Vec<Lit>) -> Result<(), Termination> {
-        'core: for clit in core {
-            for (obj_idx, (bound, olit)) in self.fence.data.iter_mut().enumerate() {
-                if let Some(alit) = &olit {
-                    if !*alit == clit {
-                        // update bound
-                        let enc = &mut self.obj_encs[obj_idx];
-                        *bound = enc.next_higher(*bound);
-                        enc.encode_ub_change(
-                            *bound..*bound + 1,
-                            &mut self.kernel.oracle,
-                            &mut self.kernel.var_manager,
-                        );
-                        let assumps = enc.enforce_ub(*bound).unwrap();
-                        *olit = if assumps.is_empty() {
-                            None
-                        } else if 1 == assumps.len() {
-                            Some(assumps[0])
-                        } else {
-                            let mut and_impl = Cnf::new();
-                            let and_lit = self.kernel.var_manager.new_var().pos_lit();
-                            and_impl.add_lit_impl_cube(and_lit, &assumps);
-                            self.kernel.oracle.add_cnf(and_impl).unwrap();
-                            Some(and_lit)
-                        };
-                        continue 'core;
-                    }
-                }
-            }
-            panic!("should never encounter clit that is not in fence");
-        }
-        if let Some(logger) = &mut self.kernel.logger {
-            logger.log_fence(&self.fence.bounds())?
-        }
-        Ok(())
-    }
-
-    /// Runs the P-Minimal algorithm within the fence to harvest solutions
-    fn harvest(&mut self) -> Result<(), Termination> {
-        debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
-        self.kernel.log_routine_start("harvest")?;
-        loop {
-            // Find minimization starting point
-            let res = self.kernel.solve_assumps(&self.fence.assumps())?;
-            if SolverResult::Unsat == res {
-                self.kernel.log_routine_end()?;
-                return Ok(());
-            }
-            self.kernel.check_termination()?;
-
-            // Minimize solution
-            let (costs, solution) = self.kernel.get_solution_and_internal_costs(
-                self.kernel
-                    .opts
-                    .heuristic_improvements
-                    .solution_tightening
-                    .wanted(Phase::OuterLoop),
-            )?;
-            self.kernel.log_candidate(&costs, Phase::OuterLoop)?;
-            self.kernel.check_termination()?;
-            self.kernel.phase_solution(solution.clone())?;
-            let (costs, solution, block_switch) =
-                self.kernel
-                    .p_minimization(costs, solution, &[], &mut self.obj_encs)?;
-
-            let assumps = self.kernel.enforce_dominating(&costs, &mut self.obj_encs);
-            self.kernel
-                .yield_solutions(costs, &assumps, solution, &mut self.pareto_front)?;
-
-            // Block last Pareto point, if temporarily blocked
-            if let Some(block_lit) = block_switch {
-                self.kernel.oracle.add_unit(block_lit)?;
             }
         }
     }
 }
 
 /// Data related to the current fence
-struct Fence {
+pub(crate) struct Fence {
     /// The current bounds and enforcing literals
-    data: Vec<(usize, Option<Lit>)>,
+    pub data: Vec<(usize, Option<Lit>)>,
 }
 
 impl Fence {
-    fn assumps(&self) -> Vec<Lit> {
+    pub fn assumps(&self) -> Vec<Lit> {
         self.data
             .iter()
             .filter_map(|(_, ol)| ol.to_owned())
             .collect()
     }
 
-    fn bounds(&self) -> Vec<usize> {
+    pub fn bounds(&self) -> Vec<usize> {
         self.data.iter().map(|&(b, _)| b).collect()
     }
 }

@@ -186,6 +186,8 @@ pub enum DivConAnchor {
     BiOptSat,
     /// P-Minimal at subproblems of given size
     PMinimal(SubProblemSize),
+    /// Run lower-bounding algorithm at subproblems of given size
+    LowerBounding(SubProblemSize),
     /// Run the appropriate anchor (Linear Sat-Unsat / BiOptSat / P-Minimal) at
     /// subproblems of size `n-x`.
     NMinus(usize),
@@ -197,6 +199,7 @@ impl fmt::Display for DivConAnchor {
             DivConAnchor::LinSu => write!(f, "lin-su"),
             DivConAnchor::BiOptSat => write!(f, "bioptsat"),
             DivConAnchor::PMinimal(size) => write!(f, "p-minimal({})", size),
+            DivConAnchor::LowerBounding(size) => write!(f, "lower-bounding({})", size),
             DivConAnchor::NMinus(x) => write!(f, "n-minus({})", x),
         }
     }
