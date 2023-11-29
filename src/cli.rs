@@ -88,6 +88,10 @@ enum AlgorithmCommand {
         /// Log inprocessing
         #[arg(long)]
         log_inprocessing: bool,
+        /// Instead of solving, print some statistics about clauses in the encoding
+        #[cfg(feature = "data-helpers")]
+        #[arg(long)]
+        enc_clauses_summary: bool,
     },
 }
 
@@ -622,6 +626,8 @@ impl Cli {
                 inprocessing,
                 log_bound_points,
                 log_inprocessing,
+                #[cfg(feature = "data-helpers")]
+                enc_clauses_summary,
             } => {
                 let inpro = if inprocessing.into() {
                     Some(shared.prepro.maxpre_techniques.clone())
@@ -672,6 +678,8 @@ impl Cli {
                         rebase_encodings: rebase_encodings.into(),
                         reset_after_global_ideal: reset_after_cb.into(),
                         inpro,
+                        #[cfg(feature = "data-helpers")]
+                        enc_clauses_summary,
                     }),
                 }
             }
@@ -1332,6 +1340,13 @@ impl WriteSolverLog for CliLogger {
             )?;
             self.stdout.print(&buffer)?;
         }
+        Ok(())
+    }
+
+    fn log_message(&mut self, msg: &str) -> Result<(), LoggerError> {
+        let mut buffer = self.stdout.buffer();
+        writeln!(buffer, "{}", msg)?;
+        self.stdout.print(&buffer)?;
         Ok(())
     }
 }

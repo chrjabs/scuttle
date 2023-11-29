@@ -46,6 +46,7 @@ binary-deps = [
   "dep:rustsat-cadical",
   "rustsat/compression",
 ]
+data-helpers = []
 
 [profile.release]
 lto = true

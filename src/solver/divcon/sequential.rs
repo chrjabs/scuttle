@@ -244,6 +244,12 @@ where
                     self.cut_dominated()?;
                 }
             }
+            
+            #[cfg(feature = "data-helpers")]
+            if self.opts.enc_clauses_summary {
+                self.worker.enc_clauses_summary()?;
+                return Ok(());
+            }
 
             // TODO: use upper bound from ideal point computation
             if self.opts.anchor == DivConAnchor::BiOptSat && obj_idxs.len() == 2 {

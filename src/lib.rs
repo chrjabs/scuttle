@@ -207,6 +207,8 @@ pub trait WriteSolverLog {
         fixed_lits: usize,
         obj_range_before_after: Vec<(usize, usize)>,
     ) -> Result<(), LoggerError>;
+    /// Logs any string
+    fn log_message(&mut self, msg: &str) -> Result<(), LoggerError>;
 }
 
 /// Error type for loggers

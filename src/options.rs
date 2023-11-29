@@ -61,6 +61,9 @@ pub struct DivConOptions {
     pub reset_after_global_ideal: bool,
     /// Whether to do inprocessing and with which techniques
     pub inpro: Option<String>,
+    #[cfg(feature = "data-helpers")]
+    /// Instead of solving, print some statistics about clauses in the encoding
+    pub enc_clauses_summary: bool,
 }
 
 impl DivConOptions {

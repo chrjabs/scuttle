@@ -409,6 +409,15 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
         }
         Ok(())
     }
+    
+    /// Logs a string message
+    fn log_message(&mut self, msg: &str) -> Result<(), Termination> {
+        // Dispatch to logger
+        if let Some(logger) = &mut self.logger {
+            logger.log_message(msg)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(feature = "interrupt-oracle")]

@@ -873,4 +873,64 @@ where
         }
         Ok(())
     }
+
+    #[cfg(feature = "data-helpers")]
+    fn enc_clauses_summary(&mut self) -> Result<(), Termination> {
+        self.kernel.solve()?;
+        self.tot_db.reset_encoded();
+        let db_bak = self.tot_db.clone();
+        let (cost, _) = self.kernel.get_solution_and_internal_costs(true)?;
+
+        // Merging
+        let mut cnf = Cnf::new();
+        for oidx in 0..self.kernel.stats.n_objs {
+            if matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                continue;
+            }
+            let enc = self.build_obj_encoding(oidx, false)?;
+            let bound = cost[oidx] - enc.offset;
+            for val in self.tot_db[enc.root.id].vals(
+                enc.root.rev_map_round_up(bound + 1)
+                    ..=enc.root.rev_map(bound + enc.max_leaf_weight),
+            ) {
+                self.tot_db
+                    .define_pos(
+                        enc.root.id,
+                        val,
+                        &mut cnf,
+                        &mut self.kernel.var_manager,
+                    )
+                    .unwrap();
+            }
+        }
+        self.kernel.log_message(&format!("encoding clauses with merging: n={}", cnf.len()))?;
+        
+        self.tot_db = db_bak;
+
+        // No merging
+        let mut cnf = Cnf::new();
+        for oidx in 0..self.kernel.stats.n_objs {
+            if matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                continue;
+            }
+            let enc = self.build_obj_encoding(oidx, true)?;
+            let bound = cost[oidx] - enc.offset;
+            for val in self.tot_db[enc.root.id].vals(
+                enc.root.rev_map_round_up(bound + 1)
+                    ..=enc.root.rev_map(bound + enc.max_leaf_weight),
+            ) {
+                self.tot_db
+                    .define_pos(
+                        enc.root.id,
+                        val,
+                        &mut cnf,
+                        &mut self.kernel.var_manager,
+                    )
+                    .unwrap();
+            }
+        }
+        self.kernel.log_message(&format!("encoding clauses without merging: n={}", cnf.len()))?;
+        
+        Ok(())
+    }
 }
