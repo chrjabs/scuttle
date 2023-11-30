@@ -12,7 +12,7 @@ use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::{card, pb, CollectClauses},
     instances::{Cnf, ManageVars, MultiOptInstance},
-    solvers::{FreezeVar, SolveIncremental, SolveStats, SolverResult},
+    solvers::{FreezeVar, SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
 };
 use scuttle_proc::oracle_bounds;
@@ -20,7 +20,7 @@ use scuttle_proc::oracle_bounds;
 use crate::{
     options::EnumOptions,
     types::{NonDomPoint, ParetoFront},
-    KernelOptions, Limits, Phase, Stats, Termination, WriteSolverLog,
+    KernelOptions, Limits, Phase, Stats, Termination, WriteSolverLog, EncodingStats,
 };
 
 use self::lowerbounding::Fence;
@@ -37,6 +37,8 @@ pub trait Solve: KernelFunctions {
     /// Solves the instance under given limits. If not fully solved, errors an
     /// early termination reason.
     fn solve(&mut self, limits: Limits) -> Result<(), Termination>;
+    /// Gets all statistics from the solver
+    fn all_stats(&self) -> (Stats, Option<SolverStats>, Option<Vec<EncodingStats>>);
 }
 
 /// Shared functionality provided by the [`SolverKernel`]

@@ -192,12 +192,14 @@ fn generic_main<S: Solve>(
 
     cli.print_pareto_front(pareto_front)?;
 
-    cli.print_stats(solver.stats())?;
-    #[cfg(feature = "cadical")]
-    {
-        // Get extended stats for solver that supports stats
-        cli.print_oracle_stats(solver.oracle_stats())?;
-        cli.print_encoding_stats(solver.encoding_stats())?;
+    let (stats, ostats, estats) = solver.all_stats();
+    cli.print_stats(stats)?;
+    // Get extended stats for solver that supports stats
+    if let Some(stats) = ostats {
+        cli.print_oracle_stats(stats)?;
+    }
+    if let Some(stats) = estats {
+        cli.print_encoding_stats(stats)?;
     }
     if let Some(prepro) = prepro {
         cli.print_maxpre_stats(prepro.stats())?;

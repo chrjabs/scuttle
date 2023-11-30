@@ -13,6 +13,7 @@ use rustsat::{
         self,
         card::{self, DbTotalizer},
         pb::{self, DbGte},
+        EncodeStats,
     },
     instances::{BasicVarManager, Cnf, ManageVars, MultiOptInstance},
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
@@ -29,11 +30,14 @@ use crate::{
 use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
 
 #[derive(KernelFunctions, Solve)]
-#[solve(bounds = "where PBE: pb::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental,
+#[solve(
+    bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
+        CE: card::BoundUpperIncremental + EncodeStats,
         VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats")]
+        O: SolveIncremental + SolveStats",
+    extended_stats
+)]
 pub struct LowerBounding<
     PBE = DbGte,
     CE = DbTotalizer,

@@ -25,6 +25,7 @@ use rustsat::{
     encodings::{
         card::{self, DbTotalizer},
         pb::{self, DbGte},
+        EncodeStats,
     },
     instances::{BasicVarManager, ManageVars, MultiOptInstance},
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
@@ -39,11 +40,14 @@ use super::{default_blocking_clause, Objective, SolverKernel};
 /// objectives, the cardinality encoding to use for unweighted objectives, the
 /// variable manager to use and the SAT backend.
 #[derive(KernelFunctions, Solve)]
-#[solve(bounds = "where PBE: pb::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental,
+#[solve(
+    bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
+        CE: card::BoundUpperIncremental + EncodeStats,
         VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats")]
+        O: SolveIncremental + SolveStats",
+    extended_stats
+)]
 pub struct PMinimal<
     PBE = DbGte,
     CE = DbTotalizer,
