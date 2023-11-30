@@ -940,6 +940,23 @@ where
             "encoding clauses without merging: n={}",
             cnf.len()
         ))?;
+        
+        use::rustsat::encodings::pb::BoundUpper;
+
+        // No core boosting
+        let mut cnf = Cnf::new();
+        for oidx in 0..self.kernel.stats.n_objs {
+            if matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                continue;
+            }
+            let mut enc = rustsat::encodings::pb::DbGte::from_iter(self.kernel.objs[oidx].iter());
+            let bound = cost[oidx];
+            enc.encode_ub(bound..=bound, &mut cnf, &mut self.kernel.var_manager);
+        }
+        self.kernel.log_message(&format!(
+            "encoding clauses without core boosting: n={}",
+            cnf.len()
+        ))?;
 
         Ok(())
     }
