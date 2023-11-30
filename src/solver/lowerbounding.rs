@@ -245,18 +245,36 @@ where
         loop {
             let res = self.kernel.solve_assumps(&self.fence.assumps())?;
             match res {
-                SolverResult::Sat => {
-                    self.kernel
-                        .harvest(&self.fence, &mut self.obj_encs, &[], &mut self.pareto_front)?
-                }
+                SolverResult::Sat => self.kernel.harvest(
+                    &self.fence,
+                    &mut self.obj_encs,
+                    &[],
+                    &mut self.pareto_front,
+                )?,
                 SolverResult::Unsat => {
                     let core = self.kernel.oracle.core()?;
                     if core.is_empty() {
                         self.kernel.log_routine_end()?;
                         return Ok(());
                     }
+                    #[cfg(debug_assertions)]
+                    let old_fence = self.fence.bounds();
                     self.kernel
                         .update_fence(&mut self.fence, core, &mut self.obj_encs)?;
+                    #[cfg(debug_assertions)]
+                    {
+                        let new_fence = self.fence.bounds();
+                        let mut increased = false;
+                        for idx in 0..old_fence.len() {
+                            debug_assert!(old_fence[idx] <= new_fence[idx]);
+                            if old_fence[idx] < new_fence[idx] {
+                                increased = true;
+                            }
+                        }
+                        if !increased {
+                            panic!("fence has not increased");
+                        }
+                    }
                 }
                 SolverResult::Interrupted => panic!("should have errored before"),
             }
