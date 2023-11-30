@@ -910,17 +910,13 @@ where
                     ..=enc.root.rev_map(bound + enc.max_leaf_weight),
             ) {
                 self.tot_db
-                    .define_pos(
-                        enc.root.id,
-                        val,
-                        &mut cnf,
-                        &mut self.kernel.var_manager,
-                    )
+                    .define_pos(enc.root.id, val, &mut cnf, &mut self.kernel.var_manager)
                     .unwrap();
             }
         }
-        self.kernel.log_message(&format!("encoding clauses with merging: n={}", cnf.len()))?;
-        
+        self.kernel
+            .log_message(&format!("encoding clauses with merging: n={}", cnf.len()))?;
+
         self.tot_db = db_bak;
 
         // No merging
@@ -936,17 +932,15 @@ where
                     ..=enc.root.rev_map(bound + enc.max_leaf_weight),
             ) {
                 self.tot_db
-                    .define_pos(
-                        enc.root.id,
-                        val,
-                        &mut cnf,
-                        &mut self.kernel.var_manager,
-                    )
+                    .define_pos(enc.root.id, val, &mut cnf, &mut self.kernel.var_manager)
                     .unwrap();
             }
         }
-        self.kernel.log_message(&format!("encoding clauses without merging: n={}", cnf.len()))?;
-        
+        self.kernel.log_message(&format!(
+            "encoding clauses without merging: n={}",
+            cnf.len()
+        ))?;
+
         Ok(())
     }
 }

@@ -244,7 +244,7 @@ where
                     self.cut_dominated()?;
                 }
             }
-            
+
             #[cfg(feature = "data-helpers")]
             if self.opts.enc_clauses_summary {
                 self.worker.enc_clauses_summary()?;

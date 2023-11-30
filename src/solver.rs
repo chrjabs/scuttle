@@ -409,7 +409,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
         }
         Ok(())
     }
-    
+
     /// Logs a string message
     fn log_message(&mut self, msg: &str) -> Result<(), Termination> {
         // Dispatch to logger
@@ -1123,7 +1123,6 @@ where
         Ok(())
     }
 }
-
 
 #[oracle_bounds]
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
