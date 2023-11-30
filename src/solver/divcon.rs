@@ -369,11 +369,11 @@ where
                         return Ok(());
                     }
                     #[cfg(debug_assertions)]
-                    let old_fence = self.fence.bounds();
+                    let old_fence = fence.bounds();
                     self.kernel.update_fence(&mut fence, core, &mut obj_encs)?;
                     #[cfg(debug_assertions)]
                     {
-                        let new_fence = self.fence.bounds();
+                        let new_fence = fence.bounds();
                         let mut increased = false;
                         for idx in 0..old_fence.len() {
                             debug_assert!(old_fence[idx] <= new_fence[idx]);
