@@ -897,6 +897,33 @@ where
         let db_bak = self.tot_db.clone();
         let (cost, _) = self.kernel.get_solution_and_internal_costs(true)?;
 
+        let mut n_terms = 0;
+        for oref in &self.reforms {
+            for (olit, _) in &oref.inactives {
+                if let Some(&TotOutput { root, oidx, .. }) = oref.outputs.get(olit) {
+                    n_terms += self.tot_db[root].len() - oidx;
+                } else {
+                    n_terms += 1;
+                }
+            }
+        }
+
+        self.kernel.log_message(&format!(
+            "number of terms after core boosting: n={}",
+            n_terms
+        ))?;
+
+        let n_terms = self.kernel.objs.iter().fold(0, |cnt, obj| match obj {
+            Objective::Weighted { lits, .. } => cnt + lits.len(),
+            Objective::Unweighted { lits, .. } => cnt + lits.len(),
+            Objective::Constant { .. } => cnt,
+        });
+
+        self.kernel.log_message(&format!(
+            "number of terms before core boosting: n={}",
+            n_terms
+        ))?;
+
         // Merging
         let mut cnf = Cnf::new();
         for oidx in 0..self.kernel.stats.n_objs {
@@ -940,8 +967,8 @@ where
             "encoding clauses without merging: n={}",
             cnf.len()
         ))?;
-        
-        use::rustsat::encodings::pb::BoundUpper;
+
+        use ::rustsat::encodings::pb::BoundUpper;
 
         // No core boosting
         let mut cnf = Cnf::new();
