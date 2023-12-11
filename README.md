@@ -1,3 +1,5 @@
+Full empirical data for our CPAIOR'24 submission can be found in `cpaior24/`.
+
 # Scuttle - A Multi-Objective MaxSAT Solver in Rust
 
 Scuttle is a multi-objective MaxSAT solver written in Rust and based on the
