@@ -18,7 +18,7 @@
 
 use crate::{
     solver::ObjEncoding, types::ParetoFront, EncodingStats, ExtendedSolveStats, KernelFunctions,
-    KernelOptions, Limits, Phase, Solve, Termination,
+    KernelOptions, Limits, Phase, Solve, Termination, options::EnumOptions,
 };
 use rustsat::{
     encodings,
@@ -27,7 +27,7 @@ use rustsat::{
         pb::{self, DbGte},
         EncodeStats,
     },
-    instances::{BasicVarManager, ManageVars, MultiOptInstance},
+    instances::{BasicVarManager, ManageVars, MultiOptInstance, Cnf},
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit},
 };
@@ -269,5 +269,169 @@ where
                 self.kernel.oracle.add_unit(block_lit)?;
             }
         }
+    }
+}
+
+#[oracle_bounds]
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    VM: ManageVars,
+    O: SolveIncremental + SolveStats,
+{
+    /// Executes P-minimization from a cost and solution starting point
+    pub fn p_minimization<PBE, CE>(
+        &mut self,
+        mut costs: Vec<usize>,
+        mut solution: Assignment,
+        base_assumps: &[Lit],
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
+    ) -> Result<(Vec<usize>, Assignment, Option<Lit>), Termination>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        self.log_routine_start("p minimization")?;
+        let mut block_switch = None;
+        let mut assumps = Vec::from(base_assumps);
+        #[cfg(feature = "coarse-convergence")]
+        let mut coarse = true;
+        loop {
+            let bound_costs: Vec<_> = costs
+                .iter()
+                .enumerate()
+                .map(|(_oidx, &c)| {
+                    #[cfg(feature = "coarse-convergence")]
+                    if coarse {
+                        return obj_encs[_oidx].coarse_ub(c);
+                    }
+                    c
+                })
+                .collect();
+            // Force next solution to dominate the current one
+            assumps.drain(base_assumps.len()..);
+            assumps.extend(self.enforce_dominating(&bound_costs, obj_encs));
+            // Block solutions dominated by the current one
+            if self.opts.enumeration == EnumOptions::NoEnum {
+                // Block permanently since no enumeration at Pareto point
+                let block_clause = self.dominated_block_clause(&costs, obj_encs);
+                self.oracle.add_clause(block_clause)?;
+            } else {
+                // Permanently block last candidate
+                if let Some(block_lit) = block_switch {
+                    self.oracle.add_unit(block_lit)?;
+                }
+                // Temporarily block to allow for enumeration at Pareto point
+                let block_lit = self.tmp_block_dominated(&costs, obj_encs);
+                block_switch = Some(block_lit);
+                assumps.push(block_lit);
+            }
+
+            // Check if dominating solution exists
+            let res = self.solve_assumps(&assumps)?;
+            if res == SolverResult::Unsat {
+                #[cfg(feature = "coarse-convergence")]
+                if bound_costs != costs {
+                    // Switch to fine convergence
+                    coarse = false;
+                    continue;
+                }
+                self.log_routine_end()?;
+                // Termination criteria, return last solution and costs
+                return Ok((costs, solution, block_switch));
+            }
+            self.check_termination()?;
+
+            (costs, solution) = self.get_solution_and_internal_costs(
+                self.opts
+                    .heuristic_improvements
+                    .solution_tightening
+                    .wanted(Phase::Minimization),
+            )?;
+            self.log_candidate(&costs, Phase::Minimization)?;
+            self.check_termination()?;
+            self.phase_solution(solution.clone())?;
+        }
+    }
+
+    /// Gets assumptions to enforce that the next solution dominates the given
+    /// cost point.
+    pub fn enforce_dominating<PBE, CE>(
+        &mut self,
+        costs: &Vec<usize>,
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
+    ) -> Vec<Lit>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        let mut assumps = vec![];
+        costs.iter().enumerate().for_each(|(idx, &cst)| {
+            let enc = &mut obj_encs[idx];
+            enc.encode_ub_change(cst..cst + 1, &mut self.oracle, &mut self.var_manager);
+            assumps.extend(enc.enforce_ub(cst).unwrap());
+        });
+        assumps
+    }
+
+    /// Gets a clause blocking solutions (weakly) dominated by the given cost point,
+    /// given objective encodings.
+    pub fn dominated_block_clause<PBE, CE>(
+        &mut self,
+        costs: &Vec<usize>,
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
+    ) -> Clause
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        debug_assert_eq!(costs.len(), obj_encs.len());
+        costs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, &cst)| {
+                // Don't block
+                if cst <= obj_encs[idx].offset() {
+                    return None;
+                }
+                let enc = &mut obj_encs[idx];
+                if let ObjEncoding::Constant = enc {
+                    return None;
+                }
+                // Encode and add to solver
+                enc.encode_ub_change(cst - 1..cst, &mut self.oracle, &mut self.var_manager);
+                let assumps = enc.enforce_ub(cst - 1).unwrap();
+                if assumps.len() == 1 {
+                    Some(assumps[0])
+                } else {
+                    let mut and_impl = Cnf::new();
+                    let and_lit = self.var_manager.new_var().pos_lit();
+                    and_impl.add_lit_impl_cube(and_lit, &assumps);
+                    self.oracle.add_cnf(and_impl).unwrap();
+                    Some(and_lit)
+                }
+            })
+            .collect()
+    }
+
+    /// Temporarily blocks solutions dominated by the given cost point. Returns
+    /// and assumption that needs to be enforced in order for the blocking to be
+    /// enforced.
+    pub fn tmp_block_dominated<PBE, CE>(
+        &mut self,
+        costs: &Vec<usize>,
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
+    ) -> Lit
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+    {
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        let mut clause = self.dominated_block_clause(costs, obj_encs);
+        let block_lit = self.var_manager.new_var().pos_lit();
+        clause.add(block_lit);
+        self.oracle.add_clause(clause).unwrap();
+        !block_lit
     }
 }

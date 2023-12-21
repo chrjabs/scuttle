@@ -13,14 +13,14 @@ use rustsat::{
         EncodeStats,
     },
     instances::{BasicVarManager, ManageVars, MultiOptInstance},
-    solvers::{SolveIncremental, SolveStats, SolverStats},
+    solvers::{SolveIncremental, SolveStats, SolverStats, SolverResult},
     types::{Assignment, Clause, Lit},
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
-    types::ParetoFront, EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
+    types::{ParetoFront, NonDomPoint}, EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
     Solve, Termination,
 };
 
@@ -241,5 +241,122 @@ where
             |_| None,
             &mut self.pareto_front,
         )
+    }
+}
+
+#[oracle_bounds]
+impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+where
+    VM: ManageVars,
+    O: SolveIncremental + SolveStats,
+    BCG: FnMut(Assignment) -> Clause,
+{
+    /// Runs the BiOptSat algorithm on two objectives. BiOptSat is run in the
+    /// LSU variant.
+    ///
+    /// `starting_point`: optional starting point with known cost of increasing
+    /// objective
+    ///
+    /// `lookup`: for a value of the increasing objective, checks if the
+    /// non-dominated point has already been discovered and returns the
+    /// corresponding value of the decreasing objective
+    pub fn bioptsat<PBE, CE, Lookup, Col>(
+        &mut self,
+        (inc_obj, dec_obj): (usize, usize),
+        (inc_encoding, dec_encoding): (&mut ObjEncoding<PBE, CE>, &mut ObjEncoding<PBE, CE>),
+        base_assumps: &[Lit],
+        starting_point: Option<(usize, Assignment)>,
+        (inc_lb, dec_lb): (Option<usize>, Option<usize>),
+        lookup: Lookup,
+        collector: &mut Col,
+    ) -> Result<(), Termination>
+    where
+        PBE: pb::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental,
+        Lookup: Fn(usize) -> Option<usize>,
+        Col: Extend<NonDomPoint>,
+    {
+        self.log_routine_start("bioptsat")?;
+
+        let mut inc_lb = inc_lb.unwrap_or(0);
+        let dec_lb = dec_lb.unwrap_or(0);
+
+        let mut assumps = Vec::from(base_assumps);
+        let (mut inc_cost, mut sol) = if let Some(bound) = starting_point {
+            bound
+        } else {
+            let res = self.solve_assumps(&assumps)?;
+            if res == SolverResult::Unsat {
+                return Ok(());
+            }
+            let mut sol = self.oracle.solution(self.max_orig_var)?;
+            let cost = self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
+            (cost, sol)
+        };
+        let mut dec_cost;
+        loop {
+            // minimize inc_obj
+            (inc_cost, sol) = if let Some(res) = self.linsu(
+                inc_obj,
+                inc_encoding,
+                &assumps,
+                Some((inc_cost, Some(sol))),
+                Some(inc_lb),
+            )? {
+                res
+            } else {
+                // no solutions
+                self.log_routine_end()?;
+                return Ok(());
+            };
+            inc_lb = inc_cost + 1;
+            dec_cost = self.get_cost_with_heuristic_improvements(dec_obj, &mut sol, false)?;
+            if let Some(found) = lookup(inc_cost) {
+                dec_cost = found;
+            } else {
+                // bound inc_obj
+                inc_encoding.encode_ub_change(
+                    inc_cost..inc_cost + 1,
+                    &mut self.oracle,
+                    &mut self.var_manager,
+                );
+                assumps.extend(inc_encoding.enforce_ub(inc_cost).unwrap());
+                // minimize dec_obj
+                dec_cost = self
+                    .linsu_yield(
+                        dec_obj,
+                        dec_encoding,
+                        &assumps,
+                        Some((dec_cost, Some(sol))),
+                        Some(dec_lb),
+                        collector,
+                    )?
+                    .unwrap();
+            };
+            // termination condition: can't decrease decreasing objective further
+            if dec_cost <= dec_lb {
+                break;
+            }
+            // skip to next non-dom
+            assumps.drain(base_assumps.len()..);
+            dec_encoding.encode_ub_change(
+                dec_cost - 1..dec_cost,
+                &mut self.oracle,
+                &mut self.var_manager,
+            );
+            assumps.extend(dec_encoding.enforce_ub(dec_cost - 1).unwrap());
+            (sol, inc_cost) = match self.solve_assumps(&assumps)? {
+                SolverResult::Sat => {
+                    let mut sol = self.oracle.solution(self.max_orig_var)?;
+                    let cost =
+                        self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
+                    (sol, cost)
+                }
+                SolverResult::Unsat => break,
+                _ => panic!(),
+            };
+        }
+        self.log_routine_end()?;
+        Ok(())
     }
 }
