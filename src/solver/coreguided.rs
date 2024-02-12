@@ -18,14 +18,14 @@ use crate::Termination;
 
 use super::{Objective, SolverKernel};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct TotOutput {
     pub root: NodeId,
     pub oidx: usize,
     pub tot_weight: usize,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub enum Inactives {
     Weighted(RsHashMap<Lit, usize>),
     Unweighted {
@@ -143,7 +143,7 @@ impl<'a> Iterator for InactIter<'a> {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct OllReformulation {
     /// Inactive literals, aka the reformulated objective
     pub inactives: Inactives,

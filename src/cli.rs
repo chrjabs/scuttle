@@ -9,11 +9,12 @@ use std::{
 };
 
 use crate::options::{
-    self, BuildEncodings, DivConOptions, EnumOptions, HeurImprOptions, HeurImprWhen,
+    self, AfterCbOptions, BuildEncodings, CoreBoostingOptions, DivConOptions, EnumOptions,
+    HeurImprOptions, HeurImprWhen, KernelOptions,
 };
 use crate::{
     types::{NonDomPoint, ParetoFront},
-    EncodingStats, KernelOptions, Limits, Stats, WriteSolverLog,
+    EncodingStats, Limits, Stats, WriteSolverLog,
 };
 use crate::{LoggerError, Phase, Termination};
 use clap::{crate_authors, crate_name, crate_version, Args, Parser, Subcommand, ValueEnum};
@@ -47,6 +48,8 @@ enum AlgorithmCommand {
     PMinimal {
         #[command(flatten)]
         shared: SharedArgs,
+        #[command(flatten)]
+        cb: CoreBoostingArgs,
     },
     /// BiOptSat Linear Sat-Unsat - Jabs et al. SAT'22
     Bioptsat {
@@ -54,11 +57,15 @@ enum AlgorithmCommand {
         shared: SharedArgs,
         #[command(flatten)]
         obj_encs: ObjEncArgs,
+        #[command(flatten)]
+        cb: CoreBoostingArgs,
     },
     /// Lower-bounding search - Cortes et al. TACAS'23
     LowerBounding {
         #[command(flatten)]
         shared: SharedArgs,
+        #[command(flatten)]
+        cb: CoreBoostingArgs,
         /// Log fence updates
         #[arg(long)]
         log_fence: bool,
@@ -82,12 +89,6 @@ enum AlgorithmCommand {
         /// Whether to perform inprocessing after finding the first ideal point
         #[arg(long, default_value_t = DivConOptions::default().inpro.is_some().into())]
         inprocessing: Bool,
-        /// Log ideal and nadir points
-        #[arg(long)]
-        log_bound_points: bool,
-        /// Log inprocessing
-        #[arg(long)]
-        log_inprocessing: bool,
         /// Instead of solving, print some statistics about clauses in the encoding
         #[cfg(feature = "data-helpers")]
         #[arg(long)]
@@ -138,6 +139,42 @@ struct ObjEncArgs {
     /// The encoding to use for unweighted objectivesh
     #[arg(long, default_value_t = CardEncoding::default())]
     obj_card_encoding: CardEncoding,
+}
+
+#[derive(Args)]
+struct CoreBoostingArgs {
+    /// Whether to perform core boosting before running the algorithm
+    #[arg(long, default_value_t = Bool::True)]
+    core_boosting: Bool,
+    /// If true, don't merge OLL totalizers into GTE but ignore the totalizer structure.
+    #[arg(long, default_value_t = CoreBoostingOptions::default().rebase.into())]
+    rebase_encodings: Bool,
+    /// Whether to reset the oracle after finding a global ideal point, i.e., core boosting
+    #[arg(long, default_value_t = matches!(CoreBoostingOptions::default().after, AfterCbOptions::Reset).into())]
+    reset_after_cb: Bool,
+    /// Whether to perform inprocessing, i.e., preprocessing after core boosting
+    #[arg(long, default_value_t = matches!(CoreBoostingOptions::default().after, AfterCbOptions::Inpro(_)).into())]
+    inprocessing: Bool,
+}
+
+impl CoreBoostingArgs {
+    fn parse(self, prepro_techs: String) -> Option<CoreBoostingOptions> {
+        if self.core_boosting == Bool::False {
+            return None;
+        }
+        Some(CoreBoostingOptions {
+            rebase: self.rebase_encodings.into(),
+            after: if self.inprocessing.into() {
+                AfterCbOptions::Inpro(prepro_techs)
+            } else {
+                if self.reset_after_cb.into() {
+                    AfterCbOptions::Reset
+                } else {
+                    AfterCbOptions::Nothing
+                }
+            },
+        })
+    }
 }
 
 #[derive(Args)]
@@ -244,6 +281,12 @@ struct LogArgs {
     /// Log routine starts and ends till a given depth
     #[arg(long, default_value_t = 0)]
     log_routines: usize,
+    /// Log ideal and nadir points
+    #[arg(long)]
+    log_bound_points: bool,
+    /// Log inprocessing
+    #[arg(long)]
+    log_inprocessing: bool,
 }
 
 impl From<&LogArgs> for LoggerConfig {
@@ -257,9 +300,9 @@ impl From<&LogArgs> for LoggerConfig {
                 || value.verbosity >= 3,
             log_fence: false,
             log_routines: std::cmp::max(value.log_routines, value.verbosity as usize * 2),
-            log_bound_points: false,
+            log_bound_points: value.log_bound_points || value.verbosity >= 2,
             log_cores: value.log_cores || value.verbosity >= 2,
-            log_inpro: value.verbosity >= 1,
+            log_inpro: value.log_inprocessing || value.verbosity >= 1,
         }
     }
 }
@@ -478,9 +521,14 @@ pub struct Cli {
 }
 
 pub enum Algorithm {
-    PMinimal(KernelOptions),
-    BiOptSat(KernelOptions, PbEncoding, CardEncoding),
-    LowerBounding(KernelOptions),
+    PMinimal(KernelOptions, Option<CoreBoostingOptions>),
+    BiOptSat(
+        KernelOptions,
+        PbEncoding,
+        CardEncoding,
+        Option<CoreBoostingOptions>,
+    ),
+    LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
     DivCon(DivConOptions),
 }
 
@@ -544,79 +592,97 @@ impl Cli {
             store_cnf: false,
         };
         let cli = match CliArgs::parse().command {
-            AlgorithmCommand::PMinimal { shared } => Cli {
-                limits: (&shared.limits).into(),
-                file_format: shared.file.file_format,
-                opb_options: fio::opb::Options {
-                    first_var_idx: shared.file.first_var_idx,
-                    ..Default::default()
-                },
-                inst_path: shared.file.inst_path.clone(),
-                preprocessing: shared.prepro.preprocessing.into(),
-                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                reindexing: shared.prepro.reindexing.into(),
-                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                cadical_config: shared.cadical_config.into(),
-                stdout: stdout(shared.log.color),
-                stderr: stderr(shared.log.color),
-                print_solver_config: shared.log.print_solver_config,
-                print_solutions: shared.log.print_solutions,
-                print_stats: !shared.log.no_print_stats,
-                color: shared.log.color,
-                logger_config: (&shared.log).into(),
-                alg: Algorithm::PMinimal(kernel_opts(shared)),
-            },
-            AlgorithmCommand::Bioptsat { shared, obj_encs } => Cli {
-                limits: (&shared.limits).into(),
-                file_format: shared.file.file_format,
-                opb_options: fio::opb::Options {
-                    first_var_idx: shared.file.first_var_idx,
-                    ..Default::default()
-                },
-                inst_path: shared.file.inst_path.clone(),
-                preprocessing: shared.prepro.preprocessing.into(),
-                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                reindexing: shared.prepro.reindexing.into(),
-                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                cadical_config: shared.cadical_config.into(),
-                stdout: stdout(shared.log.color),
-                stderr: stderr(shared.log.color),
-                print_solver_config: shared.log.print_solver_config,
-                print_solutions: shared.log.print_solutions,
-                print_stats: !shared.log.no_print_stats,
-                color: shared.log.color,
-                logger_config: (&shared.log).into(),
-                alg: Algorithm::BiOptSat(
-                    kernel_opts(shared),
-                    obj_encs.obj_pb_encoding,
-                    obj_encs.obj_card_encoding,
-                ),
-            },
-            AlgorithmCommand::LowerBounding { shared, log_fence } => Cli {
-                limits: (&shared.limits).into(),
-                file_format: shared.file.file_format,
-                opb_options: fio::opb::Options {
-                    first_var_idx: shared.file.first_var_idx,
-                    ..Default::default()
-                },
-                inst_path: shared.file.inst_path.clone(),
-                preprocessing: shared.prepro.preprocessing.into(),
-                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                reindexing: shared.prepro.reindexing.into(),
-                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                cadical_config: shared.cadical_config.into(),
-                stdout: stdout(shared.log.color),
-                stderr: stderr(shared.log.color),
-                print_solver_config: shared.log.print_solver_config,
-                print_solutions: shared.log.print_solutions,
-                print_stats: !shared.log.no_print_stats,
-                color: shared.log.color,
-                logger_config: LoggerConfig {
-                    log_fence: log_fence || shared.log.verbosity >= 2,
-                    ..(&shared.log).into()
-                },
-                alg: Algorithm::LowerBounding(kernel_opts(shared)),
-            },
+            AlgorithmCommand::PMinimal { shared, cb } => {
+                let cb = cb.parse(shared.prepro.maxpre_techniques.clone());
+                Cli {
+                    limits: (&shared.limits).into(),
+                    file_format: shared.file.file_format,
+                    opb_options: fio::opb::Options {
+                        first_var_idx: shared.file.first_var_idx,
+                        ..Default::default()
+                    },
+                    inst_path: shared.file.inst_path.clone(),
+                    preprocessing: shared.prepro.preprocessing.into(),
+                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                    reindexing: shared.prepro.reindexing.into(),
+                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                    cadical_config: shared.cadical_config.into(),
+                    stdout: stdout(shared.log.color),
+                    stderr: stderr(shared.log.color),
+                    print_solver_config: shared.log.print_solver_config,
+                    print_solutions: shared.log.print_solutions,
+                    print_stats: !shared.log.no_print_stats,
+                    color: shared.log.color,
+                    logger_config: (&shared.log).into(),
+                    alg: Algorithm::PMinimal(kernel_opts(shared), cb),
+                }
+            }
+            AlgorithmCommand::Bioptsat {
+                shared,
+                obj_encs,
+                cb,
+            } => {
+                let cb = cb.parse(shared.prepro.maxpre_techniques.clone());
+                Cli {
+                    limits: (&shared.limits).into(),
+                    file_format: shared.file.file_format,
+                    opb_options: fio::opb::Options {
+                        first_var_idx: shared.file.first_var_idx,
+                        ..Default::default()
+                    },
+                    inst_path: shared.file.inst_path.clone(),
+                    preprocessing: shared.prepro.preprocessing.into(),
+                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                    reindexing: shared.prepro.reindexing.into(),
+                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                    cadical_config: shared.cadical_config.into(),
+                    stdout: stdout(shared.log.color),
+                    stderr: stderr(shared.log.color),
+                    print_solver_config: shared.log.print_solver_config,
+                    print_solutions: shared.log.print_solutions,
+                    print_stats: !shared.log.no_print_stats,
+                    color: shared.log.color,
+                    logger_config: (&shared.log).into(),
+                    alg: Algorithm::BiOptSat(
+                        kernel_opts(shared),
+                        obj_encs.obj_pb_encoding,
+                        obj_encs.obj_card_encoding,
+                        cb,
+                    ),
+                }
+            }
+            AlgorithmCommand::LowerBounding {
+                shared,
+                log_fence,
+                cb,
+            } => {
+                let cb = cb.parse(shared.prepro.maxpre_techniques.clone());
+                Cli {
+                    limits: (&shared.limits).into(),
+                    file_format: shared.file.file_format,
+                    opb_options: fio::opb::Options {
+                        first_var_idx: shared.file.first_var_idx,
+                        ..Default::default()
+                    },
+                    inst_path: shared.file.inst_path.clone(),
+                    preprocessing: shared.prepro.preprocessing.into(),
+                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                    reindexing: shared.prepro.reindexing.into(),
+                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                    cadical_config: shared.cadical_config.into(),
+                    stdout: stdout(shared.log.color),
+                    stderr: stderr(shared.log.color),
+                    print_solver_config: shared.log.print_solver_config,
+                    print_solutions: shared.log.print_solutions,
+                    print_stats: !shared.log.no_print_stats,
+                    color: shared.log.color,
+                    logger_config: LoggerConfig {
+                        log_fence: log_fence || shared.log.verbosity >= 2,
+                        ..(&shared.log).into()
+                    },
+                    alg: Algorithm::LowerBounding(kernel_opts(shared), cb),
+                }
+            }
             AlgorithmCommand::DivCon {
                 shared,
                 anchor,
@@ -624,8 +690,6 @@ impl Cli {
                 rebase_encodings,
                 reset_after_cb,
                 inprocessing,
-                log_bound_points,
-                log_inprocessing,
                 #[cfg(feature = "data-helpers")]
                 enc_clauses_summary,
             } => {
@@ -654,8 +718,6 @@ impl Cli {
                     print_stats: !shared.log.no_print_stats,
                     color: shared.log.color,
                     logger_config: LoggerConfig {
-                        log_bound_points: log_bound_points || shared.log.verbosity >= 2,
-                        log_inpro: log_inprocessing || shared.log.verbosity >= 1,
                         ..(&shared.log).into()
                     },
                     alg: Algorithm::DivCon(DivConOptions {
@@ -807,15 +869,16 @@ impl Cli {
             writeln!(buffer, ": ")?;
             buffer.reset()?;
             match &self.alg {
-                Algorithm::PMinimal(opts) | Algorithm::LowerBounding(opts) => {
+                Algorithm::PMinimal(opts, cb_opts) | Algorithm::LowerBounding(opts, cb_opts) => {
                     Self::print_parameter(
                         &mut buffer,
                         "enumeration",
                         EnumPrinter::new(opts.enumeration),
                     )?;
                     Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
+                    Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
                 }
-                Algorithm::BiOptSat(opts, pb_enc, card_enc) => {
+                Algorithm::BiOptSat(opts, pb_enc, card_enc, cb_opts) => {
                     Self::print_parameter(
                         &mut buffer,
                         "enumeration",
@@ -824,6 +887,7 @@ impl Cli {
                     Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
                     Self::print_parameter(&mut buffer, "obj-pb-encoding", pb_enc)?;
                     Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
+                    Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
                 }
                 Algorithm::DivCon(opts) => {
                     Self::print_parameter(

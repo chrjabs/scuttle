@@ -20,6 +20,19 @@ macro_rules! test_dimacs_instance {
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
+    ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
+        use scuttle::{CoreBoost, KernelFunctions, Solve};
+        let inst: rustsat::instances::MultiOptInstance =
+            rustsat::instances::MultiOptInstance::from_dimacs_path($i).unwrap();
+        let mut solver = <$s>::new_defaults(inst, $o).unwrap();
+        let cont = solver.core_boost($cbo).unwrap();
+        if cont {
+            solver.solve(scuttle::Limits::none()).unwrap();
+        }
+        let pf = solver.pareto_front();
+        assert_eq!(pf.len(), $t.len());
+        check_pf_shape!(pf, $t);
+    }};
 }
 
 macro_rules! test_opb_instance {
@@ -37,6 +50,23 @@ macro_rules! test_opb_instance {
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
+    ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
+        use scuttle::{CoreBoost, KernelFunctions, Solve};
+        let inst: rustsat::instances::MultiOptInstance =
+            rustsat::instances::MultiOptInstance::from_opb_path(
+                $i,
+                rustsat::instances::fio::opb::Options::default(),
+            )
+            .unwrap();
+        let mut solver = <$s>::new_defaults(inst, $o).unwrap();
+        let cont = solver.core_boost($cbo).unwrap();
+        if cont {
+            solver.solve(scuttle::Limits::none()).unwrap();
+        }
+        let pf = solver.pareto_front();
+        assert_eq!(pf.len(), $t.len());
+        check_pf_shape!(pf, $t);
+    }};
 }
 
 macro_rules! small {
@@ -48,6 +78,15 @@ macro_rules! small {
             vec![(vec![0, 4], 1), (vec![2, 2], 1), (vec![4, 0], 1)]
         )
     };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
+            "./data/small.mcnf",
+            vec![(vec![0, 4], 1), (vec![2, 2], 1), (vec![4, 0], 1)]
+        )
+    };
 }
 
 macro_rules! medium_single {
@@ -55,6 +94,22 @@ macro_rules! medium_single {
         test_dimacs_instance!(
             $s,
             $o,
+            "./data/medium.mcnf",
+            vec![
+                (vec![0, 10], 1),
+                (vec![2, 8], 1),
+                (vec![4, 6], 1),
+                (vec![6, 4], 1),
+                (vec![8, 2], 1),
+                (vec![10, 0], 1),
+            ]
+        )
+    };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
             "./data/medium.mcnf",
             vec![
                 (vec![0, 10], 1),
@@ -84,6 +139,22 @@ macro_rules! medium_all {
             ]
         )
     };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
+            "./data/medium.mcnf",
+            vec![
+                (vec![0, 10], 1),
+                (vec![2, 8], 5),
+                (vec![4, 6], 10),
+                (vec![6, 4], 10),
+                (vec![8, 2], 5),
+                (vec![10, 0], 1),
+            ]
+        )
+    };
 }
 
 macro_rules! four {
@@ -91,6 +162,20 @@ macro_rules! four {
         test_dimacs_instance!(
             $s,
             $o,
+            "./data/four.mcnf",
+            vec![
+                (vec![0, 0, 0, 1], 1),
+                (vec![0, 0, 1, 0], 1),
+                (vec![0, 1, 0, 0], 1),
+                (vec![1, 0, 0, 0], 1),
+            ]
+        )
+    };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
             "./data/four.mcnf",
             vec![
                 (vec![0, 0, 0, 1], 1),
@@ -120,6 +205,24 @@ macro_rules! parkinsons {
             ]
         )
     };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
+            "./data/parkinsons_mlic.mcnf",
+            vec![
+                (vec![0, 147], 1),
+                (vec![2, 31], 1),
+                (vec![3, 19], 1),
+                (vec![4, 14], 1),
+                (vec![5, 11], 1),
+                (vec![6, 10], 1),
+                (vec![7, 9], 1),
+                (vec![8, 8], 1),
+            ]
+        )
+    };
 }
 
 macro_rules! mushroom {
@@ -127,6 +230,26 @@ macro_rules! mushroom {
         test_dimacs_instance!(
             $s,
             $o,
+            "./data/mushroom_mlic.mcnf",
+            vec![
+                (vec![0, 505], 1),
+                (vec![2, 144], 1),
+                (vec![3, 60], 1),
+                (vec![4, 43], 1),
+                (vec![5, 29], 1),
+                (vec![6, 12], 1),
+                (vec![7, 7], 1),
+                (vec![8, 3], 1),
+                (vec![9, 2], 1),
+                (vec![10, 0], 1),
+            ]
+        )
+    };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
             "./data/mushroom_mlic.mcnf",
             vec![
                 (vec![0, 505], 1),
@@ -175,6 +298,37 @@ macro_rules! dal {
             ]
         )
     };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_opb_instance!(
+            $s,
+            $o,
+            $cbo,
+            "./data/dal.opb",
+            vec![
+                (vec![8, 0, 0, 0, 0, 7, 2], 1),
+                (vec![7, 1, 0, 0, 0, 7, 2], 1),
+                (vec![7, 0, 1, 0, 0, 7, 2], 1),
+                (vec![6, 0, 2, 0, 0, 7, 2], 1),
+                (vec![6, 2, 0, 0, 0, 7, 2], 1),
+                (vec![6, 1, 1, 0, 0, 7, 2], 1),
+                (vec![5, 1, 2, 0, 0, 7, 2], 1),
+                (vec![4, 1, 3, 0, 0, 7, 2], 1),
+                (vec![3, 1, 4, 0, 0, 7, 2], 1),
+                (vec![3, 0, 5, 0, 0, 7, 2], 1),
+                (vec![4, 0, 4, 0, 0, 7, 2], 1),
+                (vec![4, 2, 2, 0, 0, 7, 2], 1),
+                (vec![3, 2, 3, 0, 0, 7, 2], 1),
+                (vec![5, 0, 3, 0, 0, 7, 2], 1),
+                (vec![5, 3, 0, 0, 0, 7, 2], 1),
+                (vec![5, 2, 1, 0, 0, 7, 2], 1),
+                (vec![4, 4, 0, 0, 0, 7, 2], 1),
+                (vec![4, 3, 1, 0, 0, 7, 2], 1),
+                (vec![3, 3, 2, 0, 0, 7, 2], 1),
+                (vec![3, 5, 0, 0, 0, 7, 2], 1),
+                (vec![3, 4, 1, 0, 0, 7, 2], 1),
+            ]
+        )
+    };
 }
 
 macro_rules! set_cover {
@@ -182,6 +336,33 @@ macro_rules! set_cover {
         test_dimacs_instance!(
             $s,
             $o,
+            "./data/set-cover.mcnf",
+            vec![
+                (vec![302, 133], 1),
+                (vec![195, 228], 1),
+                (vec![253, 175], 1),
+                (vec![284, 143], 1),
+                (vec![173, 278], 1),
+                (vec![147, 289], 1),
+                (vec![223, 185], 1),
+                (vec![268, 162], 1),
+                (vec![343, 119], 1),
+                (vec![341, 123], 1),
+                (vec![325, 129], 1),
+                (vec![273, 152], 1),
+                (vec![264, 171], 1),
+                (vec![216, 216], 1),
+                (vec![220, 196], 1),
+                (vec![192, 266], 1),
+                (vec![185, 274], 1),
+            ]
+        )
+    };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
             "./data/set-cover.mcnf",
             vec![
                 (vec![302, 133], 1),
@@ -246,6 +427,46 @@ macro_rules! packup_3 {
             ]
         )
     };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
+            "./data/packup-3.mcnf",
+            vec![
+                (vec![2, 3, 5], 1),
+                (vec![2, 4, 3], 1),
+                (vec![2, 5, 2], 1),
+                (vec![3, 2, 5], 1),
+                (vec![3, 3, 3], 1),
+                (vec![3, 4, 2], 1),
+                (vec![3, 5, 1], 1),
+                (vec![4, 1, 5], 1),
+                (vec![4, 2, 3], 1),
+                (vec![4, 3, 2], 1),
+                (vec![4, 4, 1], 1),
+                (vec![4, 5, 0], 1),
+                (vec![5, 1, 4], 1),
+                (vec![5, 2, 2], 1),
+                (vec![5, 3, 1], 1),
+                (vec![5, 4, 0], 1),
+                (vec![6, 1, 3], 1),
+                (vec![6, 2, 1], 1),
+                (vec![6, 3, 0], 1),
+                (vec![7, 1, 2], 1),
+                (vec![7, 2, 0], 1),
+                (vec![8, 1, 1], 1),
+                (vec![9, 1, 0], 1),
+                (vec![11, 0, 6], 1),
+                (vec![12, 0, 5], 1),
+                (vec![13, 0, 4], 1),
+                (vec![14, 0, 3], 1),
+                (vec![15, 0, 2], 1),
+                (vec![16, 0, 1], 1),
+                (vec![17, 0, 0], 1),
+            ]
+        )
+    };
 }
 
 macro_rules! ftp {
@@ -253,6 +474,22 @@ macro_rules! ftp {
         test_dimacs_instance!(
             $s,
             $o,
+            "./data/ftp.mcnf",
+            vec![
+                (vec![345, 6125], 1),
+                (vec![356, 4760], 1),
+                (vec![364, 4150], 1),
+                (vec![373, 3845], 1),
+                (vec![383, 3390], 1),
+                (vec![392, 2760], 1),
+            ]
+        )
+    };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
             "./data/ftp.mcnf",
             vec![
                 (vec![345, 6125], 1),
@@ -289,6 +526,29 @@ macro_rules! spot5 {
             ]
         )
     };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
+            "./data/spot5.mcnf",
+            vec![
+                (vec![222, 33], 1),
+                (vec![223, 32], 1),
+                (vec![224, 31], 1),
+                (vec![226, 30], 1),
+                (vec![228, 29], 1),
+                (vec![230, 28], 1),
+                (vec![233, 27], 1),
+                (vec![235, 26], 1),
+                (vec![238, 25], 1),
+                (vec![240, 24], 1),
+                (vec![243, 23], 1),
+                (vec![248, 22], 1),
+                (vec![253, 21], 1),
+            ]
+        )
+    };
 }
 
 macro_rules! set_cover_3 {
@@ -296,6 +556,29 @@ macro_rules! set_cover_3 {
         test_dimacs_instance!(
             $s,
             $o,
+            "./data/set-cover-3.mcnf",
+            vec![
+                (vec![67, 221, 130], 1),
+                (vec![229, 54, 151], 1),
+                (vec![136, 169, 28], 1),
+                (vec![75, 214, 149], 1),
+                (vec![223, 64, 152], 1),
+                (vec![230, 160, 49], 1),
+                (vec![90, 139, 63], 1),
+                (vec![198, 72, 152], 1),
+                (vec![101, 255, 59], 1),
+                (vec![102, 135, 99], 1),
+                (vec![154, 77, 93], 1),
+                (vec![207, 114, 87], 1),
+                (vec![158, 109, 92], 1),
+            ]
+        )
+    };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_dimacs_instance!(
+            $s,
+            $o,
+            $cbo,
             "./data/set-cover-3.mcnf",
             vec![
                 (vec![67, 221, 130], 1),
@@ -362,6 +645,54 @@ macro_rules! generate_biobj_tests {
             #[ignore]
             fn spot5() {
                 spot5!($s, $o)
+            }
+        }
+    };
+    ($mod:ident, $s:ty, $o:expr, $cbo:expr) => {
+        mod $mod {
+            #[test]
+            fn small() {
+                small!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn medium_single() {
+                medium_single!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn medium_all() {
+                let mut opts = $o;
+                opts.set_enumeration(scuttle::options::EnumOptions::Solutions(None));
+                medium_all!($s, opts, $cbo)
+            }
+
+            #[test]
+            fn parkinsons() {
+                parkinsons!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn mushroom() {
+                mushroom!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn set_cover() {
+                set_cover!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn ftp() {
+                ftp!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn spot5() {
+                spot5!($s, $o, $cbo)
             }
         }
     };
@@ -436,6 +767,74 @@ macro_rules! generate_tests {
             }
         }
     };
+    ($mod:ident, $s:ty, $o:expr, $cbo:expr) => {
+        mod $mod {
+            #[test]
+            fn small() {
+                small!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn medium_single() {
+                medium_single!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn medium_all() {
+                let mut opts = $o;
+                opts.set_enumeration(scuttle::options::EnumOptions::Solutions(None));
+                medium_all!($s, opts, $cbo)
+            }
+
+            #[test]
+            fn four() {
+                four!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn parkinsons() {
+                parkinsons!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn mushroom() {
+                mushroom!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn dal() {
+                dal!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn set_cover() {
+                set_cover!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn packup_3() {
+                packup_3!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn ftp() {
+                ftp!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn spot5() {
+                spot5!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn set_cover_3() {
+                set_cover_3!($s, $o, $cbo)
+            }
+        }
+    };
 }
 
 macro_rules! PMin {() => {scuttle::PMinimal<
@@ -489,8 +888,38 @@ generate_tests!(pmin_other_sol_guided, PMin!(), {
     opts.solution_guided_search = !opts.solution_guided_search;
     opts
 });
+generate_tests!(
+    pmin_cb,
+    PMin!(),
+    scuttle::KernelOptions::default(),
+    scuttle::CoreBoostingOptions::default()
+);
+generate_tests!(
+    pmin_cb_rebase,
+    PMin!(),
+    scuttle::KernelOptions::default(),
+    scuttle::CoreBoostingOptions {
+        rebase: true,
+        ..Default::default()
+    }
+);
 
 generate_tests!(lb_default, Lb!(), scuttle::KernelOptions::default());
+generate_tests!(
+    lb_cb,
+    Lb!(),
+    scuttle::KernelOptions::default(),
+    scuttle::CoreBoostingOptions::default()
+);
+generate_tests!(
+    lb_cb_rebase,
+    Lb!(),
+    scuttle::KernelOptions::default(),
+    scuttle::CoreBoostingOptions {
+        rebase: true,
+        ..Default::default()
+    }
+);
 
 generate_tests!(divcon_bioptsat, Dc!(), {
     let mut opts = scuttle::DivConOptions::default();
@@ -577,6 +1006,21 @@ generate_tests!(divcon_n_minus_1_clean_rebuild, Dc!(), {
 });
 
 generate_biobj_tests!(bioptsat_default, Bos!(), scuttle::KernelOptions::default());
+generate_biobj_tests!(
+    bos_cb,
+    Bos!(),
+    scuttle::KernelOptions::default(),
+    scuttle::CoreBoostingOptions::default()
+);
+generate_biobj_tests!(
+    bos_cb_rebase,
+    Bos!(),
+    scuttle::KernelOptions::default(),
+    scuttle::CoreBoostingOptions {
+        rebase: true,
+        ..Default::default()
+    }
+);
 
 #[test]
 fn debug() {

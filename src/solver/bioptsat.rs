@@ -13,18 +13,22 @@ use rustsat::{
         EncodeStats,
     },
     instances::{BasicVarManager, ManageVars, MultiOptInstance},
-    solvers::{SolveIncremental, SolveStats, SolverStats, SolverResult},
+    solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit},
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
-    types::{ParetoFront, NonDomPoint}, EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
-    Solve, Termination,
+    options::{AfterCbOptions, CoreBoostingOptions},
+    types::{NonDomPoint, ParetoFront},
+    EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits, Solve, Termination,
 };
 
-use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
+use super::{
+    coreboosting::MergeOllRef, default_blocking_clause, CoreBoost, ObjEncoding, Objective,
+    SolverKernel,
+};
 
 #[derive(KernelFunctions, Solve)]
 #[solve(
@@ -245,6 +249,57 @@ where
 }
 
 #[oracle_bounds]
+impl<PBE, CE, VM, BCG, O> CoreBoost for BiOptSat<PBE, CE, VM, BCG, O>
+where
+    (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
+    VM: ManageVars,
+    O: SolveIncremental + SolveStats + Default,
+{
+    fn core_boost(&mut self, opts: CoreBoostingOptions) -> Result<bool, Termination> {
+        if self.kernel.stats.n_solve_calls > 0 {
+            return Err(Termination::CbAfterSolve);
+        }
+        let cb_res = if let Some(cb_res) = self.kernel.core_boost()? {
+            cb_res
+        } else {
+            return Ok(false);
+        };
+        self.kernel.check_termination()?;
+        let reset_dbs = match &opts.after {
+            AfterCbOptions::Nothing => false,
+            AfterCbOptions::Reset => {
+                self.kernel.reset_oracle(true)?;
+                self.kernel.check_termination()?;
+                true
+            }
+            AfterCbOptions::Inpro(techs) => {
+                let mut encs = self.kernel.inprocess(techs, cb_res)?;
+                self.obj_encs.1 = encs.pop().unwrap();
+                self.obj_encs.0 = encs.pop().unwrap();
+                self.kernel.check_termination()?;
+                return Ok(true);
+            }
+        };
+        self.kernel.log_routine_start("merge encodings")?;
+        for (oidx, (reform, mut tot_db)) in cb_res.into_iter().enumerate() {
+            if reset_dbs {
+                tot_db.reset_vars();
+            }
+            if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                if oidx == 0 {
+                    self.obj_encs.0 = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
+                } else {
+                    self.obj_encs.1 = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
+                }
+            }
+            self.kernel.check_termination()?;
+        }
+        self.kernel.log_routine_end()?;
+        Ok(true)
+    }
+}
+
+#[oracle_bounds]
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     VM: ManageVars,
@@ -278,8 +333,8 @@ where
     {
         self.log_routine_start("bioptsat")?;
 
-        let mut inc_lb = inc_lb.unwrap_or(0);
-        let dec_lb = dec_lb.unwrap_or(0);
+        let mut inc_lb = inc_lb.unwrap_or(inc_encoding.offset());
+        let dec_lb = dec_lb.unwrap_or(dec_encoding.offset());
 
         let mut assumps = Vec::from(base_assumps);
         let (mut inc_cost, mut sol) = if let Some(bound) = starting_point {

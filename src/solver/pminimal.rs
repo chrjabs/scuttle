@@ -17,8 +17,11 @@
 //!   2009.
 
 use crate::{
-    solver::ObjEncoding, types::ParetoFront, EncodingStats, ExtendedSolveStats, KernelFunctions,
-    KernelOptions, Limits, Phase, Solve, Termination, options::EnumOptions,
+    options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
+    solver::ObjEncoding,
+    types::ParetoFront,
+    EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits, Phase, Solve,
+    Termination,
 };
 use rustsat::{
     encodings,
@@ -27,14 +30,16 @@ use rustsat::{
         pb::{self, DbGte},
         EncodeStats,
     },
-    instances::{BasicVarManager, ManageVars, MultiOptInstance, Cnf},
+    instances::{BasicVarManager, Cnf, ManageVars, MultiOptInstance},
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit},
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
-use super::{default_blocking_clause, Objective, SolverKernel};
+use super::{
+    coreboosting::MergeOllRef, default_blocking_clause, CoreBoost, Objective, SolverKernel,
+};
 
 /// The solver type. Generics the pseudo-boolean encoding to use for weighted
 /// objectives, the cardinality encoding to use for unweighted objectives, the
@@ -269,6 +274,51 @@ where
                 self.kernel.oracle.add_unit(block_lit)?;
             }
         }
+    }
+}
+
+#[oracle_bounds]
+impl<PBE, CE, VM, BCG, O> CoreBoost for PMinimal<PBE, CE, VM, BCG, O>
+where
+    (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
+    VM: ManageVars,
+    O: SolveIncremental + SolveStats + Default,
+{
+    fn core_boost(&mut self, opts: CoreBoostingOptions) -> Result<bool, Termination> {
+        if self.kernel.stats.n_solve_calls > 0 {
+            return Err(Termination::CbAfterSolve);
+        }
+        let cb_res = if let Some(cb_res) = self.kernel.core_boost()? {
+            cb_res
+        } else {
+            return Ok(false);
+        };
+        self.kernel.check_termination()?;
+        let reset_dbs = match &opts.after {
+            AfterCbOptions::Nothing => false,
+            AfterCbOptions::Reset => {
+                self.kernel.reset_oracle(true)?;
+                self.kernel.check_termination()?;
+                true
+            }
+            AfterCbOptions::Inpro(techs) => {
+                self.obj_encs = self.kernel.inprocess(techs, cb_res)?;
+                self.kernel.check_termination()?;
+                return Ok(true);
+            }
+        };
+        self.kernel.log_routine_start("merge encodings")?;
+        for (oidx, (reform, mut tot_db)) in cb_res.into_iter().enumerate() {
+            if reset_dbs {
+                tot_db.reset_vars();
+            }
+            if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                self.obj_encs[oidx] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
+            }
+            self.kernel.check_termination()?;
+        }
+        self.kernel.log_routine_end()?;
+        Ok(true)
     }
 }
 

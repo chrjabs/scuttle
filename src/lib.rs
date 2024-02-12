@@ -7,7 +7,7 @@ use std::fmt;
 use rustsat::solvers::{SolverError, SolverResult, SolverStats};
 
 pub mod options;
-pub use options::{DivConOptions, KernelOptions, Limits};
+pub use options::{CoreBoostingOptions, DivConOptions, KernelOptions, Limits};
 
 pub mod types;
 use types::NonDomPoint;
@@ -15,6 +15,7 @@ use types::NonDomPoint;
 pub mod solver;
 pub use solver::KernelFunctions;
 pub use solver::Solve;
+pub use solver::CoreBoost;
 
 // Reexport algorithms
 pub use solver::bioptsat::BiOptSat;
@@ -53,13 +54,18 @@ pub enum Termination {
     OracleError(SolverError),
     /// Attempted to reset oracle without having stored the original CNF
     ResetWithoutCnf,
+    /// Called core boosting after calling solve
+    CbAfterSolve,
 }
 
 impl Termination {
     pub fn is_error(&self) -> bool {
         matches!(
             self,
-            Termination::LoggerError(_) | Termination::OracleError(_)
+            Termination::LoggerError(_)
+                | Termination::OracleError(_)
+                | Termination::ResetWithoutCnf
+                | Termination::CbAfterSolve
         )
     }
 }
@@ -93,6 +99,9 @@ impl fmt::Display for Termination {
                 f,
                 "Tried to reset the SAT oracle without having stored the original clauses"
             ),
+            Termination::CbAfterSolve => {
+                write!(f, "Tried to call core boosting after calling solve")
+            }
         }
     }
 }

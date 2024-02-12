@@ -18,7 +18,7 @@ use rustsat::{
 use scuttle_proc::oracle_bounds;
 
 use crate::{
-    options::EnumOptions,
+    options::{CoreBoostingOptions, EnumOptions},
     types::{NonDomPoint, ParetoFront},
     EncodingStats, KernelOptions, Limits, Phase, Stats, Termination, WriteSolverLog,
 };
@@ -28,15 +28,22 @@ pub mod divcon;
 pub mod lowerbounding;
 pub mod pminimal;
 
+mod coreboosting;
 mod coreguided;
 
 /// Solving interface for each algorithm
 pub trait Solve: KernelFunctions {
     /// Solves the instance under given limits. If not fully solved, errors an
     /// early termination reason.
-    fn solve(&mut self, limits: Limits) -> Result<(), Termination>;
+    fn solve(&mut self, limits: Limits) -> Result<bool, Termination>;
     /// Gets all statistics from the solver
     fn all_stats(&self) -> (Stats, Option<SolverStats>, Option<Vec<EncodingStats>>);
+}
+
+/// Core boosting interface
+pub trait CoreBoost {
+    /// Performs core boosting. Returns false if instance is unsat.    
+    fn core_boost(&mut self, opts: CoreBoostingOptions) -> Result<bool, Termination>;
 }
 
 /// Shared functionality provided by the [`SolverKernel`]
@@ -1032,11 +1039,7 @@ where
     }
 }
 
-impl<PBE, CE> ObjEncoding<PBE, CE>
-where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
-{
+impl<PBE, CE> ObjEncoding<PBE, CE> {
     /// Gets the offset of the encoding
     fn offset(&self) -> usize {
         match self {
@@ -1045,7 +1048,13 @@ where
             ObjEncoding::Constant => 0,
         }
     }
+}
 
+impl<PBE, CE> ObjEncoding<PBE, CE>
+where
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
+{
     /// Gets the next higher objective value
     fn next_higher(&self, val: usize) -> usize {
         match self {
@@ -1102,14 +1111,14 @@ where
                 if ub >= *offset {
                     enc.enforce_ub(ub - *offset)
                 } else {
-                    Ok(vec![])
+                    Err(rustsat::encodings::Error::Unsat)
                 }
             }
             ObjEncoding::Unweighted(enc, offset) => {
                 if ub >= *offset {
                     enc.enforce_ub(ub - *offset)
                 } else {
-                    Ok(vec![])
+                    Err(rustsat::encodings::Error::Unsat)
                 }
             }
             ObjEncoding::Constant => Ok(vec![]),

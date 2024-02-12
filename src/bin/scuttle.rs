@@ -14,11 +14,11 @@ use rustsat_cadical::CaDiCaL;
 use scuttle::{
     self,
     cli::{Algorithm, CardEncoding, Cli, FileFormat, PbEncoding},
-    solver::divcon::SeqDivCon,
+    solver::{divcon::SeqDivCon, CoreBoost},
     BiOptSat, LoggerError, LowerBounding, PMinimal, Solve,
 };
 
-macro_rules! handle_term {
+macro_rules! expect_no_term {
     ($e:expr, $cli:expr) => {
         match $e {
             Ok(x) => x,
@@ -26,41 +26,26 @@ macro_rules! handle_term {
                 $cli.log_termination(&term)?;
                 if term.is_error() {
                     return Err(Error::from(term));
-                } else {
-                    return Ok(());
                 }
+                panic!("expected success or error");
             }
         }
     };
 }
 
-macro_rules! main_with_obj_encs {
-    ($s:ident, $pb:expr, $card: expr, $inst:expr, $oracle:expr, $opts:expr, $cli:expr, $prepro:expr, $reind:expr) => {{
-        match $pb {
-            PbEncoding::Gte => match $card {
-                CardEncoding::Tot => {
-                    type T<VM> = $s<pb::DbGte, card::DbTotalizer, VM>;
-                    generic_main(
-                        handle_term!(T::new_default_blocking($inst, $oracle, $opts), $cli),
-                        $cli,
-                        $prepro,
-                        $reind,
-                    )
+macro_rules! handle_term {
+    ($e:expr, $cli:expr) => {
+        match $e {
+            Ok(cont) => cont,
+            Err(term) => {
+                $cli.log_termination(&term)?;
+                if term.is_error() {
+                    return Err(Error::from(term));
                 }
-            },
-            PbEncoding::Dpw => match $card {
-                CardEncoding::Tot => {
-                    type T<VM> = $s<pb::DynamicPolyWatchdog, card::DbTotalizer, VM>;
-                    generic_main(
-                        handle_term!(T::new_default_blocking($inst, $oracle, $opts), $cli),
-                        $cli,
-                        $prepro,
-                        $reind,
-                    )
-                }
-            },
+                false
+            }
         }
-    }};
+    };
 }
 
 /// The SAT solver used
@@ -106,6 +91,7 @@ fn main() -> Result<(), Error> {
         (inst, None)
     };
 
+    // TODO: make sure configuration is also set after reset
     let oracle = {
         let mut o = Oracle::default();
         o.set_configuration(cli.cadical_config).unwrap();
@@ -113,40 +99,82 @@ fn main() -> Result<(), Error> {
     };
 
     match cli.alg {
-        Algorithm::PMinimal(opts) => generic_main(
-            handle_term!(PMin::new_default_blocking(inst, oracle, opts), cli),
-            cli,
-            prepro,
-            reindexer,
-        ),
-        Algorithm::BiOptSat(opts, pb_enc, card_enc) => {
+        Algorithm::PMinimal(opts, ref cb_opts) => {
+            let mut solver = expect_no_term!(PMin::new_default_blocking(inst, oracle, opts), cli);
+            setup_cli_interaction(&mut solver, &cli)?;
+            let cont = if let Some(cb_opts) = cb_opts {
+                handle_term!(solver.core_boost(cb_opts.clone()), cli)
+            } else {
+                true
+            };
+            if cont {
+                handle_term!(solver.solve(cli.limits), cli);
+            }
+            post_solve(&mut solver, &cli, prepro, reindexer)
+        }
+        Algorithm::BiOptSat(opts, pb_enc, card_enc, ref cb_opts) => {
             if inst.n_objectives() != 2 {
                 cli.error("the bioptsat algorithm can only be run on bi-objective problems")?;
                 return Err(Error::InvalidInstance);
             }
-            main_with_obj_encs!(Bos, pb_enc, card_enc, inst, oracle, opts, cli, prepro, reindexer)
+            if cb_opts.is_some() && (pb_enc != PbEncoding::Gte || card_enc != CardEncoding::Tot) {
+                cli.error("core boosting is only implemented for the GTE and Totalizer encodings")?;
+                return Err(Error::InvalidConfig);
+            }
+            match pb_enc {
+                PbEncoding::Gte => match card_enc {
+                    CardEncoding::Tot => {
+                        type S<VM> = Bos<pb::DbGte, card::DbTotalizer, VM>;
+                        let mut solver =
+                            expect_no_term!(S::new_default_blocking(inst, oracle, opts), cli);
+                        setup_cli_interaction(&mut solver, &cli)?;
+                        let cont = if let Some(cb_opts) = cb_opts {
+                            handle_term!(solver.core_boost(cb_opts.clone()), cli)
+                        } else {
+                            true
+                        };
+                        if cont {
+                            handle_term!(solver.solve(cli.limits), cli);
+                        }
+                        post_solve(&mut solver, &cli, prepro, reindexer)
+                    }
+                },
+                PbEncoding::Dpw => match card_enc {
+                    CardEncoding::Tot => {
+                        type S<VM> = Bos<pb::DynamicPolyWatchdog, card::DbTotalizer, VM>;
+                        let mut solver =
+                            expect_no_term!(S::new_default_blocking(inst, oracle, opts), cli);
+                        setup_cli_interaction(&mut solver, &cli)?;
+                        handle_term!(solver.solve(cli.limits), cli);
+                        post_solve(&mut solver, &cli, prepro, reindexer)
+                    }
+                },
+            }
         }
-        Algorithm::LowerBounding(opts) => generic_main(
-            handle_term!(Lb::new_default_blocking(inst, oracle, opts), cli),
-            cli,
-            prepro,
-            reindexer,
-        ),
-        Algorithm::DivCon(ref opts) => generic_main(
-            handle_term!(Dc::new_default_blocking(inst, oracle, opts.clone()), cli),
-            cli,
-            prepro,
-            reindexer,
-        ),
+        Algorithm::LowerBounding(opts, ref cb_opts) => {
+            let mut solver = expect_no_term!(Lb::new_default_blocking(inst, oracle, opts), cli);
+            setup_cli_interaction(&mut solver, &cli)?;
+            let cont = if let Some(cb_opts) = cb_opts {
+                handle_term!(solver.core_boost(cb_opts.clone()), cli)
+            } else {
+                true
+            };
+            if cont {
+                handle_term!(solver.solve(cli.limits), cli);
+            }
+            post_solve(&mut solver, &cli, prepro, reindexer)
+        }
+        Algorithm::DivCon(ref opts) => {
+            let mut solver =
+                expect_no_term!(Dc::new_default_blocking(inst, oracle, opts.clone()), cli);
+            setup_cli_interaction(&mut solver, &cli)?;
+            handle_term!(solver.solve(cli.limits), cli);
+            post_solve(&mut solver, &cli, prepro, reindexer)
+        }
     }
 }
 
-fn generic_main<S: Solve>(
-    mut solver: S,
-    cli: Cli,
-    mut prepro: Option<MaxPre>,
-    reindexer: Option<ReindexingVarManager>,
-) -> Result<(), Error> {
+fn setup_cli_interaction<S: Solve>(solver: &mut S, cli: &Cli) -> Result<(), Error> {
     // Set up signal handling
     let mut interrupter = solver.interrupter();
     let mut signals = signal_hook::iterator::Signals::new([
@@ -163,14 +191,15 @@ fn generic_main<S: Solve>(
     });
 
     solver.attach_logger(cli.new_cli_logger());
+    Ok(())
+}
 
-    if let Err(term) = solver.solve(cli.limits) {
-        cli.log_termination(&term)?;
-        if term.is_error() {
-            return Err(Error::from(term));
-        }
-    };
-
+fn post_solve<S: Solve>(
+    solver: &mut S,
+    cli: &Cli,
+    mut prepro: Option<MaxPre>,
+    reindexer: Option<ReindexingVarManager>,
+) -> Result<(), Error> {
     cli.info("finished solving the instance")?;
 
     let pareto_front = solver.pareto_front();
@@ -256,6 +285,9 @@ enum Error {
     Logger(LoggerError),
     Oracle(SolverError),
     InvalidInstance,
+    InvalidConfig,
+    ResetWithoutCnf,
+    CbAfterSolve,
 }
 
 impl From<std::io::Error> for Error {
@@ -269,6 +301,8 @@ impl From<scuttle::Termination> for Error {
         match value {
             scuttle::Termination::LoggerError(err) => Error::Logger(err),
             scuttle::Termination::OracleError(err) => Error::Oracle(err),
+            scuttle::Termination::ResetWithoutCnf => Error::ResetWithoutCnf,
+            scuttle::Termination::CbAfterSolve => Error::CbAfterSolve,
             _ => panic!("Termination is not an error!"),
         }
     }
@@ -300,6 +334,14 @@ impl fmt::Debug for Error {
             Self::Logger(err) => write!(f, "Logger Error: {}", err),
             Self::Oracle(err) => write!(f, "Oracle Error: {}", err),
             Self::InvalidInstance => write!(f, "Invalid instance"),
+            Self::InvalidConfig => write!(f, "Invalid configuration"),
+            Self::ResetWithoutCnf => write!(
+                f,
+                "Tried to reset the SAT oracle without having stored the original clauses"
+            ),
+            Self::CbAfterSolve => {
+                write!(f, "Tried to call core boosting after calling solve")
+            }
         }
     }
 }

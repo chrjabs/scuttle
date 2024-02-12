@@ -49,6 +49,28 @@ impl KernelOptions {
 }
 
 #[derive(Clone, Default)]
+pub struct CoreBoostingOptions {
+    /// Whether to merge or rebase the encoding
+    pub rebase: bool,
+    /// What to do after core boosting
+    pub after: AfterCbOptions,
+}
+
+#[derive(Clone, Default, PartialEq, Eq)]
+pub enum AfterCbOptions {
+    /// Don't do anything special after core boosting
+    #[default]
+    Nothing,
+    /// Reset the SAT oracle after core boosting
+    Reset,
+    /// Perform MaxPre "inprocessing" after core boosting
+    Inpro(String),
+    
+}
+
+pub type KernelWithCbOptions = (KernelOptions, Option<CoreBoostingOptions>);
+
+#[derive(Clone, Default)]
 pub struct DivConOptions {
     pub kernel: KernelOptions,
     /// The recursion anchor to use

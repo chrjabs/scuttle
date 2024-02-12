@@ -23,11 +23,16 @@ use rustsat_cadical::CaDiCaL;
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
-    types::{ParetoFront, NonDomPoint}, EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
-    Solve, Termination, Phase,
+    options::{AfterCbOptions, CoreBoostingOptions},
+    types::{NonDomPoint, ParetoFront},
+    EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits, Phase, Solve,
+    Termination,
 };
 
-use super::{default_blocking_clause, ObjEncoding, Objective, SolverKernel};
+use super::{
+    coreboosting::MergeOllRef, default_blocking_clause, CoreBoost, ObjEncoding, Objective,
+    SolverKernel,
+};
 
 #[derive(KernelFunctions, Solve)]
 #[solve(
@@ -283,6 +288,78 @@ where
                 SolverResult::Interrupted => panic!("should have errored before"),
             }
         }
+    }
+}
+
+#[oracle_bounds]
+impl<PBE, CE, VM, BCG, O> CoreBoost for LowerBounding<PBE, CE, VM, BCG, O>
+where
+    (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
+    VM: ManageVars,
+    O: SolveIncremental + SolveStats + Default,
+{
+    fn core_boost(&mut self, opts: CoreBoostingOptions) -> Result<bool, Termination> {
+        if self.kernel.stats.n_solve_calls > 0 {
+            return Err(Termination::CbAfterSolve);
+        }
+        let cb_res = if let Some(cb_res) = self.kernel.core_boost()? {
+            cb_res
+        } else {
+            return Ok(false);
+        };
+        self.kernel.check_termination()?;
+        let reset_dbs = match &opts.after {
+            AfterCbOptions::Nothing => false,
+            AfterCbOptions::Reset => {
+                self.kernel.reset_oracle(true)?;
+                self.kernel.check_termination()?;
+                true
+            }
+            AfterCbOptions::Inpro(techs) => {
+                self.obj_encs = self.kernel.inprocess(techs, cb_res)?;
+                self.kernel.check_termination()?;
+                return Ok(true);
+            }
+        };
+        self.kernel.log_routine_start("merge encodings")?;
+        for (oidx, (reform, mut tot_db)) in cb_res.into_iter().enumerate() {
+            if reset_dbs {
+                tot_db.reset_vars();
+            }
+            if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                self.obj_encs[oidx] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
+            }
+            self.kernel.check_termination()?;
+        }
+        self.kernel.log_routine_end()?;
+        // Update fence
+        self.fence.data = self
+            .obj_encs
+            .iter_mut()
+            .map(|enc| {
+                enc.encode_ub_change(
+                    enc.offset()..enc.offset() + 1,
+                    &mut self.kernel.oracle,
+                    &mut self.kernel.var_manager,
+                );
+                let assumps = enc.enforce_ub(enc.offset()).unwrap();
+                let assump = if assumps.is_empty() {
+                    None
+                } else if 1 == assumps.len() {
+                    Some(assumps[0])
+                } else {
+                    let mut and_impl = Cnf::new();
+                    let and_lit = self.kernel.var_manager.new_var().pos_lit();
+                    and_impl.add_lit_impl_cube(and_lit, &assumps);
+                    self.kernel.oracle.add_cnf(and_impl).unwrap();
+                    Some(and_lit)
+                };
+                (enc.offset(), assump)
+            })
+            .collect();
+        Ok(true)
     }
 }
 
