@@ -128,8 +128,7 @@ where
     pub fn core_boost(&mut self) -> Result<Option<Vec<(OllReformulation, TotDb)>>, Termination> {
         self.log_routine_start("core boost")?;
         let mut unsat = false;
-        let mut res = vec![];
-        res.reserve(self.stats.n_objs);
+        let mut res = Vec::with_capacity(self.stats.n_objs);
         for obj_idx in 0..self.stats.n_objs {
             let mut reform = (&self.objs[obj_idx]).into();
             let mut tot_db = TotDb::default();

@@ -208,34 +208,32 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
                 }
             }
         }
-    } else {
-        if oracle_stats {
-            quote!{
-                impl #impl_generics Solve for #name #ty_generics #where_clause {
-                    fn solve(&mut self, limits: Limits) -> Result<bool, Termination> {
-                        #kernel.start_solving(limits);
-                        self.alg_main()?;
-                        Ok(true)
-                    }
+    } else if oracle_stats {
+        quote!{
+            impl #impl_generics Solve for #name #ty_generics #where_clause {
+                fn solve(&mut self, limits: Limits) -> Result<bool, Termination> {
+                    #kernel.start_solving(limits);
+                    self.alg_main()?;
+                    Ok(true)
+                }
 
-                    fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
-                        use rustsat::solvers::SolveStats;
-                        (#kernel.stats, Some(#kernel.oracle.stats()), None)
-                    }
+                fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
+                    use rustsat::solvers::SolveStats;
+                    (#kernel.stats, Some(#kernel.oracle.stats()), None)
                 }
             }
-        } else {
-            quote!{
-                impl #impl_generics Solve for #name #ty_generics #where_clause {
-                    fn solve(&mut self, limits: Limits) -> Result<bool, Termination> {
-                        #kernel.start_solving(limits);
-                        self.alg_main()?;
-                        Ok(true)
-                    }
+        }
+    } else {
+        quote!{
+            impl #impl_generics Solve for #name #ty_generics #where_clause {
+                fn solve(&mut self, limits: Limits) -> Result<bool, Termination> {
+                    #kernel.start_solving(limits);
+                    self.alg_main()?;
+                    Ok(true)
+                }
 
-                    fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
-                        (#kernel.stats, None, None)
-                    }
+                fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
+                    (#kernel.stats, None, None)
                 }
             }
         }

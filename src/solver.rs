@@ -319,7 +319,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     }
 
     /// Logs a cost point candidate. Can error a termination if the candidates limit is reached.
-    fn log_candidate(&mut self, costs: &Vec<usize>, phase: Phase) -> Result<(), Termination> {
+    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> Result<(), Termination> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.stats.n_candidates += 1;
         // Dispatch to logger
@@ -784,7 +784,7 @@ where
                     let new_cost =
                         self.get_cost_with_heuristic_improvements(obj_idx, &mut thissol, false)?;
                     debug_assert!(new_cost < cost);
-                    let costs = (0..self.stats.n_objs)
+                    let costs: Vec<_> = (0..self.stats.n_objs)
                         .map(|oidx| {
                             self.get_cost_with_heuristic_improvements(oidx, &mut thissol, false)
                                 .unwrap()

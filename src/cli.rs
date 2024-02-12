@@ -169,12 +169,10 @@ impl CoreBoostingArgs {
             rebase: self.rebase_encodings.into(),
             after: if self.inprocessing.into() {
                 AfterCbOptions::Inpro(prepro_techs)
+            } else if self.reset_after_cb.into() {
+                AfterCbOptions::Reset
             } else {
-                if self.reset_after_cb.into() {
-                    AfterCbOptions::Reset
-                } else {
-                    AfterCbOptions::Nothing
-                }
+                AfterCbOptions::Nothing
             },
         })
     }

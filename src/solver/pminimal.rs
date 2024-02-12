@@ -408,7 +408,7 @@ where
     /// cost point.
     pub fn enforce_dominating<PBE, CE>(
         &mut self,
-        costs: &Vec<usize>,
+        costs: &[usize],
         obj_encs: &mut [ObjEncoding<PBE, CE>],
     ) -> Vec<Lit>
     where
@@ -429,7 +429,7 @@ where
     /// given objective encodings.
     pub fn dominated_block_clause<PBE, CE>(
         &mut self,
-        costs: &Vec<usize>,
+        costs: &[usize],
         obj_encs: &mut [ObjEncoding<PBE, CE>],
     ) -> Clause
     where
@@ -470,7 +470,7 @@ where
     /// enforced.
     pub fn tmp_block_dominated<PBE, CE>(
         &mut self,
-        costs: &Vec<usize>,
+        costs: &[usize],
         obj_encs: &mut [ObjEncoding<PBE, CE>],
     ) -> Lit
     where

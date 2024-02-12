@@ -84,7 +84,7 @@ impl Inactives {
         }
     }
 
-    pub fn as_map(mut self) -> RsHashMap<Lit, usize> {
+    pub fn convert_to_map(mut self) -> RsHashMap<Lit, usize> {
         self.cleanup();
         match self {
             Inactives::Weighted(map) => map,
