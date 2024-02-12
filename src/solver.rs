@@ -24,6 +24,7 @@ use crate::{
 };
 
 pub mod bioptsat;
+#[cfg(feature = "div-con")]
 pub mod divcon;
 pub mod lowerbounding;
 pub mod pminimal;
@@ -264,6 +265,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
             .collect()
     }
 
+    #[cfg(feature = "div-con")]
     /// Converts an external cost vector to an internal one.
     fn internalize_external_costs(&self, costs: &[isize]) -> Vec<usize> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
@@ -417,6 +419,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
         Ok(())
     }
 
+    #[cfg(all(feature = "div-con", feature = "data-helpers"))]
     /// Logs a string message
     fn log_message(&mut self, msg: &str) -> Result<(), Termination> {
         // Dispatch to logger

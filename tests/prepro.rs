@@ -337,65 +337,65 @@ macro_rules! generate_tests {
     };
 }
 
-macro_rules! PMin {() => {scuttle::PMinimal<
-    rustsat::encodings::pb::DefIncUpperBounding,
-    rustsat::encodings::card::DefIncUpperBounding,
-    rustsat::instances::BasicVarManager,
-    fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    rustsat_cadical::CaDiCaL<'static, 'static>,
->};}
+mod pmin {
+    type S = scuttle::PMinimal<
+        rustsat::encodings::pb::DbGte,
+        rustsat::encodings::card::DbTotalizer,
+        rustsat::instances::BasicVarManager,
+        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
+        rustsat_cadical::CaDiCaL<'static, 'static>,
+    >;
+    generate_tests!(
+        default,
+        super::S,
+        scuttle::KernelOptions::default(),
+        "[[uvsrgc]VRTG]"
+    );
+}
 
-macro_rules! Bos {() => {scuttle::BiOptSat<
-    rustsat::encodings::pb::DefIncUpperBounding,
-    rustsat::encodings::card::DefIncUpperBounding,
-    rustsat::instances::BasicVarManager,
-    fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    rustsat_cadical::CaDiCaL<'static, 'static>,
->};}
+mod lb {
+    type S = scuttle::LowerBounding<
+        rustsat::encodings::pb::DbGte,
+        rustsat::encodings::card::DbTotalizer,
+        rustsat::instances::BasicVarManager,
+        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
+        rustsat_cadical::CaDiCaL<'static, 'static>,
+    >;
+    generate_tests!(
+        default,
+        super::S,
+        scuttle::KernelOptions::default(),
+        "[[uvsrgc]VRTG]"
+    );
+}
 
-macro_rules! Lb {() => { scuttle::LowerBounding<
-    rustsat::encodings::pb::DefIncUpperBounding,
-    rustsat::encodings::card::DefIncUpperBounding,
-    rustsat::instances::BasicVarManager,
-    fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    rustsat_cadical::CaDiCaL<'static, 'static>,
->};}
+mod bioptsat {
+    type S = scuttle::BiOptSat<
+        rustsat::encodings::pb::DbGte,
+        rustsat::encodings::card::DbTotalizer,
+        rustsat::instances::BasicVarManager,
+        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
+        rustsat_cadical::CaDiCaL<'static, 'static>,
+    >;
+    generate_biobj_tests!(
+        default,
+        super::S,
+        scuttle::KernelOptions::default(),
+        "[[uvsrgc]VRTG]"
+    );
+}
 
-macro_rules! Dc {() => { scuttle::solver::divcon::SeqDivCon<
-    rustsat::instances::BasicVarManager,
-    rustsat_cadical::CaDiCaL<'static, 'static>,
-    fn(rustsat::types::Assignment) -> rustsat::types::Clause,
->};}
-
-generate_tests!(
-    pmin,
-    PMin!(),
-    scuttle::KernelOptions::default(),
-    "[[uvsrgc]VRTG]"
-);
-
-generate_tests!(
-    lb,
-    Lb!(),
-    scuttle::KernelOptions::default(),
-    "[[uvsrgc]VRTG]"
-);
-
-generate_tests!(
-    divcon,
-    Dc!(),
-    scuttle::DivConOptions::default(),
-    "[[uvsrgc]VRTG]"
-);
-
-generate_biobj_tests!(
-    bioptsat,
-    Bos!(),
-    scuttle::KernelOptions::default(),
-    "[[uvsrgc]VRTG]"
-);
-
-#[test]
-fn debug() {
-    packup_3!(Dc!(), scuttle::DivConOptions::default(), "[[uvsrgc]VRTG]")
+#[cfg(feature = "div-con")]
+mod divcon {
+    type S = scuttle::solver::divcon::SeqDivCon<
+        rustsat::instances::BasicVarManager,
+        rustsat_cadical::CaDiCaL<'static, 'static>,
+        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
+    >;
+    generate_tests!(
+        default,
+        super::S
+        scuttle::DivConOptions::default(),
+        "[[uvsrgc]VRTG]"
+    );
 }

@@ -69,6 +69,7 @@ pub enum AfterCbOptions {
 
 pub type KernelWithCbOptions = (KernelOptions, Option<CoreBoostingOptions>);
 
+#[cfg(feature = "div-con")]
 #[derive(Clone, Default)]
 pub struct DivConOptions {
     pub kernel: KernelOptions,
@@ -87,6 +88,7 @@ pub struct DivConOptions {
     pub enc_clauses_summary: bool,
 }
 
+#[cfg(feature = "div-con")]
 impl DivConOptions {
     pub fn set_enumeration(&mut self, enumeration: EnumOptions) {
         self.kernel.set_enumeration(enumeration)

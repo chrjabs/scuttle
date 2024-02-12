@@ -11,10 +11,12 @@ use rustsat::{
     types::{Assignment, Clause},
 };
 use rustsat_cadical::CaDiCaL;
+#[cfg(feature = "div-con")]
+use scuttle::solver::divcon::SeqDivCon;
 use scuttle::{
     self,
     cli::{Algorithm, CardEncoding, Cli, FileFormat, PbEncoding},
-    solver::{divcon::SeqDivCon, CoreBoost},
+    solver::CoreBoost,
     BiOptSat, LoggerError, LowerBounding, PMinimal, Solve,
 };
 
@@ -57,6 +59,7 @@ type PMin<VM> = PMinimal<pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Cla
 type Bos<PBE, CE, VM> = BiOptSat<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
 /// Lower-bounding instantiation used
 type Lb<VM> = LowerBounding<pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause, Oracle>;
+#[cfg(feature = "div-con")]
 /// Divide and Conquer prototype used
 type Dc<VM> = SeqDivCon<VM, Oracle, fn(Assignment) -> Clause>;
 
@@ -164,6 +167,7 @@ fn main() -> Result<(), Error> {
             }
             post_solve(&mut solver, &cli, prepro, reindexer)
         }
+        #[cfg(feature = "div-con")]
         Algorithm::DivCon(ref opts) => {
             let mut solver =
                 expect_no_term!(Dc::new_default_blocking(inst, oracle, opts.clone()), cli);

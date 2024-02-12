@@ -47,6 +47,7 @@ binary-deps = [
   "rustsat/compression",
 ]
 data-helpers = []
+div-con = []
 
 [profile.release]
 lto = true

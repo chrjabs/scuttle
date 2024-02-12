@@ -9,8 +9,7 @@ use std::{
 };
 
 use crate::options::{
-    self, AfterCbOptions, BuildEncodings, CoreBoostingOptions, DivConOptions, EnumOptions,
-    HeurImprOptions, HeurImprWhen, KernelOptions,
+    AfterCbOptions, CoreBoostingOptions, EnumOptions, HeurImprOptions, HeurImprWhen, KernelOptions,
 };
 use crate::{
     types::{NonDomPoint, ParetoFront},
@@ -24,6 +23,9 @@ use rustsat::{
     solvers::{SolverResult, SolverStats},
 };
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
+
+#[cfg(feature = "div-con")]
+use crate::options::{self, BuildEncodings, DivConOptions};
 
 macro_rules! none_if_zero {
     ($val:expr) => {
@@ -71,6 +73,7 @@ enum AlgorithmCommand {
         log_fence: bool,
     },
     /// Divide and conquer prototype
+    #[cfg(feature = "div-con")]
     DivCon {
         #[command(flatten)]
         shared: SharedArgs,
@@ -340,6 +343,7 @@ impl fmt::Display for CardEncoding {
     }
 }
 
+#[cfg(feature = "div-con")]
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum DivConAnchor {
     /// Linear Sat-Unsat for single-objective subproblems
@@ -357,6 +361,7 @@ pub enum DivConAnchor {
     PMinNMinusOne,
 }
 
+#[cfg(feature = "div-con")]
 impl fmt::Display for DivConAnchor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -370,6 +375,7 @@ impl fmt::Display for DivConAnchor {
     }
 }
 
+#[cfg(feature = "div-con")]
 impl From<options::DivConAnchor> for DivConAnchor {
     fn from(value: options::DivConAnchor) -> Self {
         match value {
@@ -529,6 +535,7 @@ pub enum Algorithm {
         Option<CoreBoostingOptions>,
     ),
     LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
+    #[cfg(feature = "div-con")]
     DivCon(DivConOptions),
 }
 
@@ -538,6 +545,7 @@ impl fmt::Display for Algorithm {
             Algorithm::PMinimal(..) => write!(f, "p-pminimal"),
             Algorithm::BiOptSat(..) => write!(f, "bioptsat"),
             Algorithm::LowerBounding(..) => write!(f, "lower-bounding"),
+            #[cfg(feature = "div-con")]
             Algorithm::DivCon(..) => write!(f, "div-con"),
         }
     }
@@ -683,6 +691,7 @@ impl Cli {
                     alg: Algorithm::LowerBounding(kernel_opts(shared), cb),
                 }
             }
+            #[cfg(feature = "div-con")]
             AlgorithmCommand::DivCon {
                 shared,
                 anchor,
@@ -889,6 +898,7 @@ impl Cli {
                     Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
                 }
+                #[cfg(feature = "div-con")]
                 Algorithm::DivCon(opts) => {
                     Self::print_parameter(
                         &mut buffer,
