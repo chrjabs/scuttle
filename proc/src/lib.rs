@@ -200,10 +200,10 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
                     self.alg_main()?;
                     Ok(true)
                 }
-                
+
                 fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
                     use crate::ExtendedSolveStats;
-                    (#kernel.stats, Some(self.oracle_stats()), 
+                    (#kernel.stats, Some(self.oracle_stats()),
                     Some(self.encoding_stats()))
                 }
             }
@@ -217,7 +217,7 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
                         self.alg_main()?;
                         Ok(true)
                     }
-                    
+
                     fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
                         use rustsat::solvers::SolveStats;
                         (#kernel.stats, Some(#kernel.oracle.stats()), None)
@@ -232,7 +232,7 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
                         self.alg_main()?;
                         Ok(true)
                     }
-                    
+
                     fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
                         (#kernel.stats, None, None)
                     }

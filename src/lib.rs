@@ -13,9 +13,9 @@ pub mod types;
 use types::NonDomPoint;
 
 pub mod solver;
+pub use solver::CoreBoost;
 pub use solver::KernelFunctions;
 pub use solver::Solve;
-pub use solver::CoreBoost;
 
 // Reexport algorithms
 pub use solver::bioptsat::BiOptSat;

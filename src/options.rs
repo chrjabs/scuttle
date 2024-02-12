@@ -65,7 +65,6 @@ pub enum AfterCbOptions {
     Reset,
     /// Perform MaxPre "inprocessing" after core boosting
     Inpro(String),
-    
 }
 
 pub type KernelWithCbOptions = (KernelOptions, Option<CoreBoostingOptions>);
