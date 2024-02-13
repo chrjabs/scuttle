@@ -1,38 +1,39 @@
-# Supplementary Material for CPAIOR'24 Submission #22
+# Supplementary Material for CPAIOR'24 Paper
 
-This directory includes additional materials for CPAIOR'24 submission #22,
-including additional details about the empirical results (in `appendix.pdf`),
-numeric evaluation data (in `data/`) , and instructions on how to replicate
-experiments (in this file).
+This directory includes additional materials for our CPAIOR'24 paper "Core
+Boosting in SAT-Based Multi-Objective Optimization". Included are additional
+details about the empirical results (in `appendix.pdf`), numeric evaluation data
+(in `data/`) , and instructions on how to replicate experiments (in this file).
 
 ## Benchmark Instances
 
 All benchmark instances used in our evaluation can be downloaded at
-`https://media.christophjabs.info/mcnf/<hash>.mcnf.xz` where instances are identified by their hash.
-This includes _all_ instances that we randomly sampeled the 320 used
-instances from.  The files are named following a `<hash>.mcnf.xz` pattern with
-additional metadata for the instances (identified by their hash) being provided
-in the `data/mcnf_meta.csv` table.  The metadata includes the family of the
-instances, the number of objectives, the sum of weights in each objective and
-whether the instance was selected for our evaluation.  Note that the family
-`lidr` from the paper is called `mlic` in the metadata.
+`https://cs.helsinki.fi/group/coreo/benchmarks/multi-opt/<hash>.mcnf.xz` where
+instances are identified by their hash. This includes _all_ instances that we
+randomly sampeled the 320 used instances from.  The files are named following a
+`<hash>.mcnf.xz` pattern with additional metadata for the instances (identified
+by their hash) being provided in the `data/mcnf_meta.csv` table.  The metadata
+includes the family of the instances, the number of objectives, the sum of
+weights in each objective and whether the instance was selected for our
+evaluation. Note that the family `lidr` from the paper is called `mlic` in the
+metadata.
 
 To download all instances selected for the evaluation, use the following command:
-```
+```bash
 mkdir instances
-cat data/mcnf_meta.csv | cut -d ',' -f1,9 | grep 'True' | cut -d ',' -f1 | while read hash; do echo "https://media.christophjabs.info/mcnf/${hash}.mcnf.xz"; done > instances/list.txt
+hashes=$(cat data/mcnf_meta.csv | cut -d ',' -f1,9 | grep 'True' | cut -d ',' -f1 | tr '\n' ',' | sed 's/,$/\n/')
 cd instances
-wget --content-disposition -i list.txt
+curl -Z -O "https://cs.helsinki.fi/group/coreo/benchmarks/multi-opt/{${hashes}}.mcnf.xz"
 ```
 
 ## Evaluation Data
 
 The data collected during the empirical evaluation is available in the `data/`
-directory.  The `mcnf_runtime.csv` file contains runtime measurements
+directory. The `mcnf_runtime.csv` file contains runtime measurements
 (`<config>_CPUTIME`) and solved/timeout information (`<config>_result`) of the
-different evaluated configurations.  `mcnf_core_boosting.csv` contains
+different evaluated configurations. `mcnf_core_boosting.csv` contains
 additional data about how much time was spent core boosting
-(`<config>_CB_CPUTIME`).  `mcnf_clauses.csv` contains data on the number of
+(`<config>_CB_CPUTIME`). `mcnf_clauses.csv` contains data on the number of
 clauses in the objective encodings with (`cb_enc_clauses_MERGING`) and without
 core boosting (`cb_enc_clauses_NO_CB`).
 
@@ -56,7 +57,7 @@ In our evaluation we used the versions of
 `cpaior24` tags. To build this specific version, use the following commands
 with Rust installed:
 
-```
+```bash
 mkdir cpaior-scuttle
 cd cpaior-scuttle
 git clone --branch cpaior24 git@github.com:chrjabs/rustsat.git
@@ -67,7 +68,9 @@ cargo install --path scuttle --root .
 
 After these commands, the scuttle binary will be at `cpaior-scuttle/bin/scuttle`.
 
-##
+With the version updated since the `cpaior24` tag (the `main` branch or scuttle
+version `>=0.3`), core boosting is available through a more convenient
+`--core-boosting=true` CLI option.
 
 ## MCNF File Format
 
@@ -94,55 +97,59 @@ in a WCNF file.
 
 ### Running the Algorithms
 
-These are the exact commands used for running the experiments.
+These are the commands used for running the configurations equivalent to
+the experiments in the paper. Note that we updated the code since the
+evaluation was run to provide an easier CLI. To run the exact same code
+used in the evaluation, check out the `cpaior24` tag and follow the
+instructions there.
 
 #### P-Minimal
 
 No core boosting
-```
-scuttle p-minimal -v2 --preprocessing=false <instance>
+```bash
+scuttle p-minimal -v2 --core-boosting=false --preprocessing=false <instance>
 ```
 
 With core boosting
-```
-scuttle div-con -v2 --anchor=p-minimal --preprocessing=false <instance>
+```bash
+scuttle p-minimal -v2 --core-boosting=true --preprocessing=false <instance>
 ```
 
 With MaxPre
-```
-scuttle p-minimal -v2 --preprocessing=true <instance>
+```bash
+scuttle p-minimal -v2 --core-boosting=false --preprocessing=true <instance>
 ```
 
 #### BiOptSat
 
 No core boosting
-```
-scuttle bioptsat -v2 --obj-pb-encoding=gte --preprocessing=false <instance>
+```bash
+scuttle bioptsat -v2 --obj-pb-encoding=gte --core-boosting=false --preprocessing=false <instance>
 ```
 
 With core boosting
-```
-scuttle div-con -v2 --anchor=bioptsat --preprocessing=false <instance>
+```bash
+scuttle bioptsat -v2 --obj-pb-encoding=gte --core-boosting=true --preprocessing=false <instance>
 ```
 
 With MaxPre
-```
-scuttle bioptsat -v2 --obj-pb-encoding=gte --preprocessing=true <instance>
+```bash
+scuttle bioptsat -v2 --obj-pb-encoding=gte --core-boosting=false --preprocessing=true <instance>
 ```
 
 #### LowerBound
 
 No core boosting
-```
-scuttle lower-bounding -v2 --preprocessing=false <instance>
+```bash
+scuttle lower-bounding -v2 --core-boosting=false --preprocessing=false <instance>
 ```
 
 With core boosting
-```
-scuttle div-con -v2 --anchor=lower-bounding --preprocessing=false <instance>
+```bash
+scuttle lower-bounding -v2 --core-boosting=true --preprocessing=false <instance>
 ```
 
 With MaxPre
-```
-scuttle lower-bounding -v2 --preprocessing=true <instance>
+```bash
+scuttle lower-bounding -v2 --core-boosting=false --preprocessing=true <instance>
 ```
