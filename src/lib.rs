@@ -4,7 +4,8 @@
 
 use std::fmt;
 
-use rustsat::solvers::{SolverError, SolverResult, SolverStats};
+use anyhow::Error;
+use rustsat::solvers::{SolverResult, SolverStats};
 
 pub mod options;
 #[cfg(feature = "div-con")]
@@ -53,7 +54,7 @@ pub enum Termination {
     /// Termination because of external interrupt
     Interrupted,
     /// An error occured in the oracle
-    OracleError(SolverError),
+    OracleError(Error),
     /// Attempted to reset oracle without having stored the original CNF
     ResetWithoutCnf,
     /// Called core boosting after calling solve
@@ -108,8 +109,8 @@ impl fmt::Display for Termination {
     }
 }
 
-impl From<SolverError> for Termination {
-    fn from(se: SolverError) -> Self {
+impl From<Error> for Termination {
+    fn from(se: Error) -> Self {
         Termination::OracleError(se)
     }
 }

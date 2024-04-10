@@ -3,14 +3,11 @@ use std::{ffi::OsString, fmt, path::PathBuf, thread};
 use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
 use rustsat::{
     encodings::{card, pb},
-    instances::{
-        fio::{self, ParsingError},
-        BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager,
-    },
-    solvers::SolverError,
+    instances::{BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager},
     types::{Assignment, Clause},
 };
 use rustsat_cadical::CaDiCaL;
+
 #[cfg(feature = "div-con")]
 use scuttle::solver::divcon::SeqDivCon;
 use scuttle::{
@@ -250,7 +247,7 @@ macro_rules! is_one_of {
 fn parse_instance(
     inst_path: PathBuf,
     file_format: FileFormat,
-    opb_opts: fio::opb::Options,
+    opb_opts: rustsat::instances::fio::opb::Options,
 ) -> Result<MultiOptInstance, Error> {
     match file_format {
         FileFormat::Infer => {
@@ -284,10 +281,10 @@ fn parse_instance(
 enum Error {
     UnknownFileExtension(OsString),
     NoFileExtension,
-    Parsing(ParsingError),
+    Parsing(anyhow::Error),
     IO(std::io::Error),
     Logger(LoggerError),
-    Oracle(SolverError),
+    Oracle(anyhow::Error),
     InvalidInstance,
     InvalidConfig,
     ResetWithoutCnf,
@@ -314,7 +311,7 @@ impl From<scuttle::Termination> for Error {
 
 impl Error {
     fn wrap_parser(
-        parser_result: Result<MultiOptInstance, ParsingError>,
+        parser_result: Result<MultiOptInstance, anyhow::Error>,
     ) -> Result<MultiOptInstance, Error> {
         match parser_result {
             Ok(inst) => Ok(inst),
