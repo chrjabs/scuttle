@@ -267,7 +267,7 @@ fn parse_instance(
                 };
                 if is_one_of!(ext, "mcnf", "bicnf", "wcnf", "cnf", "dimacs") {
                     Error::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path))
-                } else if is_one_of!(ext, "opb") {
+                } else if is_one_of!(ext, "opb", "mopb", "pbmo") {
                     Error::wrap_parser(MultiOptInstance::from_opb_path(inst_path, opb_opts))
                 } else {
                     Err(Error::UnknownFileExtension(OsString::from(ext)))
