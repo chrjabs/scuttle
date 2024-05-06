@@ -41,6 +41,18 @@ impl Inactives {
         self.into()
     }
 
+    pub fn final_cleanup(&mut self) {
+        self.cleanup();
+        let to_constant = match self {
+            Inactives::Weighted(map) => map.is_empty(),
+            Inactives::Unweighted { lits, .. } => lits.is_empty(),
+            Inactives::Constant => false,
+        };
+        if to_constant {
+            *self = Inactives::Constant;
+        }
+    }
+
     pub fn cleanup(&mut self) {
         match self {
             Inactives::Weighted(map) => map.retain(|_, w| *w > 0),
@@ -247,7 +259,7 @@ where
                 Sat => {
                     if unreform_cores.is_empty() {
                         let sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
-                        reform.inactives.cleanup();
+                        reform.inactives.final_cleanup();
                         self.log_routine_end()?;
                         return Ok(Some(sol));
                     }

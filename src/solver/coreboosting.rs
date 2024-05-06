@@ -21,7 +21,7 @@ use scuttle_proc::oracle_bounds;
 use crate::Termination;
 
 use super::{
-    coreguided::{OllReformulation, TotOutput},
+    coreguided::{Inactives, OllReformulation, TotOutput},
     ObjEncoding, Objective, SolverKernel,
 };
 
@@ -77,6 +77,10 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
         mut tot_db: TotDb,
         rebase: bool,
     ) -> ObjEncoding<Self::PBE, Self::CE> {
+        if matches!(reform.inactives, Inactives::Constant) {
+            // core boosting derived constant objective
+            return ObjEncoding::Constant;
+        }
         let mut cons = vec![];
         let mut max_leaf_weight = 0;
         for (lit, &weight) in &reform.inactives {
