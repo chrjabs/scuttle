@@ -21,8 +21,11 @@ use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
     options::{AfterCbOptions, CoreBoostingOptions},
+    termination::ensure,
     types::{NonDomPoint, ParetoFront},
-    EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits, Solve, Termination,
+    EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
+    MaybeTerminatedError::{self, Done},
+    Solve,
 };
 
 use super::{
@@ -66,7 +69,7 @@ where
         inst: MultiOptInstance<VM>,
         oracle: O,
         opts: KernelOptions,
-    ) -> Result<Self, Termination> {
+    ) -> anyhow::Result<Self> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             oracle,
@@ -90,7 +93,7 @@ where
         inst: MultiOptInstance<VM>,
         opts: KernelOptions,
         block_clause_gen: BCG,
-    ) -> Result<Self, Termination> {
+    ) -> anyhow::Result<Self> {
         let kernel = SolverKernel::new(inst, O::default(), block_clause_gen, opts)?;
         Ok(Self::init(kernel))
     }
@@ -104,10 +107,7 @@ where
     VM: ManageVars,
     O: SolveIncremental + SolveStats + Default,
 {
-    pub fn new_defaults(
-        inst: MultiOptInstance<VM>,
-        opts: KernelOptions,
-    ) -> Result<Self, Termination> {
+    pub fn new_defaults(inst: MultiOptInstance<VM>, opts: KernelOptions) -> anyhow::Result<Self> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             O::default(),
@@ -134,7 +134,7 @@ where
         oracle: O,
         opts: KernelOptions,
         block_clause_gen: BCG,
-    ) -> Result<Self, Termination> {
+    ) -> anyhow::Result<Self> {
         let kernel = SolverKernel::new(inst, oracle, block_clause_gen, opts)?;
         Ok(Self::init(kernel))
     }
@@ -235,7 +235,7 @@ where
     O: SolveIncremental + SolveStats,
 {
     /// The solving algorithm main routine.
-    fn alg_main(&mut self) -> Result<(), Termination> {
+    fn alg_main(&mut self) -> MaybeTerminatedError {
         self.kernel.bioptsat(
             (0, 1),
             (&mut self.obj_encs.0, &mut self.obj_encs.1),
@@ -255,14 +255,15 @@ where
     VM: ManageVars,
     O: SolveIncremental + SolveStats + Default,
 {
-    fn core_boost(&mut self, opts: CoreBoostingOptions) -> Result<bool, Termination> {
-        if self.kernel.stats.n_solve_calls > 0 {
-            return Err(Termination::CbAfterSolve);
-        }
+    fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
+        ensure!(
+            self.kernel.stats.n_solve_calls == 0,
+            "cannot perform core boosting after solve has been called"
+        );
         let cb_res = if let Some(cb_res) = self.kernel.core_boost()? {
             cb_res
         } else {
-            return Ok(false);
+            return Done(false);
         };
         self.kernel.check_termination()?;
         let reset_dbs = match &opts.after {
@@ -277,7 +278,7 @@ where
                 self.obj_encs.1 = encs.pop().unwrap();
                 self.obj_encs.0 = encs.pop().unwrap();
                 self.kernel.check_termination()?;
-                return Ok(true);
+                return Done(true);
             }
         };
         self.kernel.log_routine_start("merge encodings")?;
@@ -295,7 +296,7 @@ where
             self.kernel.check_termination()?;
         }
         self.kernel.log_routine_end()?;
-        Ok(true)
+        Done(true)
     }
 }
 
@@ -324,7 +325,7 @@ where
         (inc_lb, dec_lb): (Option<usize>, Option<usize>),
         lookup: Lookup,
         collector: &mut Col,
-    ) -> Result<(), Termination>
+    ) -> MaybeTerminatedError
     where
         PBE: pb::BoundUpperIncremental,
         CE: card::BoundUpperIncremental,
@@ -342,7 +343,7 @@ where
         } else {
             let res = self.solve_assumps(&assumps)?;
             if res == SolverResult::Unsat {
-                return Ok(());
+                return Done(());
             }
             let mut sol = self.oracle.solution(self.max_inst_var)?;
             let cost = self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
@@ -362,7 +363,7 @@ where
             } else {
                 // no solutions
                 self.log_routine_end()?;
-                return Ok(());
+                return Done(());
             };
             inc_lb = inc_cost + 1;
             dec_cost = self.get_cost_with_heuristic_improvements(dec_obj, &mut sol, false)?;
@@ -374,7 +375,7 @@ where
                     inc_cost..inc_cost + 1,
                     &mut self.oracle,
                     &mut self.var_manager,
-                );
+                )?;
                 assumps.extend(inc_encoding.enforce_ub(inc_cost).unwrap());
                 // minimize dec_obj
                 dec_cost = self
@@ -398,7 +399,7 @@ where
                 dec_cost - 1..dec_cost,
                 &mut self.oracle,
                 &mut self.var_manager,
-            );
+            )?;
             assumps.extend(dec_encoding.enforce_ub(dec_cost - 1).unwrap());
             (sol, inc_cost) = match self.solve_assumps(&assumps)? {
                 SolverResult::Sat => {
@@ -412,6 +413,6 @@ where
             };
         }
         self.log_routine_end()?;
-        Ok(())
+        Done(())
     }
 }

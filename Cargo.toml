@@ -12,14 +12,14 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rustsat = { version = "0.4.3", path = "./rustsat/rustsat", features = [
+rustsat = { version = "0.5.0", path = "./rustsat/rustsat", features = [
   "multiopt",
   "internals",
 ] }
-rustsat-cadical = { optional = true, version = "0.2", path = "./rustsat/cadical", features = [
-  "v1-7-2",
+rustsat-cadical = { optional = true, version = "0.3", path = "./rustsat/cadical", features = [
+  "v1-9-4",
 ] }
-maxpre = { version = "0.2", path = "./maxpre-rs", optional = true, features = [
+maxpre = { version = "0.2.2", path = "./maxpre-rs", optional = true, features = [
   "multiopt",
 ] }
 cpu-time = { optional = true, version = "1.0.0" }
@@ -29,6 +29,8 @@ termcolor = { optional = true, version = "1.2.0" }
 atty = { optional = true, version = "0.2.14" }
 signal-hook = { optional = true, version = "0.3.15" }
 scuttle-proc = { version = "0.1", path = "./proc" }
+anyhow = "1.0.83"
+thiserror = "1.0.60"
 
 [features]
 default = [

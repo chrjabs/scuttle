@@ -11,7 +11,9 @@ use crate::{
     options::{BuildEncodings, DivConAnchor, DivConOptions},
     solver::{default_blocking_clause, Objective, SolverKernel},
     types::ParetoFront,
-    KernelFunctions, KernelOptions, Limits, Solve, Termination,
+    KernelFunctions, KernelOptions, Limits,
+    MaybeTerminatedError::{self, Done},
+    Solve,
 };
 
 use super::Worker;
@@ -47,7 +49,7 @@ where
         inst: MultiOptInstance<VM>,
         oracle: O,
         opts: DivConOptions,
-    ) -> Result<Self, Termination> {
+    ) -> anyhow::Result<Self> {
         let kernel_opts = KernelOptions {
             store_cnf: opts.kernel.store_cnf
                 || opts.build_encodings == BuildEncodings::CleanRebuild
@@ -71,10 +73,7 @@ where
     VM: ManageVars,
     O: SolveIncremental + Default,
 {
-    pub fn new_defaults(
-        inst: MultiOptInstance<VM>,
-        opts: DivConOptions,
-    ) -> Result<Self, Termination> {
+    pub fn new_defaults(inst: MultiOptInstance<VM>, opts: DivConOptions) -> anyhow::Result<Self> {
         let kernel_opts = KernelOptions {
             store_cnf: opts.kernel.store_cnf
                 || opts.build_encodings == BuildEncodings::CleanRebuild
@@ -116,7 +115,7 @@ where
     O: SolveIncremental + SolveStats + Default,
 {
     /// The solving algorithm main routine.
-    fn alg_main(&mut self) -> Result<(), Termination> {
+    fn alg_main(&mut self) -> MaybeTerminatedError {
         self.worker.kernel.log_routine_start("seq-div-con")?;
         let all_objs: Vec<_> = (0..self.worker.kernel.stats.n_objs)
             .filter(|&oidx| !matches!(self.worker.kernel.objs[oidx], Objective::Constant { .. }))
@@ -124,7 +123,7 @@ where
         debug_assert_eq!(all_objs.len(), self.worker.kernel.stats.n_real_objs);
         self.solve_subproblem(vec![0; self.worker.kernel.stats.n_objs], &[], &all_objs)?;
         self.worker.kernel.log_routine_end()?;
-        Ok(())
+        Done(())
     }
 
     /// Recurses down into the subproblems and solves them
@@ -133,7 +132,7 @@ where
         mut ideal: Vec<usize>,
         base_assumps: &[Lit],
         obj_idxs: &[usize],
-    ) -> Result<(), Termination> {
+    ) -> MaybeTerminatedError {
         debug_assert_eq!(ideal.len(), self.worker.kernel.stats.n_objs);
         // TODO: filtering not just through cutting solutions to avoid unsat calls
         loop {
@@ -154,7 +153,7 @@ where
                     self.opts.rebase_encodings,
                 )?;
                 self.cut_dominated()?;
-                return Ok(());
+                return Done(());
             }
 
             if let DivConAnchor::NMinus(x) = self.opts.anchor {
@@ -172,7 +171,7 @@ where
                                 self.opts.rebase_encodings,
                             )?;
                             self.cut_dominated()?;
-                            return Ok(());
+                            return Done(());
                         }
                         _ => {
                             self.worker.p_minimal(
@@ -181,7 +180,7 @@ where
                                 &mut self.pareto_front,
                                 self.opts.rebase_encodings,
                             )?;
-                            return Ok(());
+                            return Done(());
                         }
                     }
                 }
@@ -197,7 +196,7 @@ where
                         &mut self.pareto_front,
                         self.opts.rebase_encodings,
                     )?;
-                    return Ok(());
+                    return Done(());
                 }
             }
 
@@ -210,7 +209,7 @@ where
                         &mut self.pareto_front,
                         self.opts.rebase_encodings,
                     )?;
-                    return Ok(());
+                    return Done(());
                 }
             }
 
@@ -228,15 +227,13 @@ where
                 if matches!(
                     self.opts.build_encodings,
                     BuildEncodings::Rebuild | BuildEncodings::CleanRebuild
-                ) {
-                    if self.worker.rebuild_obj_encodings(
-                        self.opts.build_encodings == BuildEncodings::CleanRebuild,
-                        self.opts.rebase_encodings,
-                    )? {
-                        reset = true;
-                        self.last_blocked = 0;
-                        self.cut_dominated()?;
-                    }
+                ) && self.worker.rebuild_obj_encodings(
+                    self.opts.build_encodings == BuildEncodings::CleanRebuild,
+                    self.opts.rebase_encodings,
+                )? {
+                    reset = true;
+                    self.last_blocked = 0;
+                    self.cut_dominated()?;
                 }
                 if !reset && self.opts.reset_after_global_ideal {
                     self.worker.reset_oracle()?;
@@ -248,7 +245,7 @@ where
             #[cfg(feature = "data-helpers")]
             if self.opts.enc_clauses_summary {
                 self.worker.enc_clauses_summary()?;
-                return Ok(());
+                return Done(());
             }
 
             // TODO: use upper bound from ideal point computation
@@ -263,7 +260,7 @@ where
                     self.opts.rebase_encodings,
                 )?;
                 self.cut_dominated()?;
-                return Ok(());
+                return Done(());
             }
 
             if let DivConAnchor::PMinimal(sub_size) = self.opts.anchor {
@@ -277,7 +274,7 @@ where
                         &mut self.pareto_front,
                         self.opts.rebase_encodings,
                     )?;
-                    return Ok(());
+                    return Done(());
                 }
             }
 
@@ -291,7 +288,7 @@ where
                         &mut self.pareto_front,
                         self.opts.rebase_encodings,
                     )?;
-                    return Ok(());
+                    return Done(());
                 }
             }
 
@@ -310,10 +307,10 @@ where
                 self.solve_subproblem(ideal.clone(), &assumps, &subproblem)?;
             }
         }
-        Ok(())
+        Done(())
     }
 
-    fn cut_dominated(&mut self) -> Result<(), Termination> {
+    fn cut_dominated(&mut self) -> MaybeTerminatedError {
         let mut costs = Vec::new();
         for point_idx in self.last_blocked..self.pareto_front.len() {
             costs.extend(
@@ -329,6 +326,6 @@ where
         self.worker
             .cut_dominated(&points, self.opts.rebase_encodings)?;
         self.last_blocked = self.pareto_front.len();
-        Ok(())
+        Done(())
     }
 }

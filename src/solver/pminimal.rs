@@ -15,14 +15,6 @@
 //! - \[2\] Miyuki Koshimura and Hidetomo Nabeshima and Hiroshi Fujita and Ryuzo
 //!   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
 //!   2009.
-
-use crate::{
-    options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
-    solver::ObjEncoding,
-    types::ParetoFront,
-    EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits, Phase, Solve,
-    Termination,
-};
 use rustsat::{
     encodings,
     encodings::{
@@ -36,6 +28,16 @@ use rustsat::{
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
+
+use crate::{
+    options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
+    solver::ObjEncoding,
+    termination::ensure,
+    types::ParetoFront,
+    EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
+    MaybeTerminatedError::{self, Done},
+    Phase, Solve,
+};
 
 use super::{
     coreboosting::MergeOllRef, default_blocking_clause, CoreBoost, Objective, SolverKernel,
@@ -80,7 +82,7 @@ where
         inst: MultiOptInstance<VM>,
         oracle: O,
         opts: KernelOptions,
-    ) -> Result<Self, Termination> {
+    ) -> anyhow::Result<Self> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             oracle,
@@ -104,7 +106,7 @@ where
         inst: MultiOptInstance<VM>,
         opts: KernelOptions,
         block_clause_gen: BCG,
-    ) -> Result<Self, Termination> {
+    ) -> anyhow::Result<Self> {
         let kernel = SolverKernel::new(inst, O::default(), block_clause_gen, opts)?;
         Ok(Self::init(kernel))
     }
@@ -118,10 +120,7 @@ where
     VM: ManageVars,
     O: SolveIncremental + Default,
 {
-    pub fn new_defaults(
-        inst: MultiOptInstance<VM>,
-        opts: KernelOptions,
-    ) -> Result<Self, Termination> {
+    pub fn new_defaults(inst: MultiOptInstance<VM>, opts: KernelOptions) -> anyhow::Result<Self> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
             inst,
             O::default(),
@@ -148,7 +147,7 @@ where
         oracle: O,
         opts: KernelOptions,
         block_clause_gen: BCG,
-    ) -> Result<Self, Termination> {
+    ) -> anyhow::Result<Self> {
         let kernel = SolverKernel::new(inst, oracle, block_clause_gen, opts)?;
         Ok(Self::init(kernel))
     }
@@ -238,7 +237,7 @@ where
     O: SolveIncremental + SolveStats,
 {
     /// The solving algorithm main routine.
-    fn alg_main(&mut self) -> Result<(), Termination> {
+    fn alg_main(&mut self) -> MaybeTerminatedError {
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
         self.kernel.log_routine_start("p-minimal")?;
         loop {
@@ -246,7 +245,7 @@ where
             let res = self.kernel.solve()?;
             if SolverResult::Unsat == res {
                 self.kernel.log_routine_end()?;
-                return Ok(());
+                return Done(());
             }
             self.kernel.check_termination()?;
 
@@ -267,7 +266,7 @@ where
 
             let assumps: Vec<_> = self
                 .kernel
-                .enforce_dominating(&costs, &mut self.obj_encs)
+                .enforce_dominating(&costs, &mut self.obj_encs)?
                 .collect();
             self.kernel
                 .yield_solutions(costs, &assumps, solution, &mut self.pareto_front)?;
@@ -287,14 +286,15 @@ where
     VM: ManageVars,
     O: SolveIncremental + SolveStats + Default,
 {
-    fn core_boost(&mut self, opts: CoreBoostingOptions) -> Result<bool, Termination> {
-        if self.kernel.stats.n_solve_calls > 0 {
-            return Err(Termination::CbAfterSolve);
-        }
+    fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
+        ensure!(
+            self.kernel.stats.n_solve_calls == 0,
+            "cannot perform core boosting after solve has been called"
+        );
         let cb_res = if let Some(cb_res) = self.kernel.core_boost()? {
             cb_res
         } else {
-            return Ok(false);
+            return Done(false);
         };
         self.kernel.check_termination()?;
         let reset_dbs = match &opts.after {
@@ -307,7 +307,7 @@ where
             AfterCbOptions::Inpro(techs) => {
                 self.obj_encs = self.kernel.inprocess(techs, cb_res)?;
                 self.kernel.check_termination()?;
-                return Ok(true);
+                return Done(true);
             }
         };
         self.kernel.log_routine_start("merge encodings")?;
@@ -321,7 +321,7 @@ where
             self.kernel.check_termination()?;
         }
         self.kernel.log_routine_end()?;
-        Ok(true)
+        Done(true)
     }
 }
 
@@ -338,7 +338,7 @@ where
         mut solution: Assignment,
         base_assumps: &[Lit],
         obj_encs: &mut [ObjEncoding<PBE, CE>],
-    ) -> Result<(Vec<usize>, Assignment, Option<Lit>), Termination>
+    ) -> MaybeTerminatedError<(Vec<usize>, Assignment, Option<Lit>)>
     where
         PBE: pb::BoundUpperIncremental,
         CE: card::BoundUpperIncremental,
@@ -350,11 +350,11 @@ where
         #[cfg(feature = "coarse-convergence")]
         let mut coarse = true;
         loop {
+            #[cfg(feature = "coarse-convergence")]
             let bound_costs: Vec<_> = costs
                 .iter()
                 .enumerate()
                 .map(|(_oidx, &c)| {
-                    #[cfg(feature = "coarse-convergence")]
                     if coarse {
                         return obj_encs[_oidx].coarse_ub(c);
                     }
@@ -363,11 +363,14 @@ where
                 .collect();
             // Force next solution to dominate the current one
             assumps.drain(base_assumps.len()..);
-            assumps.extend(self.enforce_dominating(&bound_costs, obj_encs));
+            #[cfg(not(feature = "coarse-convergence"))]
+            assumps.extend(self.enforce_dominating(&costs, obj_encs)?);
+            #[cfg(feature = "coarse-convergence")]
+            assumps.extend(self.enforce_dominating(&bound_costs, obj_encs)?);
             // Block solutions dominated by the current one
             if self.opts.enumeration == EnumOptions::NoEnum {
                 // Block permanently since no enumeration at Pareto point
-                let block_clause = self.dominated_block_clause(&costs, obj_encs);
+                let block_clause = self.dominated_block_clause(&costs, obj_encs)?;
                 self.oracle.add_clause(block_clause)?;
             } else {
                 // Permanently block last candidate
@@ -375,7 +378,7 @@ where
                     self.oracle.add_unit(block_lit)?;
                 }
                 // Temporarily block to allow for enumeration at Pareto point
-                let block_lit = self.tmp_block_dominated(&costs, obj_encs);
+                let block_lit = self.tmp_block_dominated(&costs, obj_encs)?;
                 block_switch = Some(block_lit);
                 assumps.push(block_lit);
             }
@@ -391,7 +394,7 @@ where
                 }
                 self.log_routine_end()?;
                 // Termination criteria, return last solution and costs
-                return Ok((costs, solution, block_switch));
+                return Done((costs, solution, block_switch));
             }
             self.check_termination()?;
 
@@ -413,17 +416,20 @@ where
         &'a mut self,
         costs: &'a [usize],
         obj_encs: &'a mut [ObjEncoding<PBE, CE>],
-    ) -> impl Iterator<Item = Lit> + 'a
+    ) -> Result<impl Iterator<Item = Lit> + 'a, rustsat::OutOfMemory>
     where
         PBE: pb::BoundUpperIncremental,
         CE: card::BoundUpperIncremental,
     {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
-        costs.iter().enumerate().flat_map(|(idx, &cst)| {
+        for (idx, &cst) in costs.iter().enumerate() {
             let enc = &mut obj_encs[idx];
-            enc.encode_ub_change(cst..cst + 1, &mut self.oracle, &mut self.var_manager);
+            enc.encode_ub_change(cst..cst + 1, &mut self.oracle, &mut self.var_manager)?;
+        }
+        Ok(costs.iter().enumerate().flat_map(|(idx, &cst)| {
+            let enc = &mut obj_encs[idx];
             enc.enforce_ub(cst).unwrap().into_iter()
-        })
+        }))
     }
 
     /// Gets a clause blocking solutions (weakly) dominated by the given cost point,
@@ -432,38 +438,36 @@ where
         &mut self,
         costs: &[usize],
         obj_encs: &mut [ObjEncoding<PBE, CE>],
-    ) -> Clause
+    ) -> Result<Clause, rustsat::OutOfMemory>
     where
         PBE: pb::BoundUpperIncremental,
         CE: card::BoundUpperIncremental,
     {
         debug_assert_eq!(costs.len(), obj_encs.len());
-        costs
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, &cst)| {
-                // Don't block
-                if cst <= obj_encs[idx].offset() {
-                    return None;
-                }
-                let enc = &mut obj_encs[idx];
-                if let ObjEncoding::Constant = enc {
-                    return None;
-                }
-                // Encode and add to solver
-                enc.encode_ub_change(cst - 1..cst, &mut self.oracle, &mut self.var_manager);
-                let assumps = enc.enforce_ub(cst - 1).unwrap();
-                if assumps.len() == 1 {
-                    Some(assumps[0])
-                } else {
-                    let mut and_impl = Cnf::new();
-                    let and_lit = self.var_manager.new_var().pos_lit();
-                    and_impl.add_lit_impl_cube(and_lit, &assumps);
-                    self.oracle.add_cnf(and_impl).unwrap();
-                    Some(and_lit)
-                }
-            })
-            .collect()
+        let mut clause = Clause::default();
+        for (idx, &cst) in costs.iter().enumerate() {
+            // Don't block
+            if cst <= obj_encs[idx].offset() {
+                continue;
+            }
+            let enc = &mut obj_encs[idx];
+            if let ObjEncoding::Constant = enc {
+                continue;
+            }
+            // Encode and add to solver
+            enc.encode_ub_change(cst - 1..cst, &mut self.oracle, &mut self.var_manager)?;
+            let assumps = enc.enforce_ub(cst - 1).unwrap();
+            if assumps.len() == 1 {
+                clause.add(assumps[0]);
+            } else {
+                let mut and_impl = Cnf::new();
+                let and_lit = self.var_manager.new_var().pos_lit();
+                and_impl.add_lit_impl_cube(and_lit, &assumps);
+                self.oracle.add_cnf(and_impl).unwrap();
+                clause.add(and_lit)
+            }
+        }
+        Ok(clause)
     }
 
     /// Temporarily blocks solutions dominated by the given cost point. Returns
@@ -473,16 +477,16 @@ where
         &mut self,
         costs: &[usize],
         obj_encs: &mut [ObjEncoding<PBE, CE>],
-    ) -> Lit
+    ) -> Result<Lit, rustsat::OutOfMemory>
     where
         PBE: pb::BoundUpperIncremental,
         CE: card::BoundUpperIncremental,
     {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
-        let mut clause = self.dominated_block_clause(costs, obj_encs);
+        let mut clause = self.dominated_block_clause(costs, obj_encs)?;
         let block_lit = self.var_manager.new_var().pos_lit();
         clause.add(block_lit);
         self.oracle.add_clause(clause).unwrap();
-        !block_lit
+        Ok(!block_lit)
     }
 }

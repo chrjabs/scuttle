@@ -394,7 +394,7 @@ mod divcon {
     >;
     generate_tests!(
         default,
-        super::S
+        super::S,
         scuttle::DivConOptions::default(),
         "[[uvsrgc]VRTG]"
     );

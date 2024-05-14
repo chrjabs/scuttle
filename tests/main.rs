@@ -994,78 +994,119 @@ mod divcon {
         rustsat_cadical::CaDiCaL<'static, 'static>,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     >;
-    generate_tests!(bioptsat, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor = scuttle::options::DivConAnchor::BiOptSat;
-        opts
-    });
-    generate_tests!(linsu, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor = scuttle::options::DivConAnchor::LinSu;
-        opts
-    });
-    generate_tests!(pmin_smaller_0, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor =
-            scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
-        opts
-    });
-    generate_tests!(lb_smaller_0, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor = scuttle::options::DivConAnchor::LowerBounding(
-            scuttle::options::SubProblemSize::Smaller(0),
-        );
-        opts
-    });
-    generate_tests!(pmin_smaller_0_inpro, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor =
-            scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
-        opts.inpro = Some(String::from("[[uvsrgc]VRTG]"));
-        opts
-    });
-    generate_tests!(pmin_smaller_0_reset, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor =
-            scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
-        opts.reset_after_global_ideal = true;
-        opts
-    });
-    generate_tests!(pmin_smaller_0_rebase, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor =
-            scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(0));
-        opts.rebase_encodings = true;
-        opts
-    });
-    generate_tests!(pmin_smaller_1, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor =
-            scuttle::options::DivConAnchor::PMinimal(scuttle::options::SubProblemSize::Smaller(1));
-        opts
-    });
-    generate_tests!(lb_smaller_1, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor = scuttle::options::DivConAnchor::LowerBounding(
-            scuttle::options::SubProblemSize::Smaller(1),
-        );
-        opts
-    });
-    generate_tests!(n_minus_1, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor = scuttle::options::DivConAnchor::NMinus(1);
-        opts
-    });
-    generate_tests!(n_minus_1_rebuild, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor = scuttle::options::DivConAnchor::NMinus(1);
-        opts.build_encodings = scuttle::options::BuildEncodings::Rebuild;
-        opts
-    });
-    generate_tests!(n_minus_1_clean_rebuild, super::S, {
-        let mut opts = scuttle::DivConOptions::default();
-        opts.anchor = scuttle::options::DivConAnchor::NMinus(1);
-        opts.build_encodings = scuttle::options::BuildEncodings::CleanRebuild;
-        opts
-    });
+    generate_tests!(
+        bioptsat,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::BiOptSat,
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        linsu,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::LinSu,
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        pmin_smaller_0,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::PMinimal(
+                scuttle::options::SubProblemSize::Smaller(0)
+            ),
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        lb_smaller_0,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::LowerBounding(
+                scuttle::options::SubProblemSize::Smaller(0),
+            ),
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        pmin_smaller_0_inpro,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::PMinimal(
+                scuttle::options::SubProblemSize::Smaller(0)
+            ),
+            inpro: Some(String::from("[[uvsrgc]VRTG]")),
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        pmin_smaller_0_reset,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::PMinimal(
+                scuttle::options::SubProblemSize::Smaller(0)
+            ),
+            reset_after_global_ideal: true,
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        pmin_smaller_0_rebase,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::PMinimal(
+                scuttle::options::SubProblemSize::Smaller(0)
+            ),
+            rebase_encodings: true,
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        pmin_smaller_1,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::PMinimal(
+                scuttle::options::SubProblemSize::Smaller(1)
+            ),
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        lb_smaller_1,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::LowerBounding(
+                scuttle::options::SubProblemSize::Smaller(1)
+            ),
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        n_minus_1,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::NMinus(1),
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        n_minus_1_rebuild,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::NMinus(1),
+            build_encodings: scuttle::options::BuildEncodings::Rebuild,
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        n_minus_1_clean_rebuild,
+        super::S,
+        scuttle::DivConOptions {
+            anchor: scuttle::options::DivConAnchor::NMinus(1),
+            build_encodings: scuttle::options::BuildEncodings::CleanRebuild,
+            ..Default::default()
+        }
+    );
 }

@@ -1,13 +1,11 @@
-use std::{ffi::OsString, fmt, path::PathBuf, thread};
+use std::{ffi::OsString, path::PathBuf, thread};
 
 use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
 use rustsat::{
     encodings::{card, pb},
     instances::{
-        fio::{self, ParsingError},
-        BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager,
+        fio, BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager,
     },
-    solvers::SolverError,
     types::{Assignment, Clause},
 };
 use rustsat_cadical::CaDiCaL;
@@ -17,38 +15,8 @@ use scuttle::{
     self,
     cli::{Algorithm, CardEncoding, Cli, FileFormat, PbEncoding},
     solver::CoreBoost,
-    BiOptSat, LoggerError, LowerBounding, PMinimal, Solve,
+    BiOptSat, LowerBounding, MaybeTerminatedError, PMinimal, Solve,
 };
-
-macro_rules! expect_no_term {
-    ($e:expr, $cli:expr) => {
-        match $e {
-            Ok(x) => x,
-            Err(term) => {
-                $cli.log_termination(&term)?;
-                if term.is_error() {
-                    return Err(Error::from(term));
-                }
-                panic!("expected success or error");
-            }
-        }
-    };
-}
-
-macro_rules! handle_term {
-    ($e:expr, $cli:expr) => {
-        match $e {
-            Ok(cont) => cont,
-            Err(term) => {
-                $cli.log_termination(&term)?;
-                if term.is_error() {
-                    return Err(Error::from(term));
-                }
-                false
-            }
-        }
-    };
-}
 
 /// The SAT solver used
 type Oracle = CaDiCaL<'static, 'static>;
@@ -63,9 +31,19 @@ type Lb<VM> = LowerBounding<pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> 
 /// Divide and Conquer prototype used
 type Dc<VM> = SeqDivCon<VM, Oracle, fn(Assignment) -> Clause>;
 
-fn main() -> Result<(), Error> {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::init();
 
+    match sub_main(&cli) {
+        MaybeTerminatedError::Done(_) => (),
+        MaybeTerminatedError::Terminated(term) => cli.log_termination(&term)?,
+        MaybeTerminatedError::Error(err) => cli.error(&format!("{err}"))?,
+    };
+
+    Ok(())
+}
+
+fn sub_main(cli: &Cli) -> MaybeTerminatedError {
     cli.print_header()?;
     cli.print_solver_config()?;
 
@@ -103,82 +81,79 @@ fn main() -> Result<(), Error> {
 
     match cli.alg {
         Algorithm::PMinimal(opts, ref cb_opts) => {
-            let mut solver = expect_no_term!(PMin::new_default_blocking(inst, oracle, opts), cli);
-            setup_cli_interaction(&mut solver, &cli)?;
+            let mut solver = PMin::new_default_blocking(inst, oracle, opts)?;
+            setup_cli_interaction(&mut solver, cli)?;
             let cont = if let Some(cb_opts) = cb_opts {
-                handle_term!(solver.core_boost(cb_opts.clone()), cli)
+                solver.core_boost(cb_opts.clone())?
             } else {
                 true
             };
             if cont {
-                handle_term!(solver.solve(cli.limits), cli);
+                solver.solve(cli.limits)?;
             }
-            post_solve(&mut solver, &cli, prepro, reindexer)
+            post_solve(&mut solver, cli, prepro, reindexer).into()
         }
         Algorithm::BiOptSat(opts, pb_enc, card_enc, ref cb_opts) => {
             if inst.n_objectives() != 2 {
                 cli.error("the bioptsat algorithm can only be run on bi-objective problems")?;
-                return Err(Error::InvalidInstance);
+                return MaybeTerminatedError::Error(anyhow::anyhow!(Error::InvalidInstance));
             }
             if cb_opts.is_some() && (pb_enc != PbEncoding::Gte || card_enc != CardEncoding::Tot) {
                 cli.error("core boosting is only implemented for the GTE and Totalizer encodings")?;
-                return Err(Error::InvalidConfig);
+                return MaybeTerminatedError::Error(anyhow::anyhow!(Error::InvalidConfig));
             }
             match pb_enc {
                 PbEncoding::Gte => match card_enc {
                     CardEncoding::Tot => {
                         type S<VM> = Bos<pb::DbGte, card::DbTotalizer, VM>;
-                        let mut solver =
-                            expect_no_term!(S::new_default_blocking(inst, oracle, opts), cli);
-                        setup_cli_interaction(&mut solver, &cli)?;
+                        let mut solver = S::new_default_blocking(inst, oracle, opts)?;
+                        setup_cli_interaction(&mut solver, cli)?;
                         let cont = if let Some(cb_opts) = cb_opts {
-                            handle_term!(solver.core_boost(cb_opts.clone()), cli)
+                            solver.core_boost(cb_opts.clone())?
                         } else {
                             true
                         };
                         if cont {
-                            handle_term!(solver.solve(cli.limits), cli);
+                            solver.solve(cli.limits)?;
                         }
-                        post_solve(&mut solver, &cli, prepro, reindexer)
+                        post_solve(&mut solver, cli, prepro, reindexer).into()
                     }
                 },
                 PbEncoding::Dpw => match card_enc {
                     CardEncoding::Tot => {
                         type S<VM> = Bos<pb::DynamicPolyWatchdog, card::DbTotalizer, VM>;
-                        let mut solver =
-                            expect_no_term!(S::new_default_blocking(inst, oracle, opts), cli);
-                        setup_cli_interaction(&mut solver, &cli)?;
-                        handle_term!(solver.solve(cli.limits), cli);
-                        post_solve(&mut solver, &cli, prepro, reindexer)
+                        let mut solver = S::new_default_blocking(inst, oracle, opts)?;
+                        setup_cli_interaction(&mut solver, cli)?;
+                        solver.solve(cli.limits)?;
+                        post_solve(&mut solver, cli, prepro, reindexer).into()
                     }
                 },
             }
         }
         Algorithm::LowerBounding(opts, ref cb_opts) => {
-            let mut solver = expect_no_term!(Lb::new_default_blocking(inst, oracle, opts), cli);
-            setup_cli_interaction(&mut solver, &cli)?;
+            let mut solver = Lb::new_default_blocking(inst, oracle, opts)?;
+            setup_cli_interaction(&mut solver, cli)?;
             let cont = if let Some(cb_opts) = cb_opts {
-                handle_term!(solver.core_boost(cb_opts.clone()), cli)
+                solver.core_boost(cb_opts.clone())?
             } else {
                 true
             };
             if cont {
-                handle_term!(solver.solve(cli.limits), cli);
+                solver.solve(cli.limits)?;
             }
-            post_solve(&mut solver, &cli, prepro, reindexer)
+            post_solve(&mut solver, cli, prepro, reindexer).into()
         }
         #[cfg(feature = "div-con")]
         Algorithm::DivCon(ref opts) => {
-            let mut solver =
-                expect_no_term!(Dc::new_default_blocking(inst, oracle, opts.clone()), cli);
-            setup_cli_interaction(&mut solver, &cli)?;
-            handle_term!(solver.solve(cli.limits), cli);
-            post_solve(&mut solver, &cli, prepro, reindexer)
+            let mut solver = Dc::new_default_blocking(inst, oracle, opts.clone())?;
+            setup_cli_interaction(&mut solver, cli)?;
+            solver.solve(cli.limits)?;
+            post_solve(&mut solver, cli, prepro, reindexer).into()
         }
     }
 }
 
-fn setup_cli_interaction<S: Solve>(solver: &mut S, cli: &Cli) -> Result<(), Error> {
+fn setup_cli_interaction<S: Solve>(solver: &mut S, cli: &Cli) -> anyhow::Result<()> {
     // Set up signal handling
     let mut interrupter = solver.interrupter();
     let mut signals = signal_hook::iterator::Signals::new([
@@ -203,7 +178,7 @@ fn post_solve<S: Solve>(
     cli: &Cli,
     mut prepro: Option<MaxPre>,
     reindexer: Option<ReindexingVarManager>,
-) -> Result<(), Error> {
+) -> anyhow::Result<()> {
     cli.info("finished solving the instance")?;
 
     let pareto_front = solver.pareto_front();
@@ -251,7 +226,7 @@ fn parse_instance(
     inst_path: PathBuf,
     file_format: FileFormat,
     opb_opts: fio::opb::Options,
-) -> Result<MultiOptInstance, Error> {
+) -> anyhow::Result<MultiOptInstance> {
     match file_format {
         FileFormat::Infer => {
             if let Some(ext) = inst_path.extension() {
@@ -260,92 +235,37 @@ fn parse_instance(
                     // Strip compression extension
                     match path_without_compr.extension() {
                         Some(ext) => ext,
-                        None => return Err(Error::NoFileExtension),
+                        None => anyhow::bail!(Error::NoFileExtension),
                     }
                 } else {
                     ext
                 };
-                if is_one_of!(ext, "mcnf", "bicnf", "wcnf", "cnf", "dimacs") {
-                    Error::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path))
-                } else if is_one_of!(ext, "opb", "mopb", "pbmo") {
-                    Error::wrap_parser(MultiOptInstance::from_opb_path(inst_path, opb_opts))
-                } else {
-                    Err(Error::UnknownFileExtension(OsString::from(ext)))
-                }
+                Ok(
+                    if is_one_of!(ext, "mcnf", "bicnf", "wcnf", "cnf", "dimacs") {
+                        MultiOptInstance::from_dimacs_path(inst_path)?
+                    } else if is_one_of!(ext, "opb", "mopb", "pbmo") {
+                        MultiOptInstance::from_opb_path(inst_path, opb_opts)?
+                    } else {
+                        anyhow::bail!(Error::UnknownFileExtension(OsString::from(ext)))
+                    },
+                )
             } else {
-                Err(Error::NoFileExtension)
+                anyhow::bail!(Error::NoFileExtension)
             }
         }
-        FileFormat::Dimacs => Error::wrap_parser(MultiOptInstance::from_dimacs_path(inst_path)),
-        FileFormat::Opb => Error::wrap_parser(MultiOptInstance::from_opb_path(inst_path, opb_opts)),
+        FileFormat::Dimacs => Ok(MultiOptInstance::from_dimacs_path(inst_path)?),
+        FileFormat::Opb => Ok(MultiOptInstance::from_opb_path(inst_path, opb_opts)?),
     }
 }
 
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 enum Error {
+    #[error("Cannot infer file format from extension {0:?}")]
     UnknownFileExtension(OsString),
+    #[error("To infer the file format, the file needs to have a file extension")]
     NoFileExtension,
-    Parsing(ParsingError),
-    IO(std::io::Error),
-    Logger(LoggerError),
-    Oracle(SolverError),
+    #[error("Invalid instance")]
     InvalidInstance,
+    #[error("Invalid configuration")]
     InvalidConfig,
-    ResetWithoutCnf,
-    CbAfterSolve,
-}
-
-impl From<std::io::Error> for Error {
-    fn from(ioe: std::io::Error) -> Self {
-        Error::IO(ioe)
-    }
-}
-
-impl From<scuttle::Termination> for Error {
-    fn from(value: scuttle::Termination) -> Self {
-        match value {
-            scuttle::Termination::LoggerError(err) => Error::Logger(err),
-            scuttle::Termination::OracleError(err) => Error::Oracle(err),
-            scuttle::Termination::ResetWithoutCnf => Error::ResetWithoutCnf,
-            scuttle::Termination::CbAfterSolve => Error::CbAfterSolve,
-            _ => panic!("Termination is not an error!"),
-        }
-    }
-}
-
-impl Error {
-    fn wrap_parser(
-        parser_result: Result<MultiOptInstance, ParsingError>,
-    ) -> Result<MultiOptInstance, Error> {
-        match parser_result {
-            Ok(inst) => Ok(inst),
-            Err(err) => Err(Error::Parsing(err)),
-        }
-    }
-}
-
-impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnknownFileExtension(ext) => {
-                write!(f, "Cannot infer file format from extension {:?}", ext)
-            }
-            Self::NoFileExtension => write!(
-                f,
-                "To infer the file format, the file needs to have a file extension"
-            ),
-            Self::Parsing(err) => write!(f, "Error while parsing the input file: {}", err),
-            Self::IO(err) => write!(f, "IO Error: {}", err),
-            Self::Logger(err) => write!(f, "Logger Error: {}", err),
-            Self::Oracle(err) => write!(f, "Oracle Error: {}", err),
-            Self::InvalidInstance => write!(f, "Invalid instance"),
-            Self::InvalidConfig => write!(f, "Invalid configuration"),
-            Self::ResetWithoutCnf => write!(
-                f,
-                "Tried to reset the SAT oracle without having stored the original clauses"
-            ),
-            Self::CbAfterSolve => {
-                write!(f, "Tried to call core boosting after calling solve")
-            }
-        }
-    }
 }

@@ -18,7 +18,10 @@ use rustsat::{
 };
 use scuttle_proc::oracle_bounds;
 
-use crate::Termination;
+use crate::{
+    termination::ensure,
+    MaybeTerminatedError::{self, Done},
+};
 
 use super::{
     coreguided::{Inactives, OllReformulation, TotOutput},
@@ -130,7 +133,7 @@ where
     /// Performs core boosting on the instance by executing single-objective OLL
     /// on each objective individually. Returns the OLL reformulations or
     /// [`None`], if unsat.
-    pub fn core_boost(&mut self) -> Result<Option<Vec<(OllReformulation, TotDb)>>, Termination> {
+    pub fn core_boost(&mut self) -> MaybeTerminatedError<Option<Vec<(OllReformulation, TotDb)>>> {
         self.log_routine_start("core boost")?;
         let mut unsat = false;
         let mut res = Vec::with_capacity(self.stats.n_objs);
@@ -153,11 +156,7 @@ where
             let ideal: Vec<_> = res.iter().map(|reform| reform.0.offset).collect();
             logger.log_ideal(&ideal)?;
         }
-        if unsat {
-            Ok(None)
-        } else {
-            Ok(Some(res))
-        }
+        Done(if unsat { None } else { Some(res) })
     }
 }
 
@@ -172,13 +171,14 @@ where
         &mut self,
         techniques: &str,
         mut reforms: Vec<(OllReformulation, TotDb)>,
-    ) -> Result<Vec<ObjEncoding<PBE, CE>>, Termination>
+    ) -> MaybeTerminatedError<Vec<ObjEncoding<PBE, CE>>>
     where
         (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     {
-        if !self.opts.store_cnf {
-            return Err(Termination::ResetWithoutCnf);
-        }
+        ensure!(
+            self.opts.store_cnf,
+            "cannot reset oracle without having stored the CNF"
+        );
         // Reset oracle
         self.oracle = O::default();
         #[cfg(feature = "interrupt-oracle")]
@@ -191,55 +191,44 @@ where
             .iter()
             .map(|reform| reform.0.outputs.clone())
             .collect();
-        let objs: Vec<(Vec<_>, isize)> = reforms
-            .iter_mut()
-            .enumerate()
-            .map(|(obj_idx, (reform, tot_db))| {
-                tot_db.reset_encoded();
-                (
-                    reform
-                        .inactives
-                        .iter()
-                        .flat_map(|(lit, weight)| {
-                            let lits: Vec<_> = if let Some(TotOutput {
-                                root,
-                                oidx,
-                                tot_weight,
-                            }) = reform.outputs.get(lit)
-                            {
-                                (*oidx..tot_db[*root].len())
-                                    .map(|idx| {
-                                        let olit = tot_db.define_pos_tot(
-                                            *root,
-                                            idx,
-                                            &mut orig_cnf,
-                                            &mut self.var_manager,
-                                        );
-                                        if idx == *oidx {
-                                            (clause![!olit], *weight)
-                                        } else {
-                                            all_outputs[obj_idx].insert(
-                                                olit,
-                                                TotOutput {
-                                                    root: *root,
-                                                    oidx: idx,
-                                                    tot_weight: *tot_weight,
-                                                },
-                                            );
-                                            (clause![!olit], *tot_weight)
-                                        }
-                                    })
-                                    .collect()
-                            } else {
-                                (0..1).map(|_| (clause![!*lit], *weight)).collect()
-                            };
-                            lits.into_iter()
-                        })
-                        .collect(),
-                    0,
-                )
-            })
-            .collect();
+        let mut objs = Vec::with_capacity(reforms.len());
+        for (obj_idx, (reform, tot_db)) in reforms.iter_mut().enumerate() {
+            tot_db.reset_encoded();
+            let mut softs = Vec::with_capacity(reform.inactives.len());
+            for (lit, weight) in reform.inactives.iter() {
+                if let Some(TotOutput {
+                    root,
+                    oidx,
+                    tot_weight,
+                }) = reform.outputs.get(lit)
+                {
+                    for idx in *oidx..tot_db[*root].len() {
+                        let olit = tot_db.define_pos_tot(
+                            *root,
+                            idx,
+                            &mut orig_cnf,
+                            &mut self.var_manager,
+                        )?;
+                        if idx == *oidx {
+                            softs.push((clause![!olit], *weight));
+                        } else {
+                            all_outputs[obj_idx].insert(
+                                olit,
+                                TotOutput {
+                                    root: *root,
+                                    oidx: idx,
+                                    tot_weight: *tot_weight,
+                                },
+                            );
+                            softs.push((clause![!olit], *tot_weight));
+                        }
+                    }
+                } else {
+                    softs.push((clause![!*lit], *weight));
+                };
+            }
+            objs.push((softs, 0));
+        }
         // Inprocess
         self.log_routine_start("inprocessing")?;
         let cls_before = orig_cnf.len() + objs.iter().fold(0, |cnt, (obj, _)| cnt + obj.len());
@@ -287,7 +276,7 @@ where
             let mut cons = vec![];
             if softs.is_empty() {
                 self.objs[obj_idx] = Objective::Constant {
-                    offset: self.objs[obj_idx].offset() + reform.offset as isize,
+                    offset: self.objs[obj_idx].offset() + reform.offset as isize + offset,
                 };
                 continue;
             }
@@ -351,6 +340,6 @@ where
             ));
             self.log_routine_end()?;
         }
-        Ok(encs)
+        Done(encs)
     }
 }

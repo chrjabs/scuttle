@@ -23,7 +23,12 @@ use scuttle_proc::oracle_bounds;
 mod sequential;
 pub use sequential::DivCon as SeqDivCon;
 
-use crate::{types::NonDomPoint, Phase, Termination};
+use crate::{
+    termination::ensure,
+    types::NonDomPoint,
+    MaybeTerminatedError::{self, Done},
+    Phase,
+};
 
 use super::{
     coreguided::{OllReformulation, TotOutput},
@@ -81,7 +86,7 @@ where
         assumps: &[Lit],
         obj_idxs: &[usize],
         ideal: &mut [usize],
-    ) -> Result<bool, Termination> {
+    ) -> MaybeTerminatedError<bool> {
         self.kernel.log_routine_start("find_ideal")?;
         let mut cont = true;
         for &obj_idx in obj_idxs {
@@ -104,7 +109,7 @@ where
             ideal[obj_idx] = reform.offset;
         }
         self.kernel.log_routine_end()?;
-        Ok(cont)
+        Done(cont)
     }
 
     /// Solves a bi-objective subproblem with the BiOptSat algorithm. This is
@@ -126,7 +131,7 @@ where
         lookup: Lookup,
         collector: &mut Col,
         rebase_encodings: bool,
-    ) -> Result<(), Termination>
+    ) -> MaybeTerminatedError
     where
         Lookup: Fn(usize) -> Option<usize>,
         Col: Extend<NonDomPoint>,
@@ -176,7 +181,7 @@ where
         lower_bound: Option<usize>,
         collector: &mut Col,
         rebase_encodings: bool,
-    ) -> Result<Option<usize>, Termination> {
+    ) -> MaybeTerminatedError<Option<usize>> {
         if self.encodings[obj_idx].is_none() {
             self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx, rebase_encodings)?);
         }
@@ -208,7 +213,7 @@ where
         mut starting_point: Option<Assignment>,
         collector: &mut Col,
         rebase_encodings: bool,
-    ) -> Result<(), Termination> {
+    ) -> MaybeTerminatedError {
         self.kernel.log_routine_start("p-minimal")?;
         for oidx in 0..self.kernel.stats.n_objs {
             if self.encodings[oidx].is_none()
@@ -246,7 +251,7 @@ where
                 let res = self.kernel.solve_assumps(base_assumps)?;
                 if SolverResult::Unsat == res {
                     self.kernel.log_routine_end()?;
-                    return Ok(());
+                    return Done(());
                 }
                 self.kernel.check_termination()?;
                 self.kernel.get_solution_and_internal_costs(
@@ -267,7 +272,7 @@ where
                     .p_minimization(costs, solution, base_assumps, &mut obj_encs)?;
 
             assumps.drain(base_assumps.len()..);
-            assumps.extend(self.kernel.enforce_dominating(&costs, &mut obj_encs));
+            assumps.extend(self.kernel.enforce_dominating(&costs, &mut obj_encs)?);
             self.kernel
                 .yield_solutions(costs, &assumps, solution, collector)?;
 
@@ -283,7 +288,7 @@ where
         base_assumps: &[Lit],
         collector: &mut Col,
         rebase_encodings: bool,
-    ) -> Result<(), Termination> {
+    ) -> MaybeTerminatedError {
         self.kernel.log_routine_start("lower-bounding")?;
 
         for oidx in 0..self.kernel.stats.n_objs {
@@ -295,40 +300,39 @@ where
             }
         }
         let tot_db_cell = RefCell::from(&mut self.tot_db);
-        let (mut obj_encs, fence_data): (Vec<_>, _) = self
-            .encodings
-            .iter()
-            .map(|enc| {
-                let (mut enc, offset) = match enc.as_ref() {
-                    Some(enc) => (
-                        ObjEncoding::<_, card::DefIncUpperBounding>::Weighted(
-                            GteCell::new(enc.root, enc.max_leaf_weight, &tot_db_cell),
-                            enc.offset,
-                        ),
+        let mut obj_encs = Vec::with_capacity(self.encodings.len());
+        let mut fence_data = Vec::with_capacity(self.encodings.len());
+        for enc in &self.encodings {
+            let (mut enc, offset) = match enc.as_ref() {
+                Some(enc) => (
+                    ObjEncoding::<_, card::DefIncUpperBounding>::Weighted(
+                        GteCell::new(enc.root, enc.max_leaf_weight, &tot_db_cell),
                         enc.offset,
                     ),
-                    None => (ObjEncoding::Constant, 0),
-                };
-                enc.encode_ub_change(
-                    offset..offset + 1,
-                    &mut self.kernel.oracle,
-                    &mut self.kernel.var_manager,
-                );
-                let assumps = enc.enforce_ub(offset).unwrap();
-                let assump = if assumps.is_empty() {
-                    None
-                } else if 1 == assumps.len() {
-                    Some(assumps[0])
-                } else {
-                    let mut and_impl = Cnf::new();
-                    let and_lit = self.kernel.var_manager.new_var().pos_lit();
-                    and_impl.add_lit_impl_cube(and_lit, &assumps);
-                    self.kernel.oracle.add_cnf(and_impl).unwrap();
-                    Some(and_lit)
-                };
-                (enc, (offset, assump))
-            })
-            .unzip();
+                    enc.offset,
+                ),
+                None => (ObjEncoding::Constant, 0),
+            };
+            enc.encode_ub_change(
+                offset..offset + 1,
+                &mut self.kernel.oracle,
+                &mut self.kernel.var_manager,
+            )?;
+            let assumps = enc.enforce_ub(offset).unwrap();
+            let assump = if assumps.is_empty() {
+                None
+            } else if 1 == assumps.len() {
+                Some(assumps[0])
+            } else {
+                let mut and_impl = Cnf::new();
+                let and_lit = self.kernel.var_manager.new_var().pos_lit();
+                and_impl.add_lit_impl_cube(and_lit, &assumps);
+                self.kernel.oracle.add_cnf(and_impl).unwrap();
+                Some(and_lit)
+            };
+            obj_encs.push(enc);
+            fence_data.push((offset, assump));
+        }
         let mut fence = Fence { data: fence_data };
 
         let mut assumps = Vec::from(base_assumps);
@@ -366,7 +370,7 @@ where
                     }
                     if core.is_empty() {
                         self.kernel.log_routine_end()?;
-                        return Ok(());
+                        return Done(());
                     }
                     #[cfg(debug_assertions)]
                     let old_fence = fence.bounds();
@@ -396,48 +400,40 @@ where
         &mut self,
         points: &[&[usize]],
         rebase_encodings: bool,
-    ) -> Result<(), Termination> {
+    ) -> MaybeTerminatedError {
         for &cost in points {
-            let clause = cost
-                .iter()
-                .enumerate()
-                .filter_map(|(obj_idx, &cost)| {
-                    if matches!(self.kernel.objs[obj_idx], Objective::Constant { .. }) {
-                        debug_assert_eq!(cost, 0);
-                        return None;
-                    }
-                    let reform = &self.reforms[obj_idx];
-                    if cost <= reform.offset {
-                        // if reformulation has derived this lower bound, no
-                        // solutions will ever be <= cost and this literal can
-                        // be dropped from the clause
-                        return None;
-                    }
-                    if self.encodings[obj_idx].is_none() {
-                        match self.build_obj_encoding(obj_idx, rebase_encodings) {
-                            Ok(enc) => self.encodings[obj_idx] = Some(enc),
-                            Err(term) => return Some(Err(term)),
-                        }
-                    }
-                    let units = match self.bound_objective(obj_idx, cost - 1, rebase_encodings) {
-                        Ok(units) => units,
-                        Err(term) => return Some(Err(term)),
-                    };
-                    debug_assert!(!units.is_empty());
-                    if units.len() == 1 {
-                        Some(Ok(units[0]))
-                    } else {
-                        let and_lit = self.kernel.var_manager.new_var().pos_lit();
-                        self.kernel
-                            .oracle
-                            .extend(atomics::lit_impl_cube(and_lit, &units));
-                        Some(Ok(and_lit))
-                    }
-                })
-                .collect::<Result<Clause, Termination>>()?;
+            let mut clause = Clause::with_capacity(cost.len());
+            for (obj_idx, &cost) in cost.iter().enumerate() {
+                if matches!(self.kernel.objs[obj_idx], Objective::Constant { .. }) {
+                    debug_assert_eq!(cost, 0);
+                    continue;
+                }
+                let reform = &self.reforms[obj_idx];
+                if cost <= reform.offset {
+                    // if reformulation has derived this lower bound, no
+                    // solutions will ever be <= cost and this literal can
+                    // be dropped from the clause
+                    continue;
+                }
+                if self.encodings[obj_idx].is_none() {
+                    self.encodings[obj_idx] =
+                        Some(self.build_obj_encoding(obj_idx, rebase_encodings)?);
+                }
+                let units = self.bound_objective(obj_idx, cost - 1, rebase_encodings)?;
+                debug_assert!(!units.is_empty());
+                if units.len() == 1 {
+                    clause.add(units[0])
+                } else {
+                    let and_lit = self.kernel.var_manager.new_var().pos_lit();
+                    self.kernel
+                        .oracle
+                        .extend(atomics::lit_impl_cube(and_lit, &units));
+                    clause.add(and_lit)
+                }
+            }
             self.kernel.oracle.add_clause(clause)?;
         }
-        Ok(())
+        Done(())
     }
 
     /// Bounds an objective at `<= bound`
@@ -446,14 +442,16 @@ where
         obj_idx: usize,
         bound: usize,
         rebase_encodings: bool,
-    ) -> Result<Vec<Lit>, Termination> {
+    ) -> MaybeTerminatedError<Vec<Lit>> {
         debug_assert!(bound >= self.reforms[obj_idx].offset);
         if bound == self.reforms[obj_idx].offset {
-            return Ok(self.reforms[obj_idx]
-                .inactives
-                .iter()
-                .map(|(&l, _)| !l)
-                .collect());
+            return Done(
+                self.reforms[obj_idx]
+                    .inactives
+                    .iter()
+                    .map(|(&l, _)| !l)
+                    .collect(),
+            );
         }
         if self.encodings[obj_idx].is_none() {
             self.encodings[obj_idx] = Some(self.build_obj_encoding(obj_idx, rebase_encodings)?);
@@ -473,11 +471,11 @@ where
                         val,
                         &mut self.kernel.oracle,
                         &mut self.kernel.var_manager,
-                    )
+                    )?
                     .unwrap(),
             )
         }
-        Ok(assumps)
+        Done(assumps)
     }
 
     /// Merges the current OLL reformulation into a GTE. If `rebase` is true,
@@ -487,7 +485,7 @@ where
         &mut self,
         obj_idx: usize,
         rebase: bool,
-    ) -> Result<ObjEncData, Termination> {
+    ) -> MaybeTerminatedError<ObjEncData> {
         self.kernel.log_routine_start("build-encoding")?;
         let reform = &self.reforms[obj_idx];
         let mut cons = vec![];
@@ -552,7 +550,7 @@ where
                 seg.sort_unstable_by_key(|&con| self.tot_db.con_len(con));
                 let con = self.tot_db.merge_balanced(&seg);
                 debug_assert_eq!(con.multiplier(), 1);
-                merged_cons.push(con.reweight(cons[seg_begin].multiplier().try_into().unwrap()));
+                merged_cons.push(con.reweight(cons[seg_begin].multiplier()));
             } else {
                 merged_cons.push(cons[seg_begin])
             }
@@ -571,21 +569,21 @@ where
             first_node,
         };
         self.kernel.log_routine_end()?;
-        Ok(enc)
+        Done(enc)
     }
 
     /// Resets the oracle
-    fn reset_oracle(&mut self) -> Result<(), Termination> {
+    fn reset_oracle(&mut self) -> MaybeTerminatedError {
         debug_assert!(self.kernel.orig_cnf.is_some());
         self.kernel.reset_oracle(true)?;
         self.tot_db.reset_vars();
         self.kernel.check_termination()?;
-        Ok(())
+        Done(())
     }
 
     /// Rebuilds all existing objective encodings. If `clean` is set, does so by
     /// restarting the oracle. Returns `true` if the oracle was restarted.
-    fn rebuild_obj_encodings(&mut self, clean: bool, rebase: bool) -> Result<bool, Termination> {
+    fn rebuild_obj_encodings(&mut self, clean: bool, rebase: bool) -> MaybeTerminatedError<bool> {
         self.kernel.log_routine_start("rebuilding encodings")?;
         debug_assert!(!clean || self.kernel.orig_cnf.is_some());
         if clean {
@@ -599,7 +597,7 @@ where
                 .collect();
             if encs.is_empty() {
                 self.kernel.log_routine_end()?;
-                return Ok(false);
+                return Done(false);
             }
             encs.sort_unstable_by_key(|e| e.first_node);
             for enc in encs.iter().rev() {
@@ -618,7 +616,7 @@ where
             // between), so we can do this once here rather than in the loop.
             for reform in &mut self.reforms {
                 let outputs = reform.outputs.clone();
-                let inactives = reform.inactives.clone().as_map();
+                let inactives = reform.inactives.clone().into_map();
                 reform.outputs.clear();
                 reform.inactives.retain(|lit, _| !outputs.contains_key(lit));
                 for (
@@ -640,7 +638,7 @@ where
                         oidx,
                         &mut self.kernel.oracle,
                         &mut self.kernel.var_manager,
-                    );
+                    )?;
                     // Update output map
                     reform.outputs.insert(
                         olit,
@@ -664,13 +662,14 @@ where
             self.kernel.check_termination()?;
         }
         self.kernel.log_routine_end()?;
-        Ok(clean)
+        Done(clean)
     }
 
-    fn inpro_and_reset(&mut self, techniques: &str) -> Result<(), Termination> {
-        if !self.kernel.opts.store_cnf {
-            return Err(Termination::ResetWithoutCnf);
-        }
+    fn inpro_and_reset(&mut self, techniques: &str) -> MaybeTerminatedError {
+        ensure!(
+            self.kernel.opts.store_cnf,
+            "cannot reset oracle without having stored the CNF"
+        );
         // Reset oracle
         self.kernel.oracle = O::default();
         #[cfg(feature = "interrupt-oracle")]
@@ -686,55 +685,43 @@ where
             .iter()
             .map(|reform| reform.outputs.clone())
             .collect();
-        let objs: Vec<(Vec<_>, isize)> = self
-            .reforms
-            .iter()
-            .enumerate()
-            .map(|(obj_idx, reform)| {
-                (
-                    reform
-                        .inactives
-                        .iter()
-                        .flat_map(|(lit, weight)| {
-                            let lits: Vec<_> = if let Some(TotOutput {
-                                root,
-                                oidx,
-                                tot_weight,
-                            }) = reform.outputs.get(lit)
-                            {
-                                (*oidx..self.tot_db[*root].len())
-                                    .map(|idx| {
-                                        let olit = self.tot_db.define_pos_tot(
-                                            *root,
-                                            idx,
-                                            &mut orig_cnf,
-                                            &mut self.kernel.var_manager,
-                                        );
-                                        if idx == *oidx {
-                                            (clause![!olit], *weight)
-                                        } else {
-                                            all_outputs[obj_idx].insert(
-                                                olit,
-                                                TotOutput {
-                                                    root: *root,
-                                                    oidx: idx,
-                                                    tot_weight: *tot_weight,
-                                                },
-                                            );
-                                            (clause![!olit], *tot_weight)
-                                        }
-                                    })
-                                    .collect()
-                            } else {
-                                (0..1).map(|_| (clause![!*lit], *weight)).collect()
-                            };
-                            lits.into_iter()
-                        })
-                        .collect(),
-                    0,
-                )
-            })
-            .collect();
+        let mut objs = Vec::with_capacity(self.reforms.len());
+        for (obj_idx, reform) in self.reforms.iter().enumerate() {
+            let mut softs = Vec::with_capacity(reform.inactives.len());
+            for (lit, weight) in reform.inactives.iter() {
+                if let Some(TotOutput {
+                    root,
+                    oidx,
+                    tot_weight,
+                }) = reform.outputs.get(lit)
+                {
+                    for idx in *oidx..self.tot_db[*root].len() {
+                        let olit = self.tot_db.define_pos_tot(
+                            *root,
+                            idx,
+                            &mut orig_cnf,
+                            &mut self.kernel.var_manager,
+                        )?;
+                        if idx == *oidx {
+                            softs.push((clause![!olit], *weight));
+                        } else {
+                            all_outputs[obj_idx].insert(
+                                olit,
+                                TotOutput {
+                                    root: *root,
+                                    oidx: idx,
+                                    tot_weight: *tot_weight,
+                                },
+                            );
+                            softs.push((clause![!olit], *tot_weight));
+                        }
+                    }
+                } else {
+                    softs.push((clause![!*lit], *weight));
+                }
+            }
+            objs.push((softs, 0));
+        }
         // Inprocess
         self.kernel.log_routine_start("inprocessing")?;
         let cls_before = orig_cnf.len() + objs.iter().fold(0, |cnt, (obj, _)| cnt + obj.len());
@@ -866,8 +853,7 @@ where
                     seg.sort_unstable_by_key(|&con| self.tot_db.con_len(con));
                     let con = self.tot_db.merge_balanced(&seg);
                     debug_assert_eq!(con.multiplier(), 1);
-                    merged_cons
-                        .push(con.reweight(cons[seg_begin].multiplier().try_into().unwrap()));
+                    merged_cons.push(con.reweight(cons[seg_begin].multiplier()));
                 } else {
                     merged_cons.push(cons[seg_begin])
                 }
@@ -887,11 +873,11 @@ where
             });
             self.kernel.log_routine_end()?;
         }
-        Ok(())
+        Done(())
     }
 
     #[cfg(feature = "data-helpers")]
-    fn enc_clauses_summary(&mut self) -> Result<(), Termination> {
+    fn enc_clauses_summary(&mut self) -> MaybeTerminatedError {
         self.kernel.solve()?;
         self.tot_db.reset_encoded();
         let db_bak = self.tot_db.clone();
@@ -926,12 +912,12 @@ where
 
         // Merging
         let mut cnf = Cnf::new();
-        for oidx in 0..self.kernel.stats.n_objs {
+        for (oidx, &cst) in cost.iter().enumerate() {
             if matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
                 continue;
             }
             let enc = self.build_obj_encoding(oidx, false)?;
-            let bound = cost[oidx] - enc.offset;
+            let bound = cst - enc.offset;
             for val in self.tot_db[enc.root.id].vals(
                 enc.root.rev_map_round_up(bound + 1)
                     ..=enc.root.rev_map(bound + enc.max_leaf_weight),
@@ -948,12 +934,12 @@ where
 
         // No merging
         let mut cnf = Cnf::new();
-        for oidx in 0..self.kernel.stats.n_objs {
+        for (oidx, &cst) in cost.iter().enumerate() {
             if matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
                 continue;
             }
             let enc = self.build_obj_encoding(oidx, true)?;
-            let bound = cost[oidx] - enc.offset;
+            let bound = cst - enc.offset;
             for val in self.tot_db[enc.root.id].vals(
                 enc.root.rev_map_round_up(bound + 1)
                     ..=enc.root.rev_map(bound + enc.max_leaf_weight),
@@ -972,19 +958,19 @@ where
 
         // No core boosting
         let mut cnf = Cnf::new();
-        for oidx in 0..self.kernel.stats.n_objs {
+        for (oidx, &cst) in cost.iter().enumerate() {
             if matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
                 continue;
             }
             let mut enc = rustsat::encodings::pb::DbGte::from_iter(self.kernel.objs[oidx].iter());
-            let bound = cost[oidx];
-            enc.encode_ub(bound..=bound, &mut cnf, &mut self.kernel.var_manager);
+            let bound = cst;
+            enc.encode_ub(bound..=bound, &mut cnf, &mut self.kernel.var_manager)?;
         }
         self.kernel.log_message(&format!(
             "encoding clauses without core boosting: n={}",
             cnf.len()
         ))?;
 
-        Ok(())
+        Done(())
     }
 }

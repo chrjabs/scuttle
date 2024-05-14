@@ -14,7 +14,7 @@ use rustsat::{
 };
 use scuttle_proc::oracle_bounds;
 
-use crate::Termination;
+use crate::MaybeTerminatedError::{self, Done};
 
 use super::{Objective, SolverKernel};
 
@@ -43,6 +43,22 @@ impl Inactives {
 
     pub fn assumps(&self) -> impl Iterator<Item = Lit> + '_ {
         self.iter().map(|(&l, _)| !l)
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Inactives::Weighted(map) => map.len(),
+            Inactives::Unweighted { lits, .. } => lits.len(),
+            Inactives::Constant => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Inactives::Weighted(map) => map.is_empty(),
+            Inactives::Unweighted { lits, .. } => lits.is_empty(),
+            Inactives::Constant => true,
+        }
     }
 
     pub fn final_cleanup(&mut self) {
@@ -100,7 +116,7 @@ impl Inactives {
         }
     }
 
-    pub fn convert_to_map(mut self) -> RsHashMap<Lit, usize> {
+    pub fn into_map(mut self) -> RsHashMap<Lit, usize> {
         self.cleanup();
         match self {
             Inactives::Weighted(map) => map,
@@ -214,15 +230,15 @@ where
         reform: &mut OllReformulation,
         base_assumps: &[Lit],
         tot_db: &mut TotDb,
-    ) -> Result<Option<Assignment>, Termination> {
+    ) -> MaybeTerminatedError<Option<Assignment>> {
         if matches!(reform.inactives, Inactives::Constant) {
             match self.solve_assumps(base_assumps)? {
                 Sat => {
-                    return Ok(Some(
+                    return Done(Some(
                         self.oracle.solution(self.var_manager.max_var().unwrap())?,
                     ))
                 }
-                Unsat => return Ok(None),
+                Unsat => return Done(None),
                 Interrupted => unreachable!(),
             }
         }
@@ -265,7 +281,7 @@ where
                         let sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
                         reform.inactives.final_cleanup();
                         self.log_routine_end()?;
-                        return Ok(Some(sol));
+                        return Done(Some(sol));
                     }
                     // TODO: maybe get solution and do hardening
                     // Reformulate cores
@@ -283,8 +299,12 @@ where
                             }
                         }
                         if oidx < tot_db[root].len() {
-                            let olit =
-                                tot_db.define_pos_tot(root, oidx, &mut encs, &mut self.var_manager);
+                            let olit = tot_db.define_pos_tot(
+                                root,
+                                oidx,
+                                &mut encs,
+                                &mut self.var_manager,
+                            )?;
                             reform.inactives.insert(olit, weight);
                             reform.outputs.insert(
                                 olit,
@@ -324,7 +344,7 @@ where
                     if core.is_empty() {
                         // unsat
                         self.log_routine_end()?;
-                        return Ok(None);
+                        return Done(None);
                     }
                     let orig_len = core.len();
                     core = self.minimize_core(core, base_assumps)?;
@@ -367,7 +387,7 @@ where
                                 oidx + 1,
                                 &mut encs,
                                 &mut self.var_manager,
-                            );
+                            )?;
                             reform.inactives.insert(new_olit, tot_weight);
                             reform.outputs.insert(
                                 new_olit,
@@ -405,9 +425,9 @@ where
         root: NodeId,
         base_assumps: &[Lit],
         tot_db: &mut TotDb,
-    ) -> Result<usize, Termination> {
+    ) -> MaybeTerminatedError<usize> {
         if !self.opts.core_exhaustion {
-            return Ok(1);
+            return Done(1);
         }
 
         self.log_routine_start("core-exhaustion")?;
@@ -418,7 +438,8 @@ where
         let mut bound = 1;
         let core_len = tot_db[root].len();
         while bound < core_len {
-            let olit = tot_db.define_pos_tot(root, bound, &mut self.oracle, &mut self.var_manager);
+            let olit =
+                tot_db.define_pos_tot(root, bound, &mut self.oracle, &mut self.var_manager)?;
             #[cfg(feature = "limit-conflicts")]
             self.oracle.limit_conflicts(Some(50000))?;
             assumps[base_assumps.len()] = !olit;
@@ -432,7 +453,7 @@ where
         #[cfg(feature = "limit-conflicts")]
         self.oracle.limit_conflicts(None)?;
         self.log_routine_end()?;
-        Ok(bound)
+        Done(bound)
     }
 
     /// Minimizes a core
@@ -440,12 +461,12 @@ where
         &mut self,
         mut core: Vec<Lit>,
         base_assumps: &[Lit],
-    ) -> Result<Vec<Lit>, Termination> {
+    ) -> MaybeTerminatedError<Vec<Lit>> {
         if !self.opts.core_minimization {
-            return Ok(core);
+            return Done(core);
         }
         if core.len() <= 1 {
-            return Ok(core);
+            return Done(core);
         }
 
         self.log_routine_start("core-minimization")?;
@@ -493,7 +514,7 @@ where
         #[cfg(feature = "limit-conflicts")]
         self.oracle.limit_conflicts(None)?;
         self.log_routine_end()?;
-        Ok(core)
+        Done(core)
     }
 
     /// Trims a core
@@ -501,12 +522,12 @@ where
         &mut self,
         mut core: Vec<Lit>,
         base_assumps: &[Lit],
-    ) -> Result<Vec<Lit>, Termination> {
+    ) -> MaybeTerminatedError<Vec<Lit>> {
         if !self.opts.core_trimming {
-            return Ok(core);
+            return Done(core);
         }
         if core.len() <= 1 {
-            return Ok(core);
+            return Done(core);
         }
 
         self.log_routine_start("core-trimming")?;
@@ -543,6 +564,6 @@ where
 
         self.log_routine_end()?;
 
-        Ok(core)
+        Done(core)
     }
 }

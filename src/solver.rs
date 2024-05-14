@@ -4,23 +4,32 @@ use std::{
     ops::{Not, Range},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
 
-use maxpre::{MaxPre, PreproClauses};
+#[cfg(feature = "interrupt-oracle")]
+use std::sync::Mutex;
+
+use anyhow::Context;
+use maxpre::MaxPre;
 use rustsat::{
     encodings::{card, pb, CollectClauses},
     instances::{Cnf, ManageVars, MultiOptInstance},
-    solvers::{FreezeVar, SolveIncremental, SolveStats, SolverResult, SolverStats},
+    solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
 };
 use scuttle_proc::oracle_bounds;
 
+#[cfg(feature = "sol-tightening")]
+use maxpre::PreproClauses;
+
 use crate::{
     options::{CoreBoostingOptions, EnumOptions},
     types::{NonDomPoint, ParetoFront},
-    EncodingStats, KernelOptions, Limits, Phase, Stats, Termination, WriteSolverLog,
+    EncodingStats, KernelOptions, Limits, MaybeTerminated,
+    MaybeTerminatedError::{self, Done, Error, Terminated},
+    Phase, Stats, Termination, WriteSolverLog,
 };
 
 pub mod bioptsat;
@@ -34,9 +43,9 @@ mod coreguided;
 
 /// Solving interface for each algorithm
 pub trait Solve: KernelFunctions {
-    /// Solves the instance under given limits. If not fully solved, errors an
+    /// Solves the instance under given limits. If not fully solved, returns an
     /// early termination reason.
-    fn solve(&mut self, limits: Limits) -> Result<bool, Termination>;
+    fn solve(&mut self, limits: Limits) -> MaybeTerminatedError;
     /// Gets all statistics from the solver
     fn all_stats(&self) -> (Stats, Option<SolverStats>, Option<Vec<EncodingStats>>);
 }
@@ -44,7 +53,7 @@ pub trait Solve: KernelFunctions {
 /// Core boosting interface
 pub trait CoreBoost {
     /// Performs core boosting. Returns false if instance is unsat.    
-    fn core_boost(&mut self, opts: CoreBoostingOptions) -> Result<bool, Termination>;
+    fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool>;
 }
 
 /// Shared functionality provided by the [`SolverKernel`]
@@ -92,6 +101,7 @@ struct SolverKernel<VM, O, BCG> {
     oracle: O,
     /// The variable manager keeping track of variables
     var_manager: VM,
+    #[cfg(feature = "sol-tightening")]
     /// Objective literal data
     obj_lit_data: RsHashMap<Lit, ObjLitData>,
     /// The maximum variable in the instance
@@ -134,11 +144,20 @@ where
         mut oracle: O,
         bcg: BCG,
         opts: KernelOptions,
-    ) -> Result<Self, Termination> {
-        let (mut constr, objs) = inst.decompose();
-        let max_inst_var = constr.var_manager().max_var().unwrap();
-        let (cnf, mut var_manager) = constr.as_cnf();
+    ) -> anyhow::Result<Self> {
+        let (constr, objs) = inst.decompose();
+        anyhow::ensure!(constr.max_var().is_some(), "instance contains no variables");
+        let max_inst_var = constr.max_var().unwrap();
+        let (cnf, mut var_manager) = constr.into_cnf();
+        #[cfg(feature = "sol-tightening")]
         let mut stats = Stats {
+            n_objs: objs.len(),
+            n_real_objs: objs.len(),
+            n_orig_clauses: cnf.len(),
+            ..Default::default()
+        };
+        #[cfg(not(feature = "sol-tightening"))]
+        let stats = Stats {
             n_objs: objs.len(),
             n_real_objs: objs.len(),
             n_orig_clauses: cnf.len(),
@@ -152,32 +171,36 @@ where
             .map(|obj| absorb_objective(obj, &mut obj_cnf, &mut blits, &mut var_manager))
             .collect();
         // Record objective literal occurrences
-        let mut obj_lit_data: RsHashMap<_, ObjLitData> = RsHashMap::default();
-        for (idx, obj) in objs.iter().enumerate() {
-            match obj {
-                Objective::Weighted { lits, .. } => {
-                    for &olit in lits.keys() {
-                        match obj_lit_data.get_mut(&olit) {
-                            Some(data) => data.objs.push(idx),
-                            None => {
-                                obj_lit_data.insert(olit, ObjLitData { objs: vec![idx] });
+        #[cfg(feature = "sol-tightening")]
+        let obj_lit_data = {
+            let mut obj_lit_data: RsHashMap<_, ObjLitData> = RsHashMap::default();
+            for (idx, obj) in objs.iter().enumerate() {
+                match obj {
+                    Objective::Weighted { lits, .. } => {
+                        for &olit in lits.keys() {
+                            match obj_lit_data.get_mut(&olit) {
+                                Some(data) => data.objs.push(idx),
+                                None => {
+                                    obj_lit_data.insert(olit, ObjLitData { objs: vec![idx] });
+                                }
                             }
                         }
                     }
-                }
-                Objective::Unweighted { lits, .. } => {
-                    for &olit in lits {
-                        match obj_lit_data.get_mut(&olit) {
-                            Some(data) => data.objs.push(idx),
-                            None => {
-                                obj_lit_data.insert(olit, ObjLitData { objs: vec![idx] });
+                    Objective::Unweighted { lits, .. } => {
+                        for &olit in lits {
+                            match obj_lit_data.get_mut(&olit) {
+                                Some(data) => data.objs.push(idx),
+                                None => {
+                                    obj_lit_data.insert(olit, ObjLitData { objs: vec![idx] });
+                                }
                             }
                         }
                     }
+                    Objective::Constant { .. } => stats.n_real_objs -= 1,
                 }
-                Objective::Constant { .. } => stats.n_real_objs -= 1,
             }
-        }
+            obj_lit_data
+        };
         // Store original clauses, if needed
         let orig_cnf = if opts.store_cnf {
             let mut orig_cnf = cnf.clone();
@@ -187,9 +210,6 @@ where
             None
         };
         // Add hard clauses and relaxed soft clauses to oracle
-        if var_manager.max_var().is_none() {
-            return Err(Termination::NoVars);
-        }
         oracle.reserve(var_manager.max_var().unwrap())?;
         oracle.add_cnf(cnf)?;
         oracle.add_cnf(obj_cnf)?;
@@ -206,6 +226,7 @@ where
         Ok(Self {
             oracle,
             var_manager,
+            #[cfg(feature = "sol-tightening")]
             obj_lit_data,
             max_inst_var,
             max_orig_var,
@@ -314,121 +335,128 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     }
 
     /// Checks the termination flag and terminates if appropriate
-    fn check_termination(&self) -> Result<(), Termination> {
+    fn check_termination(&self) -> MaybeTerminated {
         if self.term_flag.load(Ordering::Relaxed) {
-            Err(Termination::Interrupted)
+            MaybeTerminated::Terminated(Termination::Interrupted)
         } else {
-            Ok(())
+            MaybeTerminated::Done(())
         }
     }
 
     /// Logs a cost point candidate. Can error a termination if the candidates limit is reached.
-    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> Result<(), Termination> {
+    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> MaybeTerminatedError {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.stats.n_candidates += 1;
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_candidate(costs, phase)?;
+            logger
+                .log_candidate(costs, phase)
+                .context("logger failed")?;
         }
         // Update limit and check termination
         if let Some(candidates) = &mut self.lims.candidates {
             *candidates -= 1;
             if *candidates == 0 {
-                return Err(Termination::CandidatesLimit);
+                return Terminated(Termination::CandidatesLimit);
             }
         }
-        Ok(())
+        Done(())
     }
 
     /// Logs an oracle call. Can return a termination if the oracle call limit is reached.
-    fn log_oracle_call(&mut self, result: SolverResult) -> Result<(), Termination> {
+    fn log_oracle_call(&mut self, result: SolverResult) -> MaybeTerminatedError {
         self.stats.n_oracle_calls += 1;
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_oracle_call(result)?;
+            logger.log_oracle_call(result).context("logger failed")?;
         }
         // Update limit and check termination
         if let Some(oracle_calls) = &mut self.lims.oracle_calls {
             *oracle_calls -= 1;
             if *oracle_calls == 0 {
-                return Err(Termination::OracleCallsLimit);
+                return Terminated(Termination::OracleCallsLimit);
             }
         }
-        Ok(())
+        Done(())
     }
 
     /// Logs a solution. Can return a termination if the solution limit is reached.
-    fn log_solution(&mut self) -> Result<(), Termination> {
+    fn log_solution(&mut self) -> MaybeTerminatedError {
         self.stats.n_solutions += 1;
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_solution()?;
+            logger.log_solution().context("logger failed")?;
         }
         // Update limit and check termination
         if let Some(solutions) = &mut self.lims.sols {
             *solutions -= 1;
             if *solutions == 0 {
-                return Err(Termination::SolsLimit);
+                return Terminated(Termination::SolsLimit);
             }
         }
-        Ok(())
+        Done(())
     }
 
     /// Logs a non-dominated point. Can return a termination if the non-dominated point limit is reached.
-    fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> Result<(), Termination> {
+    fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> MaybeTerminatedError {
         self.stats.n_non_dominated += 1;
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_non_dominated(non_dominated)?;
+            logger
+                .log_non_dominated(non_dominated)
+                .context("logger failed")?;
         }
         // Update limit and check termination
         if let Some(pps) = &mut self.lims.pps {
             *pps -= 1;
             if *pps == 0 {
-                return Err(Termination::PPLimit);
+                return Terminated(Termination::PPLimit);
             }
         }
-        Ok(())
+        Done(())
     }
 
+    #[cfg(feature = "sol-tightening")]
     /// Logs a heuristic objective improvement. Can return a logger error.
     fn log_heuristic_obj_improvement(
         &mut self,
         obj_idx: usize,
         apparent_cost: usize,
         improved_cost: usize,
-    ) -> Result<(), Termination> {
+    ) -> anyhow::Result<()> {
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_heuristic_obj_improvement(obj_idx, apparent_cost, improved_cost)?;
+            logger
+                .log_heuristic_obj_improvement(obj_idx, apparent_cost, improved_cost)
+                .context("logger failed")?;
         }
         Ok(())
     }
 
     /// Logs a routine start
-    fn log_routine_start(&mut self, desc: &'static str) -> Result<(), Termination> {
+    fn log_routine_start(&mut self, desc: &'static str) -> anyhow::Result<()> {
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_routine_start(desc)?;
+            logger.log_routine_start(desc).context("logger failed")?;
         }
         Ok(())
     }
 
     /// Logs a routine end
-    fn log_routine_end(&mut self) -> Result<(), Termination> {
+    fn log_routine_end(&mut self) -> anyhow::Result<()> {
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_routine_end()?;
+            logger.log_routine_end().context("logger failed")?;
         }
         Ok(())
     }
 
     #[cfg(all(feature = "div-con", feature = "data-helpers"))]
     /// Logs a string message
-    fn log_message(&mut self, msg: &str) -> Result<(), Termination> {
+    fn log_message(&mut self, msg: &str) -> anyhow::Result<()> {
         // Dispatch to logger
         if let Some(logger) = &mut self.logger {
-            logger.log_message(msg)?;
+            logger.log_message(msg).context("logger failed")?;
         }
         Ok(())
     }
@@ -469,7 +497,7 @@ where
         obj_idx: usize,
         sol: &mut Assignment,
         mut tightening: bool,
-    ) -> Result<usize, Termination> {
+    ) -> anyhow::Result<usize> {
         debug_assert!(obj_idx < self.stats.n_objs);
         let mut reduction = 0;
         // TODO: iterate over objective literals by weight
@@ -527,7 +555,7 @@ where
         obj_idx: usize,
         sol: &mut Assignment,
         _tightening: bool,
-    ) -> Result<usize, Termination> {
+    ) -> anyhow::Result<usize> {
         debug_assert!(obj_idx < self.stats.n_objs);
         let mut cost = 0;
         for (l, w) in self.objs[obj_idx].iter() {
@@ -548,7 +576,7 @@ where
 {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
-    fn phase_solution(&mut self, solution: Assignment) -> Result<(), Termination> {
+    fn phase_solution(&mut self, solution: Assignment) -> anyhow::Result<()> {
         if !self.opts.solution_guided_search {
             return Ok(());
         }
@@ -560,7 +588,7 @@ where
 
     /// If solution-guided search is turned on, unphases every variable in the
     /// solver
-    fn unphase_solution(&mut self) -> Result<(), Termination> {
+    fn unphase_solution(&mut self) -> anyhow::Result<()> {
         if !self.opts.solution_guided_search {
             return Ok(());
         }
@@ -575,13 +603,13 @@ where
 impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
-    fn phase_solution(&mut self, _solution: Assignment) -> Result<(), Termination> {
+    fn phase_solution(&mut self, _solution: Assignment) -> anyhow::Result<()> {
         Ok(())
     }
 
     /// If solution-guided search is turned on, unphases every variable in the
     /// solver
-    fn unphase_solution(&mut self) -> Result<(), Termination> {
+    fn unphase_solution(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -590,7 +618,7 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
 impl<VM, O, BCG> SolverKernel<VM, O, BCG>
 where
     VM: ManageVars,
-    O: SolveIncremental + FreezeVar,
+    O: SolveIncremental,
     BCG: FnMut(Assignment) -> Clause,
 {
     /// Yields Pareto-optimal solutions. The given assumptions must only allow
@@ -602,7 +630,7 @@ where
         assumps: &[Lit],
         mut solution: Assignment,
         collector: &mut Col,
-    ) -> Result<(), Termination> {
+    ) -> MaybeTerminatedError {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.log_routine_start("yield solutions")?;
         self.unphase_solution()?;
@@ -626,12 +654,18 @@ where
 
             non_dominated.add_sol(solution.clone());
             match self.log_solution() {
-                Ok(_) => (),
-                Err(term) => {
-                    let pp_term = self.log_non_dominated(&non_dominated);
+                Done(_) => (),
+                Terminated(term) => {
+                    let nd_term = self.log_non_dominated(&non_dominated);
                     collector.extend([non_dominated]);
-                    pp_term?;
-                    return Err(term);
+                    nd_term?;
+                    return Terminated(term);
+                }
+                Error(err) => {
+                    let nd_term = self.log_non_dominated(&non_dominated);
+                    collector.extend([non_dominated]);
+                    nd_term?;
+                    return Error(err);
                 }
             }
             if match self.opts.enumeration {
@@ -688,7 +722,7 @@ where
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
         collector: &mut Col,
-    ) -> Result<Option<usize>, Termination>
+    ) -> MaybeTerminatedError<Option<usize>>
     where
         PBE: pb::BoundUpperIncremental,
         CE: card::BoundUpperIncremental,
@@ -700,7 +734,7 @@ where
             res
         } else {
             // nothing to yield
-            return Ok(None);
+            return Done(None);
         };
         let costs: Vec<_> = (0..self.stats.n_objs)
             .map(|idx| {
@@ -711,10 +745,10 @@ where
         debug_assert_eq!(costs[obj_idx], cost);
         // bound obj
         let mut assumps = Vec::from(base_assumps);
-        encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager);
+        encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager)?;
         assumps.extend(encoding.enforce_ub(cost).unwrap());
         self.yield_solutions(costs, &assumps, sol, collector)?;
-        Ok(Some(cost))
+        Done(Some(cost))
     }
 }
 
@@ -730,7 +764,7 @@ where
     fn get_solution_and_internal_costs(
         &mut self,
         tightening: bool,
-    ) -> Result<(Vec<usize>, Assignment), Termination> {
+    ) -> anyhow::Result<(Vec<usize>, Assignment)> {
         let mut sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
         let costs = (0..self.objs.len())
             .map(|idx| self.get_cost_with_heuristic_improvements(idx, &mut sol, tightening))
@@ -747,7 +781,7 @@ where
         base_assumps: &[Lit],
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
-    ) -> Result<Option<(usize, Assignment)>, Termination>
+    ) -> MaybeTerminatedError<Option<(usize, Assignment)>>
     where
         PBE: pb::BoundUpperIncremental,
         CE: card::BoundUpperIncremental,
@@ -763,7 +797,7 @@ where
             let res = self.solve_assumps(&assumps)?;
             if res == SolverResult::Unsat {
                 self.log_routine_end()?;
-                return Ok(None);
+                return Done(None);
             }
             let mut sol = self.oracle.solution(self.max_inst_var)?;
             let cost = self.get_cost_with_heuristic_improvements(obj_idx, &mut sol, true)?;
@@ -780,7 +814,7 @@ where
                 cost - 1
             };
             assumps.drain(base_assumps.len()..);
-            encoding.encode_ub_change(bound..bound + 1, &mut self.oracle, &mut self.var_manager);
+            encoding.encode_ub_change(bound..bound + 1, &mut self.oracle, &mut self.var_manager)?;
             assumps.extend(encoding.enforce_ub(bound).unwrap());
             match self.solve_assumps(&assumps)? {
                 SolverResult::Sat => {
@@ -799,7 +833,7 @@ where
                     cost = new_cost;
                     if cost == lower_bound {
                         self.log_routine_end()?;
-                        return Ok(Some((cost, sol.unwrap())));
+                        return Done(Some((cost, sol.unwrap())));
                     }
                 }
                 SolverResult::Unsat => {
@@ -810,19 +844,19 @@ where
                     }
                     break;
                 }
-                _ => panic!(),
+                _ => unreachable!(),
             }
         }
         // make sure to have a solution
         if sol.is_none() {
-            encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager);
+            encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager)?;
             assumps.extend(encoding.enforce_ub(cost).unwrap());
             let res = self.solve_assumps(&assumps)?;
             debug_assert_eq!(res, SolverResult::Sat);
             sol = Some(self.oracle.solution(self.max_inst_var)?);
         }
         self.log_routine_end()?;
-        Ok(Some((cost, sol.unwrap())))
+        Done(Some((cost, sol.unwrap())))
     }
 }
 
@@ -832,28 +866,24 @@ where
 {
     /// Wrapper around the oracle with call logging and interrupt detection.
     /// Assumes that the oracle is unlimited.
-    fn solve(&mut self) -> Result<SolverResult, Termination> {
+    fn solve(&mut self) -> MaybeTerminatedError<SolverResult> {
         self.log_routine_start("oracle call")?;
         let res = self.oracle.solve()?;
         self.log_routine_end()?;
-        if res == SolverResult::Interrupted {
-            return Err(Termination::Interrupted);
-        }
+        self.check_termination()?;
         self.log_oracle_call(res)?;
-        Ok(res)
+        Done(res)
     }
 
     /// Wrapper around the oracle with call logging and interrupt detection.
     /// Assumes that the oracle is unlimited.
-    fn solve_assumps(&mut self, assumps: &[Lit]) -> Result<SolverResult, Termination> {
+    fn solve_assumps(&mut self, assumps: &[Lit]) -> MaybeTerminatedError<SolverResult> {
         self.log_routine_start("oracle call")?;
         let res = self.oracle.solve_assumps(assumps)?;
         self.log_routine_end()?;
-        if res == SolverResult::Interrupted {
-            self.check_termination()?;
-        }
+        self.check_termination()?;
         self.log_oracle_call(res)?;
-        Ok(res)
+        Done(res)
     }
 }
 
@@ -864,10 +894,11 @@ where
     VM: ManageVars,
 {
     /// Resets the oracle and returns an error when the original [`Cnf`] was not stored.
-    fn reset_oracle(&mut self, include_var_manager: bool) -> Result<(), Termination> {
-        if !self.opts.store_cnf {
-            return Err(Termination::ResetWithoutCnf);
-        }
+    fn reset_oracle(&mut self, include_var_manager: bool) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.opts.store_cnf,
+            "cannot reset oracle without having stored the CNF"
+        );
         self.log_routine_start("reset-oracle")?;
         self.oracle = O::default();
         if include_var_manager {
@@ -907,7 +938,7 @@ fn absorb_objective<VM: ManageVars>(
         };
     }
     if obj.weighted() {
-        let (soft_cls, offset) = obj.as_soft_cls();
+        let (soft_cls, offset) = obj.into_soft_cls();
         let lits_iter = soft_cls
             .into_iter()
             .map(|(cl, w)| (absorb_soft_clause(cl, cnf, blits, vm), w));
@@ -916,7 +947,7 @@ fn absorb_objective<VM: ManageVars>(
             lits: lits_iter.collect(),
         }
     } else {
-        let (soft_cls, unit_weight, offset) = obj.as_unweighted_soft_cls();
+        let (soft_cls, unit_weight, offset) = obj.into_unweighted_soft_cls();
         let lits_iter = soft_cls
             .into_iter()
             .map(|cl| absorb_soft_clause(cl, cnf, blits, vm));
@@ -1081,7 +1112,8 @@ where
         range: Range<usize>,
         collector: &mut Col,
         var_manager: &mut dyn ManageVars,
-    ) where
+    ) -> Result<(), rustsat::OutOfMemory>
+    where
         Col: CollectClauses,
     {
         match self {
@@ -1111,7 +1143,7 @@ where
                 collector,
                 var_manager,
             ),
-            ObjEncoding::Constant => (),
+            ObjEncoding::Constant => Ok(()),
         }
     }
 
@@ -1152,6 +1184,7 @@ where
     }
 }
 
+#[cfg(feature = "sol-tightening")]
 /// Data regarding an objective literal
 struct ObjLitData {
     /// Objectives that the literal appears in

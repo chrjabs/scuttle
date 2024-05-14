@@ -22,12 +22,14 @@ CPAIOR'24 paper is available in the `cpaior24/` directory in this repository.
 
 ## Building
 
+**Note**: Scuttle requires nightly Rust, which can be installed via `rustup`.
+
 If you simply want a binary of the solver, you can install it from
-[crates.io](https://crates.io) by running `cargo install scuttle`.
+[crates.io](https://crates.io) by running `cargo +nightly install scuttle`.
 
 To build the project from source, make sure to initialize the git submodules
-with `git submodule update --init`. You can then build `scuttle` by running
-`cargo build`.
+with `git submodule update --init --recursive`. You can then build `scuttle` by
+running `cargo +nightly build`.
 
 ## What's The Name
 
@@ -53,4 +55,3 @@ _multi_-objective solver in _Rust_.
   Optimization_, CP 2023.
 - \[6\] Christoph Jabs and Jeremias Berg and Matti Järvisalo: _Core Boosting
   in SAT-Based Multi-Objective Optimization_, CPAIOR 2024.
-

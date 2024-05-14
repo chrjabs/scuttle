@@ -15,7 +15,7 @@ use crate::{
     types::{NonDomPoint, ParetoFront},
     EncodingStats, Limits, Stats, WriteSolverLog,
 };
-use crate::{LoggerError, Phase, Termination};
+use crate::{Phase, Termination};
 use clap::{crate_authors, crate_name, crate_version, Args, Parser, Subcommand, ValueEnum};
 use cpu_time::ProcessTime;
 use rustsat::{
@@ -277,6 +277,7 @@ struct LogArgs {
     /// Log SAT oracle calls
     #[arg(long)]
     log_oracle_calls: bool,
+    #[cfg(feature = "sol-tightening")]
     /// Log heuristic objective improvement
     #[arg(long)]
     log_heuristic_obj_improvement: bool,
@@ -301,6 +302,7 @@ impl From<&LogArgs> for LoggerConfig {
             log_solutions: value.log_solutions,
             log_non_dom: value.log_non_dom || value.verbosity >= 1,
             log_oracle_calls: value.log_oracle_calls || value.verbosity >= 3,
+            #[cfg(feature = "sol-tightening")]
             log_heuristic_obj_improvement: value.log_heuristic_obj_improvement
                 || value.verbosity >= 3,
             log_fence: false,
@@ -732,7 +734,7 @@ impl Cli {
                         ..(&shared.log).into()
                     },
                     alg: Algorithm::DivCon(DivConOptions {
-                        kernel: kernel_opts(shared),
+                        kernel: kernel_opts(shared, false),
                         anchor: match anchor {
                             DivConAnchor::LinSu => options::DivConAnchor::LinSu,
                             DivConAnchor::Bioptsat => options::DivConAnchor::BiOptSat,
@@ -759,10 +761,26 @@ impl Cli {
         };
         #[cfg(any(not(feature = "sol-tightening"), not(feature = "phasing")))]
         match &cli.alg {
-            Algorithm::PMinimal(opts)
+            Algorithm::PMinimal(opts, ..)
             | Algorithm::BiOptSat(opts, ..)
-            | Algorithm::LowerBounding(opts)
-            | Algorithm::DivCon(DivConOptions { kernel: opts, .. }) => {
+            | Algorithm::LowerBounding(opts, ..) => {
+                #[cfg(not(feature = "sol-tightening"))]
+                if opts.heuristic_improvements.solution_tightening != HeurImprWhen::Never {
+                    cli.warning(
+                        "requested solution tightening but solver is built without this feature",
+                    )
+                    .expect("IO error during CLI initialization");
+                }
+                #[cfg(not(feature = "phasing"))]
+                if opts.solution_guided_search {
+                    cli.warning(
+                        "requested solution guided search but solver is built without this feature",
+                    )
+                    .expect("IO error during CLI initialization");
+                }
+            }
+            #[cfg(feature = "div-con")]
+            Algorithm::DivCon(DivConOptions { kernel: opts, .. }) => {
                 #[cfg(not(feature = "sol-tightening"))]
                 if opts.heuristic_improvements.solution_tightening != HeurImprWhen::Never {
                     cli.warning(
@@ -841,11 +859,7 @@ impl Cli {
 
     pub fn log_termination(&self, term: &Termination) -> Result<(), IOError> {
         let msg = &format!("{}", term);
-        if term.is_error() {
-            self.error(msg)
-        } else {
-            self.warning(msg)
-        }
+        self.warning(msg)
     }
 
     pub fn print_header(&self) -> Result<(), IOError> {
@@ -1157,6 +1171,7 @@ struct LoggerConfig {
     log_solutions: bool,
     log_non_dom: bool,
     log_oracle_calls: bool,
+    #[cfg(feature = "sol-tightening")]
     log_heuristic_obj_improvement: bool,
     log_fence: bool,
     log_routines: usize,
@@ -1172,7 +1187,7 @@ pub struct CliLogger {
 }
 
 impl WriteSolverLog for CliLogger {
-    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> Result<(), LoggerError> {
+    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> anyhow::Result<()> {
         if self.config.log_candidates {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1190,7 +1205,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_oracle_call(&mut self, result: SolverResult) -> Result<(), LoggerError> {
+    fn log_oracle_call(&mut self, result: SolverResult) -> anyhow::Result<()> {
         if self.config.log_oracle_calls {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1207,7 +1222,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_solution(&mut self) -> Result<(), LoggerError> {
+    fn log_solution(&mut self) -> anyhow::Result<()> {
         if self.config.log_solutions {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1223,7 +1238,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> Result<(), LoggerError> {
+    fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> anyhow::Result<()> {
         if self.config.log_non_dom {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1241,12 +1256,13 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
+    #[cfg(feature = "sol-tightening")]
     fn log_heuristic_obj_improvement(
         &mut self,
         obj_idx: usize,
         apparent_cost: usize,
         improved_cost: usize,
-    ) -> Result<(), LoggerError> {
+    ) -> anyhow::Result<()> {
         if self.config.log_heuristic_obj_improvement {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1265,7 +1281,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_fence(&mut self, fence: &[usize]) -> Result<(), LoggerError> {
+    fn log_fence(&mut self, fence: &[usize]) -> anyhow::Result<()> {
         if self.config.log_fence {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1277,7 +1293,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_routine_start(&mut self, desc: &'static str) -> Result<(), LoggerError> {
+    fn log_routine_start(&mut self, desc: &'static str) -> anyhow::Result<()> {
         self.routine_stack.push((desc, ProcessTime::now()));
 
         if self.config.log_routines >= self.routine_stack.len() {
@@ -1291,7 +1307,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_routine_end(&mut self) -> Result<(), LoggerError> {
+    fn log_routine_end(&mut self) -> anyhow::Result<()> {
         let (desc, start) = self.routine_stack.pop().expect("routine stack out of sync");
 
         if self.config.log_routines > self.routine_stack.len() {
@@ -1312,14 +1328,14 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_end_solve(&mut self) -> Result<(), LoggerError> {
+    fn log_end_solve(&mut self) -> anyhow::Result<()> {
         while !self.routine_stack.is_empty() {
             self.log_routine_end()?;
         }
         Ok(())
     }
 
-    fn log_ideal(&mut self, ideal: &[usize]) -> Result<(), LoggerError> {
+    fn log_ideal(&mut self, ideal: &[usize]) -> anyhow::Result<()> {
         if self.config.log_bound_points {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -1336,7 +1352,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_nadir(&mut self, nadir: &[usize]) -> Result<(), LoggerError> {
+    fn log_nadir(&mut self, nadir: &[usize]) -> anyhow::Result<()> {
         if self.config.log_bound_points {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -1353,7 +1369,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_core(&mut self, weight: usize, len: usize, red_len: usize) -> Result<(), LoggerError> {
+    fn log_core(&mut self, weight: usize, len: usize, red_len: usize) -> anyhow::Result<()> {
         if self.config.log_cores {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1369,7 +1385,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_core_exhaustion(&mut self, exhausted: usize, weight: usize) -> Result<(), LoggerError> {
+    fn log_core_exhaustion(&mut self, exhausted: usize, weight: usize) -> anyhow::Result<()> {
         if self.config.log_cores {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1386,7 +1402,7 @@ impl WriteSolverLog for CliLogger {
         cls_before_after: (usize, usize),
         fixed_lits: usize,
         obj_range_before_after: Vec<(usize, usize)>,
-    ) -> Result<(), LoggerError> {
+    ) -> anyhow::Result<()> {
         if self.config.log_inpro {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -1419,7 +1435,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_message(&mut self, msg: &str) -> Result<(), LoggerError> {
+    fn log_message(&mut self, msg: &str) -> anyhow::Result<()> {
         let mut buffer = self.stdout.buffer();
         writeln!(buffer, "{}", msg)?;
         self.stdout.print(&buffer)?;
