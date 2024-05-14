@@ -265,7 +265,10 @@ where
                 self.kernel
                     .p_minimization(costs, solution, &[], &mut self.obj_encs)?;
 
-            let assumps = self.kernel.enforce_dominating(&costs, &mut self.obj_encs);
+            let assumps: Vec<_> = self
+                .kernel
+                .enforce_dominating(&costs, &mut self.obj_encs)
+                .collect();
             self.kernel
                 .yield_solutions(costs, &assumps, solution, &mut self.pareto_front)?;
 
@@ -406,23 +409,21 @@ where
 
     /// Gets assumptions to enforce that the next solution dominates the given
     /// cost point.
-    pub fn enforce_dominating<PBE, CE>(
-        &mut self,
-        costs: &[usize],
-        obj_encs: &mut [ObjEncoding<PBE, CE>],
-    ) -> Vec<Lit>
+    pub fn enforce_dominating<'a, PBE, CE>(
+        &'a mut self,
+        costs: &'a [usize],
+        obj_encs: &'a mut [ObjEncoding<PBE, CE>],
+    ) -> impl Iterator<Item = Lit> + 'a
     where
         PBE: pb::BoundUpperIncremental,
         CE: card::BoundUpperIncremental,
     {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
-        let mut assumps = vec![];
-        costs.iter().enumerate().for_each(|(idx, &cst)| {
+        costs.iter().enumerate().flat_map(|(idx, &cst)| {
             let enc = &mut obj_encs[idx];
             enc.encode_ub_change(cst..cst + 1, &mut self.oracle, &mut self.var_manager);
-            assumps.extend(enc.enforce_ub(cst).unwrap());
-        });
-        assumps
+            enc.enforce_ub(cst).unwrap().into_iter()
+        })
     }
 
     /// Gets a clause blocking solutions (weakly) dominated by the given cost point,

@@ -41,6 +41,10 @@ impl Inactives {
         self.into()
     }
 
+    pub fn assumps(&self) -> impl Iterator<Item = Lit> + '_ {
+        self.iter().map(|(&l, _)| !l)
+    }
+
     pub fn final_cleanup(&mut self) {
         self.cleanup();
         let to_constant = match self {
@@ -219,7 +223,7 @@ where
                     ))
                 }
                 Unsat => return Ok(None),
-                Interrupted => panic!(),
+                Interrupted => unreachable!(),
             }
         }
         self.log_routine_start("oll")?;
@@ -231,7 +235,7 @@ where
         let mut assumps = Vec::from(base_assumps);
         // sort base assumptions for filtering them out efficiently
         assumps.sort_unstable();
-        assumps.extend(reform.inactives.iter().map(|(&l, _)| !l));
+        assumps.extend(reform.inactives.assumps());
 
         loop {
             match &mut reform.inactives {
@@ -249,13 +253,13 @@ where
                 Inactives::Unweighted { .. } => {
                     reform.inactives.cleanup();
                     assumps.drain(base_assumps.len()..);
-                    assumps.extend(reform.inactives.iter().map(|(&l, _)| !l));
+                    assumps.extend(reform.inactives.assumps());
                 }
-                Inactives::Constant => panic!(),
+                Inactives::Constant => unreachable!(),
             }
 
             match self.solve_assumps(&assumps)? {
-                Interrupted => panic!(),
+                Interrupted => unreachable!(),
                 Sat => {
                     if unreform_cores.is_empty() {
                         let sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
@@ -330,7 +334,7 @@ where
                             .iter()
                             .fold(usize::MAX, |cw, l| std::cmp::min(cw, inact[l])),
                         Inactives::Unweighted { .. } => 1,
-                        Inactives::Constant => panic!(),
+                        Inactives::Constant => unreachable!(),
                     };
                     reform.offset += core_weight;
                     // Log core

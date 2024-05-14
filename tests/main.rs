@@ -889,23 +889,6 @@ macro_rules! generate_tests {
     };
 }
 
-type S = scuttle::PMinimal<
-    rustsat::encodings::pb::DbGte,
-    rustsat::encodings::card::DbTotalizer,
-    rustsat::instances::BasicVarManager,
-    fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    rustsat_cadical::CaDiCaL<'static, 'static>,
->;
-
-#[test]
-fn debug() {
-    dal2!(
-        S,
-        scuttle::KernelOptions::default(),
-        scuttle::CoreBoostingOptions::default()
-    );
-}
-
 mod pmin {
     type S = scuttle::PMinimal<
         rustsat::encodings::pb::DbGte,

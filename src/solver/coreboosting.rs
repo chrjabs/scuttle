@@ -60,9 +60,10 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
         let root = tot_db.merge_thorough(&mut cons);
         if root.multiplier() == 1 {
             match &tot_db[root.id] {
-                Node::Leaf(_) | Node::Unit(_) => {
-                    ObjEncoding::Unweighted(DbTotalizer::from_raw(root.id, tot_db), offset)
-                }
+                Node::Leaf(_) | Node::Unit(_) => ObjEncoding::Unweighted(
+                    DbTotalizer::from_raw(root.id, tot_db),
+                    offset - root.offset(),
+                ),
                 Node::General(_) => {
                     ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
                 }

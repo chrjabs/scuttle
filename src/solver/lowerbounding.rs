@@ -252,7 +252,8 @@ where
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
         self.kernel.log_routine_start("lower-bounding")?;
         loop {
-            let res = self.kernel.solve_assumps(&self.fence.assumps())?;
+            let assumps: Vec<_> = self.fence.assumps().collect();
+            let res = self.kernel.solve_assumps(&assumps)?;
             match res {
                 SolverResult::Sat => self.kernel.harvest(
                     &self.fence,
@@ -370,11 +371,8 @@ pub(crate) struct Fence {
 }
 
 impl Fence {
-    pub fn assumps(&self) -> Vec<Lit> {
-        self.data
-            .iter()
-            .filter_map(|(_, ol)| ol.to_owned())
-            .collect()
+    pub fn assumps<'a>(&'a self) -> impl Iterator<Item = Lit> + 'a {
+        self.data.iter().filter_map(|(_, ol)| ol.to_owned())
     }
 
     pub fn bounds(&self) -> Vec<usize> {
@@ -482,7 +480,7 @@ where
             let (costs, solution, block_switch) =
                 self.p_minimization(costs, solution, base_assumps, obj_encs)?;
 
-            let assumps = self.enforce_dominating(&costs, obj_encs);
+            let assumps: Vec<_> = self.enforce_dominating(&costs, obj_encs).collect();
             self.yield_solutions(costs, &assumps, solution, collector)?;
 
             // Block last Pareto point, if temporarily blocked
