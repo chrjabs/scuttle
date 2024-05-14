@@ -344,7 +344,7 @@ where
             if res == SolverResult::Unsat {
                 return Ok(());
             }
-            let mut sol = self.oracle.solution(self.max_orig_var)?;
+            let mut sol = self.oracle.solution(self.max_inst_var)?;
             let cost = self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
             (cost, sol)
         };
@@ -402,7 +402,7 @@ where
             assumps.extend(dec_encoding.enforce_ub(dec_cost - 1).unwrap());
             (sol, inc_cost) = match self.solve_assumps(&assumps)? {
                 SolverResult::Sat => {
-                    let mut sol = self.oracle.solution(self.max_orig_var)?;
+                    let mut sol = self.oracle.solution(self.max_inst_var)?;
                     let cost =
                         self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
                     (sol, cost)

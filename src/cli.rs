@@ -161,20 +161,24 @@ struct CoreBoostingArgs {
 }
 
 impl CoreBoostingArgs {
-    fn parse(self, prepro_techs: String) -> Option<CoreBoostingOptions> {
+    fn parse(self, prepro_techs: String) -> (Option<CoreBoostingOptions>, bool) {
         if self.core_boosting == Bool::False {
-            return None;
+            return (None, false);
         }
-        Some(CoreBoostingOptions {
-            rebase: self.rebase_encodings.into(),
-            after: if self.inprocessing.into() {
-                AfterCbOptions::Inpro(prepro_techs)
-            } else if self.reset_after_cb.into() {
-                AfterCbOptions::Reset
-            } else {
-                AfterCbOptions::Nothing
-            },
-        })
+        let store_cnf = self.inprocessing.into() || self.reset_after_cb.into();
+        (
+            Some(CoreBoostingOptions {
+                rebase: self.rebase_encodings.into(),
+                after: if self.inprocessing.into() {
+                    AfterCbOptions::Inpro(prepro_techs)
+                } else if self.reset_after_cb.into() {
+                    AfterCbOptions::Reset
+                } else {
+                    AfterCbOptions::Nothing
+                },
+            }),
+            store_cnf,
+        )
     }
 }
 
@@ -238,7 +242,7 @@ struct FileArgs {
     #[arg(long, value_enum, default_value_t = FileFormat::Infer)]
     file_format: FileFormat,
     /// The index in the OPB file to treat as the lowest variable
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 1)]
     first_var_idx: u32,
     /// The path to the instance file to load. Compressed files with an
     /// extension like `.bz2` or `.gz` can be read.
@@ -577,7 +581,7 @@ impl Cli {
                 }
             })
         };
-        let kernel_opts = |shared: SharedArgs| KernelOptions {
+        let kernel_opts = |shared: SharedArgs, store_cnf: bool| KernelOptions {
             enumeration: match shared.enumeration.enumeration {
                 EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
                 EnumOptionsArg::Solutions => {
@@ -595,11 +599,11 @@ impl Cli {
             core_trimming: shared.core_trimming.into(),
             core_minimization: shared.core_minimization.into(),
             core_exhaustion: shared.core_exhaustion.into(),
-            store_cnf: false,
+            store_cnf,
         };
         let cli = match CliArgs::parse().command {
             AlgorithmCommand::PMinimal { shared, cb } => {
-                let cb = cb.parse(shared.prepro.maxpre_techniques.clone());
+                let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -620,7 +624,7 @@ impl Cli {
                     print_stats: !shared.log.no_print_stats,
                     color: shared.log.color,
                     logger_config: (&shared.log).into(),
-                    alg: Algorithm::PMinimal(kernel_opts(shared), cb),
+                    alg: Algorithm::PMinimal(kernel_opts(shared, store_cnf), cb),
                 }
             }
             AlgorithmCommand::Bioptsat {
@@ -628,7 +632,7 @@ impl Cli {
                 obj_encs,
                 cb,
             } => {
-                let cb = cb.parse(shared.prepro.maxpre_techniques.clone());
+                let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -650,7 +654,7 @@ impl Cli {
                     color: shared.log.color,
                     logger_config: (&shared.log).into(),
                     alg: Algorithm::BiOptSat(
-                        kernel_opts(shared),
+                        kernel_opts(shared, store_cnf),
                         obj_encs.obj_pb_encoding,
                         obj_encs.obj_card_encoding,
                         cb,
@@ -662,7 +666,7 @@ impl Cli {
                 log_fence,
                 cb,
             } => {
-                let cb = cb.parse(shared.prepro.maxpre_techniques.clone());
+                let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -686,7 +690,7 @@ impl Cli {
                         log_fence: log_fence || shared.log.verbosity >= 2,
                         ..(&shared.log).into()
                     },
-                    alg: Algorithm::LowerBounding(kernel_opts(shared), cb),
+                    alg: Algorithm::LowerBounding(kernel_opts(shared, store_cnf), cb),
                 }
             }
             #[cfg(feature = "div-con")]
@@ -1094,7 +1098,7 @@ impl Cli {
         if self.print_solutions {
             non_dom
                 .into_iter()
-                .try_fold((), |_, sol| writeln!(buffer, "s {}", sol))?
+                .try_fold((), |_, sol| writeln!(buffer, "v {}", sol))?
         }
         Self::end_block(buffer)?;
         Ok(())

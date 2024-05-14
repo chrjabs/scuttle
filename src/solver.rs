@@ -94,6 +94,8 @@ struct SolverKernel<VM, O, BCG> {
     var_manager: VM,
     /// Objective literal data
     obj_lit_data: RsHashMap<Lit, ObjLitData>,
+    /// The maximum variable in the instance
+    max_inst_var: Var,
     /// The maximum variable of the original encoding after introducing blocking
     /// variables
     max_orig_var: Var,
@@ -133,7 +135,8 @@ where
         bcg: BCG,
         opts: KernelOptions,
     ) -> Result<Self, Termination> {
-        let (constr, objs) = inst.decompose();
+        let (mut constr, objs) = inst.decompose();
+        let max_inst_var = constr.var_manager().max_var().unwrap();
         let (cnf, mut var_manager) = constr.as_cnf();
         let mut stats = Stats {
             n_objs: objs.len(),
@@ -204,6 +207,7 @@ where
             oracle,
             var_manager,
             obj_lit_data,
+            max_inst_var,
             max_orig_var,
             objs,
             orig_cnf,
@@ -617,8 +621,8 @@ where
                 costs
             );
 
-            // Truncate internal solution to only include original variables
-            solution = solution.truncate(self.max_orig_var);
+            // Truncate internal solution to only include instance variables
+            solution = solution.truncate(self.max_inst_var);
 
             non_dominated.add_sol(solution.clone());
             match self.log_solution() {
@@ -761,7 +765,7 @@ where
                 self.log_routine_end()?;
                 return Ok(None);
             }
-            let mut sol = self.oracle.solution(self.max_orig_var)?;
+            let mut sol = self.oracle.solution(self.max_inst_var)?;
             let cost = self.get_cost_with_heuristic_improvements(obj_idx, &mut sol, true)?;
             (cost, Some(sol))
         };
@@ -780,7 +784,7 @@ where
             assumps.extend(encoding.enforce_ub(bound).unwrap());
             match self.solve_assumps(&assumps)? {
                 SolverResult::Sat => {
-                    let mut thissol = self.oracle.solution(self.max_orig_var)?;
+                    let mut thissol = self.oracle.solution(self.max_inst_var)?;
                     let new_cost =
                         self.get_cost_with_heuristic_improvements(obj_idx, &mut thissol, false)?;
                     debug_assert!(new_cost < cost);
@@ -815,7 +819,7 @@ where
             assumps.extend(encoding.enforce_ub(cost).unwrap());
             let res = self.solve_assumps(&assumps)?;
             debug_assert_eq!(res, SolverResult::Sat);
-            sol = Some(self.oracle.solution(self.max_orig_var)?);
+            sol = Some(self.oracle.solution(self.max_inst_var)?);
         }
         self.log_routine_end()?;
         Ok(Some((cost, sol.unwrap())))
@@ -866,7 +870,11 @@ where
         }
         self.log_routine_start("reset-oracle")?;
         self.oracle = O::default();
-        self.oracle.reserve(self.max_orig_var)?;
+        if include_var_manager {
+            self.oracle.reserve(self.max_orig_var)?;
+        } else {
+            self.oracle.reserve(self.var_manager.max_var().unwrap())?;
+        }
         self.oracle.add_cnf(self.orig_cnf.clone().unwrap())?;
         #[cfg(feature = "interrupt-oracle")]
         {
