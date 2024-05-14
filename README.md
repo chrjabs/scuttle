@@ -25,19 +25,9 @@ CPAIOR'24 paper is available in the `cpaior24/` directory in this repository.
 If you simply want a binary of the solver, you can install it from
 [crates.io](https://crates.io) by running `cargo install scuttle`.
 
-To build the project from source, you will need to clone
-[RustSAT](https://github.com/chrjabs/rustsat) and
-[MaxPre-rs](https://github.com/chrjabs/maxpre-rs) within the same workspace
-directory as this repository.
-
-```text
-workspace/
-├── maxpre-rs/
-├── rustsat/
-└── scuttle/
-```
-
-You can then build `scuttle` by running `cargo build` within `workspace/scuttle/`.
+To build the project from source, make sure to initialize the git submodules
+with `git submodule update --init`. You can then build `scuttle` by running
+`cargo build`.
 
 ## What's The Name
 
@@ -52,7 +42,7 @@ _multi_-objective solver in _Rust_.
   Propositional Minimal Model Generation_, CP 2017.
 - \[2\] Miyuki Koshimura and Hidetomo Nabeshima and Hiroshi Fujita and Ryuzo
   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
-  2009.
+  2009\.
 - \[3\] Joao Cortes and Ines Lynce and Vasco M. Maquinho: _New Core-Guided
   and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
   TACAS 2023.
@@ -63,3 +53,4 @@ _multi_-objective solver in _Rust_.
   Optimization_, CP 2023.
 - \[6\] Christoph Jabs and Jeremias Berg and Matti Järvisalo: _Core Boosting
   in SAT-Based Multi-Objective Optimization_, CPAIOR 2024.
+
