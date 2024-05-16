@@ -26,7 +26,6 @@ use rustsat::{
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
     types::{Assignment, Clause, Lit},
 };
-use rustsat_cadical::CaDiCaL;
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
 use crate::{
@@ -56,11 +55,11 @@ use super::{
     extended_stats
 )]
 pub struct PMinimal<
+    O,
     PBE = DbGte,
     CE = DbTotalizer,
     VM = BasicVarManager,
     BCG = fn(Assignment) -> Clause,
-    O = CaDiCaL<'static, 'static>,
 > {
     /// The solver kernel
     kernel: SolverKernel<VM, O, BCG>,
@@ -71,12 +70,12 @@ pub struct PMinimal<
 }
 
 #[oracle_bounds]
-impl<PBE, CE, VM, O> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, O>
+impl<O, PBE, CE, VM> PMinimal<O, PBE, CE, VM, fn(Assignment) -> Clause>
 where
+    O: SolveIncremental,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
     VM: ManageVars,
-    O: SolveIncremental,
 {
     pub fn new_default_blocking(
         inst: MultiOptInstance<VM>,
@@ -94,13 +93,13 @@ where
 }
 
 #[oracle_bounds]
-impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
+impl<O, PBE, CE, VM, BCG> PMinimal<O, PBE, CE, VM, BCG>
 where
+    O: SolveIncremental + Default,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental + Default,
 {
     pub fn new_default_oracle(
         inst: MultiOptInstance<VM>,
@@ -113,12 +112,12 @@ where
 }
 
 #[oracle_bounds]
-impl<PBE, CE, VM, O> PMinimal<PBE, CE, VM, fn(Assignment) -> Clause, O>
+impl<O, PBE, CE, VM> PMinimal<O, PBE, CE, VM, fn(Assignment) -> Clause>
 where
+    O: SolveIncremental + Default,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
     VM: ManageVars,
-    O: SolveIncremental + Default,
 {
     pub fn new_defaults(inst: MultiOptInstance<VM>, opts: KernelOptions) -> anyhow::Result<Self> {
         let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
@@ -132,13 +131,13 @@ where
 }
 
 #[oracle_bounds]
-impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
+impl<O, PBE, CE, VM, BCG> PMinimal<O, PBE, CE, VM, BCG>
 where
+    O: SolveIncremental,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental,
 {
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
@@ -153,11 +152,11 @@ where
     }
 }
 
-impl<PBE, CE, VM, BCG, O> ExtendedSolveStats for PMinimal<PBE, CE, VM, BCG, O>
+impl<O, PBE, CE, VM, BCG> ExtendedSolveStats for PMinimal<O, PBE, CE, VM, BCG>
 where
+    O: SolveStats,
     PBE: encodings::EncodeStats,
     CE: encodings::EncodeStats,
-    O: SolveStats,
 {
     fn oracle_stats(&self) -> SolverStats {
         self.kernel.oracle.stats()
@@ -193,7 +192,7 @@ where
     }
 }
 
-impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
+impl<O, PBE, CE, VM, BCG> PMinimal<O, PBE, CE, VM, BCG>
 where
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
@@ -228,13 +227,13 @@ where
 }
 
 #[oracle_bounds]
-impl<PBE, CE, VM, BCG, O> PMinimal<PBE, CE, VM, BCG, O>
+impl<O, PBE, CE, VM, BCG> PMinimal<O, PBE, CE, VM, BCG>
 where
+    O: SolveIncremental + SolveStats,
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
-    O: SolveIncremental + SolveStats,
 {
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> MaybeTerminatedError {
@@ -280,11 +279,11 @@ where
 }
 
 #[oracle_bounds]
-impl<PBE, CE, VM, BCG, O> CoreBoost for PMinimal<PBE, CE, VM, BCG, O>
+impl<O, PBE, CE, VM, BCG> CoreBoost for PMinimal<O, PBE, CE, VM, BCG>
 where
+    O: SolveIncremental + SolveStats + Default,
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     VM: ManageVars,
-    O: SolveIncremental + SolveStats + Default,
 {
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
         ensure!(

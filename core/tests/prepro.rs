@@ -22,12 +22,12 @@ macro_rules! preprocess_inst {
 macro_rules! test_dimacs_instance {
     ($s:ty, $o:expr, $tech:expr, $i:expr, $t:expr) => {{
         use maxpre::PreproClauses;
-        use scuttle::{KernelFunctions, Solve};
+        use scuttle_core::{KernelFunctions, Solve};
         let inst: rustsat::instances::MultiOptInstance =
             rustsat::instances::MultiOptInstance::from_dimacs_path($i).unwrap();
         let (inst, mut prepro) = preprocess_inst!(inst, $tech);
         let mut solver = <$s>::new_defaults(inst, $o).unwrap();
-        solver.solve(scuttle::Limits::none()).unwrap();
+        solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver
             .pareto_front()
             .convert_solutions(&mut |s| prepro.reconstruct(s));
@@ -39,7 +39,7 @@ macro_rules! test_dimacs_instance {
 macro_rules! test_opb_instance {
     ($s:ty, $o:expr, $tech:expr, $i:expr, $t:expr) => {{
         use maxpre::PreproClauses;
-        use scuttle::{KernelFunctions, Solve};
+        use scuttle_core::{KernelFunctions, Solve};
         let inst: rustsat::instances::MultiOptInstance =
             rustsat::instances::MultiOptInstance::from_opb_path(
                 $i,
@@ -48,7 +48,7 @@ macro_rules! test_opb_instance {
             .unwrap();
         let (inst, mut prepro) = preprocess_inst!(inst, $tech);
         let mut solver = <$s>::new_defaults(inst, $o).unwrap();
-        solver.solve(scuttle::Limits::none()).unwrap();
+        solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver
             .pareto_front()
             .convert_solutions(&mut |s| prepro.reconstruct(s));
@@ -338,64 +338,64 @@ macro_rules! generate_tests {
 }
 
 mod pmin {
-    type S = scuttle::PMinimal<
+    type S = scuttle_core::PMinimal<
+        rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
         rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-        rustsat_cadical::CaDiCaL<'static, 'static>,
     >;
     generate_tests!(
         default,
         super::S,
-        scuttle::KernelOptions::default(),
+        scuttle_core::KernelOptions::default(),
         "[[uvsrgc]VRTG]"
     );
 }
 
 mod lb {
-    type S = scuttle::LowerBounding<
+    type S = scuttle_core::LowerBounding<
+        rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
         rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-        rustsat_cadical::CaDiCaL<'static, 'static>,
     >;
     generate_tests!(
         default,
         super::S,
-        scuttle::KernelOptions::default(),
+        scuttle_core::KernelOptions::default(),
         "[[uvsrgc]VRTG]"
     );
 }
 
 mod bioptsat {
-    type S = scuttle::BiOptSat<
+    type S = scuttle_core::BiOptSat<
+        rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
         rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-        rustsat_cadical::CaDiCaL<'static, 'static>,
     >;
     generate_biobj_tests!(
         default,
         super::S,
-        scuttle::KernelOptions::default(),
+        scuttle_core::KernelOptions::default(),
         "[[uvsrgc]VRTG]"
     );
 }
 
 #[cfg(feature = "div-con")]
 mod divcon {
-    type S = scuttle::solver::divcon::SeqDivCon<
-        rustsat::instances::BasicVarManager,
+    type S = scuttle_core::solver::divcon::SeqDivCon<
         rustsat_cadical::CaDiCaL<'static, 'static>,
+        rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     >;
     generate_tests!(
         default,
         super::S,
-        scuttle::DivConOptions::default(),
+        scuttle_core::DivConOptions::default(),
         "[[uvsrgc]VRTG]"
     );
 }

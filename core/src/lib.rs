@@ -30,9 +30,6 @@ pub use termination::MaybeTerminated;
 pub use termination::MaybeTerminatedError;
 pub use termination::Termination;
 
-#[cfg(feature = "binary-deps")]
-pub mod cli;
-
 /// Trait for getting statistics from the solver
 pub trait ExtendedSolveStats {
     /// Gets statistics from the internal oracle

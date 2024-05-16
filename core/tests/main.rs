@@ -11,23 +11,23 @@ macro_rules! check_pf_shape {
 
 macro_rules! test_dimacs_instance {
     ($s:ty, $o:expr, $i:expr, $t:expr) => {{
-        use scuttle::{KernelFunctions, Solve};
+        use scuttle_core::{KernelFunctions, Solve};
         let inst: rustsat::instances::MultiOptInstance =
             rustsat::instances::MultiOptInstance::from_dimacs_path($i).unwrap();
         let mut solver = <$s>::new_defaults(inst, $o).unwrap();
-        solver.solve(scuttle::Limits::none()).unwrap();
+        solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver.pareto_front();
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
     ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
-        use scuttle::{CoreBoost, KernelFunctions, Solve};
+        use scuttle_core::{CoreBoost, KernelFunctions, Solve};
         let inst: rustsat::instances::MultiOptInstance =
             rustsat::instances::MultiOptInstance::from_dimacs_path($i).unwrap();
         let mut solver = <$s>::new_defaults(inst, $o).unwrap();
         let cont = solver.core_boost($cbo).unwrap();
         if cont {
-            solver.solve(scuttle::Limits::none()).unwrap();
+            solver.solve(scuttle_core::Limits::none()).unwrap();
         }
         let pf = solver.pareto_front();
         assert_eq!(pf.len(), $t.len());
@@ -37,7 +37,7 @@ macro_rules! test_dimacs_instance {
 
 macro_rules! test_opb_instance {
     ($s:ty, $o:expr, $i:expr, $t:expr) => {{
-        use scuttle::{KernelFunctions, Solve};
+        use scuttle_core::{KernelFunctions, Solve};
         let inst: rustsat::instances::MultiOptInstance =
             rustsat::instances::MultiOptInstance::from_opb_path(
                 $i,
@@ -45,13 +45,13 @@ macro_rules! test_opb_instance {
             )
             .unwrap();
         let mut solver = <$s>::new_defaults(inst, $o).unwrap();
-        solver.solve(scuttle::Limits::none()).unwrap();
+        solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver.pareto_front();
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
     ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
-        use scuttle::{CoreBoost, KernelFunctions, Solve};
+        use scuttle_core::{CoreBoost, KernelFunctions, Solve};
         let inst: rustsat::instances::MultiOptInstance =
             rustsat::instances::MultiOptInstance::from_opb_path(
                 $i,
@@ -61,7 +61,7 @@ macro_rules! test_opb_instance {
         let mut solver = <$s>::new_defaults(inst, $o).unwrap();
         let cont = solver.core_boost($cbo).unwrap();
         if cont {
-            solver.solve(scuttle::Limits::none()).unwrap();
+            solver.solve(scuttle_core::Limits::none()).unwrap();
         }
         let pf = solver.pareto_front();
         assert_eq!(pf.len(), $t.len());
@@ -657,7 +657,7 @@ macro_rules! generate_biobj_tests {
             #[test]
             fn medium_all() {
                 let mut opts = $o;
-                opts.set_enumeration(scuttle::options::EnumOptions::Solutions(None));
+                opts.set_enumeration(scuttle_core::options::EnumOptions::Solutions(None));
                 medium_all!($s, opts)
             }
 
@@ -705,7 +705,7 @@ macro_rules! generate_biobj_tests {
             #[test]
             fn medium_all() {
                 let mut opts = $o;
-                opts.set_enumeration(scuttle::options::EnumOptions::Solutions(None));
+                opts.set_enumeration(scuttle_core::options::EnumOptions::Solutions(None));
                 medium_all!($s, opts, $cbo)
             }
 
@@ -756,7 +756,7 @@ macro_rules! generate_tests {
             #[test]
             fn medium_all() {
                 let mut opts = $o;
-                opts.set_enumeration(scuttle::options::EnumOptions::Solutions(None));
+                opts.set_enumeration(scuttle_core::options::EnumOptions::Solutions(None));
                 medium_all!($s, opts)
             }
 
@@ -829,7 +829,7 @@ macro_rules! generate_tests {
             #[test]
             fn medium_all() {
                 let mut opts = $o;
-                opts.set_enumeration(scuttle::options::EnumOptions::Solutions(None));
+                opts.set_enumeration(scuttle_core::options::EnumOptions::Solutions(None));
                 medium_all!($s, opts, $cbo)
             }
 
@@ -890,45 +890,57 @@ macro_rules! generate_tests {
 }
 
 mod pmin {
-    type S = scuttle::PMinimal<
+    type S = scuttle_core::PMinimal<
+        rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
         rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-        rustsat_cadical::CaDiCaL<'static, 'static>,
     >;
-    generate_tests!(default, super::S, scuttle::KernelOptions::default());
-    generate_tests!(no_heur, super::S, {
-        let mut opts = scuttle::KernelOptions::default();
-        opts.heuristic_improvements = scuttle::options::HeurImprOptions::none();
-        opts
-    });
-    generate_tests!(all_heur, super::S, {
-        let mut opts = scuttle::KernelOptions::default();
-        opts.heuristic_improvements = scuttle::options::HeurImprOptions::all();
-        opts
-    });
-    generate_tests!(other_reserve, super::S, {
-        let mut opts = scuttle::KernelOptions::default();
-        opts.reserve_enc_vars = !opts.reserve_enc_vars;
-        opts
-    });
-    generate_tests!(other_sol_guided, super::S, {
-        let mut opts = scuttle::KernelOptions::default();
-        opts.solution_guided_search = !opts.solution_guided_search;
-        opts
-    });
+    generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
+    generate_tests!(
+        no_heur,
+        super::S,
+        scuttle_core::KernelOptions {
+            heuristic_improvements: scuttle_core::options::HeurImprOptions::none(),
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        all_heur,
+        super::S,
+        scuttle_core::KernelOptions {
+            heuristic_improvements: scuttle_core::options::HeurImprOptions::all(),
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        other_reserve,
+        super::S,
+        scuttle_core::KernelOptions {
+            reserve_enc_vars: !scuttle_core::KernelOptions::default().reserve_enc_vars,
+            ..Default::default()
+        }
+    );
+    generate_tests!(
+        other_sol_guided,
+        super::S,
+        scuttle_core::KernelOptions {
+            solution_guided_search: !scuttle_core::KernelOptions::default().solution_guided_search,
+            ..Default::default()
+        }
+    );
     generate_tests!(
         cb,
         super::S,
-        scuttle::KernelOptions::default(),
-        scuttle::CoreBoostingOptions::default()
+        scuttle_core::KernelOptions::default(),
+        scuttle_core::CoreBoostingOptions::default()
     );
     generate_tests!(
         cb_rebase,
         super::S,
-        scuttle::KernelOptions::default(),
-        scuttle::CoreBoostingOptions {
+        scuttle_core::KernelOptions::default(),
+        scuttle_core::CoreBoostingOptions {
             rebase: true,
             ..Default::default()
         }
@@ -936,25 +948,25 @@ mod pmin {
 }
 
 mod lb {
-    type S = scuttle::LowerBounding<
+    type S = scuttle_core::LowerBounding<
+        rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
         rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-        rustsat_cadical::CaDiCaL<'static, 'static>,
     >;
-    generate_tests!(default, super::S, scuttle::KernelOptions::default());
+    generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
     generate_tests!(
         cb,
         super::S,
-        scuttle::KernelOptions::default(),
-        scuttle::CoreBoostingOptions::default()
+        scuttle_core::KernelOptions::default(),
+        scuttle_core::CoreBoostingOptions::default()
     );
     generate_tests!(
         cb_rebase,
         super::S,
-        scuttle::KernelOptions::default(),
-        scuttle::CoreBoostingOptions {
+        scuttle_core::KernelOptions::default(),
+        scuttle_core::CoreBoostingOptions {
             rebase: true,
             ..Default::default()
         }
@@ -962,25 +974,25 @@ mod lb {
 }
 
 mod bioptsat {
-    type S = scuttle::BiOptSat<
+    type S = scuttle_core::BiOptSat<
+        rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
         rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-        rustsat_cadical::CaDiCaL<'static, 'static>,
     >;
-    generate_biobj_tests!(default, super::S, scuttle::KernelOptions::default());
+    generate_biobj_tests!(default, super::S, scuttle_core::KernelOptions::default());
     generate_biobj_tests!(
         cb,
         super::S,
-        scuttle::KernelOptions::default(),
-        scuttle::CoreBoostingOptions::default()
+        scuttle_core::KernelOptions::default(),
+        scuttle_core::CoreBoostingOptions::default()
     );
     generate_biobj_tests!(
         cb_rebase,
         super::S,
-        scuttle::KernelOptions::default(),
-        scuttle::CoreBoostingOptions {
+        scuttle_core::KernelOptions::default(),
+        scuttle_core::CoreBoostingOptions {
             rebase: true,
             ..Default::default()
         }
@@ -989,33 +1001,33 @@ mod bioptsat {
 
 #[cfg(feature = "div-con")]
 mod divcon {
-    type S = scuttle::solver::divcon::SeqDivCon<
-        rustsat::instances::BasicVarManager,
+    type S = scuttle_core::solver::divcon::SeqDivCon<
         rustsat_cadical::CaDiCaL<'static, 'static>,
+        rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     >;
     generate_tests!(
         bioptsat,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::BiOptSat,
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::BiOptSat,
             ..Default::default()
         }
     );
     generate_tests!(
         linsu,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::LinSu,
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::LinSu,
             ..Default::default()
         }
     );
     generate_tests!(
         pmin_smaller_0,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::PMinimal(
-                scuttle::options::SubProblemSize::Smaller(0)
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::PMinimal(
+                scuttle_core::options::SubProblemSize::Smaller(0)
             ),
             ..Default::default()
         }
@@ -1023,9 +1035,9 @@ mod divcon {
     generate_tests!(
         lb_smaller_0,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::LowerBounding(
-                scuttle::options::SubProblemSize::Smaller(0),
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::LowerBounding(
+                scuttle_core::options::SubProblemSize::Smaller(0),
             ),
             ..Default::default()
         }
@@ -1033,9 +1045,9 @@ mod divcon {
     generate_tests!(
         pmin_smaller_0_inpro,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::PMinimal(
-                scuttle::options::SubProblemSize::Smaller(0)
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::PMinimal(
+                scuttle_core::options::SubProblemSize::Smaller(0)
             ),
             inpro: Some(String::from("[[uvsrgc]VRTG]")),
             ..Default::default()
@@ -1044,9 +1056,9 @@ mod divcon {
     generate_tests!(
         pmin_smaller_0_reset,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::PMinimal(
-                scuttle::options::SubProblemSize::Smaller(0)
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::PMinimal(
+                scuttle_core::options::SubProblemSize::Smaller(0)
             ),
             reset_after_global_ideal: true,
             ..Default::default()
@@ -1055,9 +1067,9 @@ mod divcon {
     generate_tests!(
         pmin_smaller_0_rebase,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::PMinimal(
-                scuttle::options::SubProblemSize::Smaller(0)
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::PMinimal(
+                scuttle_core::options::SubProblemSize::Smaller(0)
             ),
             rebase_encodings: true,
             ..Default::default()
@@ -1066,9 +1078,9 @@ mod divcon {
     generate_tests!(
         pmin_smaller_1,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::PMinimal(
-                scuttle::options::SubProblemSize::Smaller(1)
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::PMinimal(
+                scuttle_core::options::SubProblemSize::Smaller(1)
             ),
             ..Default::default()
         }
@@ -1076,9 +1088,9 @@ mod divcon {
     generate_tests!(
         lb_smaller_1,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::LowerBounding(
-                scuttle::options::SubProblemSize::Smaller(1)
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::LowerBounding(
+                scuttle_core::options::SubProblemSize::Smaller(1)
             ),
             ..Default::default()
         }
@@ -1086,26 +1098,26 @@ mod divcon {
     generate_tests!(
         n_minus_1,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::NMinus(1),
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::NMinus(1),
             ..Default::default()
         }
     );
     generate_tests!(
         n_minus_1_rebuild,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::NMinus(1),
-            build_encodings: scuttle::options::BuildEncodings::Rebuild,
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::NMinus(1),
+            build_encodings: scuttle_core::options::BuildEncodings::Rebuild,
             ..Default::default()
         }
     );
     generate_tests!(
         n_minus_1_clean_rebuild,
         super::S,
-        scuttle::DivConOptions {
-            anchor: scuttle::options::DivConAnchor::NMinus(1),
-            build_encodings: scuttle::options::BuildEncodings::CleanRebuild,
+        scuttle_core::DivConOptions {
+            anchor: scuttle_core::options::DivConAnchor::NMinus(1),
+            build_encodings: scuttle_core::options::BuildEncodings::CleanRebuild,
             ..Default::default()
         }
     );

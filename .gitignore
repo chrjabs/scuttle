@@ -1,3 +1,5 @@
 /target
 /proc/target
 /proc/Cargo.lock
+/core/target
+/core/Cargo.lock

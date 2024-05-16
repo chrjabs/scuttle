@@ -8,24 +8,24 @@ use std::{
     io::Write,
 };
 
-use crate::options::{
-    AfterCbOptions, CoreBoostingOptions, EnumOptions, HeurImprOptions, HeurImprWhen, KernelOptions,
-};
-use crate::{
-    types::{NonDomPoint, ParetoFront},
-    EncodingStats, Limits, Stats, WriteSolverLog,
-};
-use crate::{Phase, Termination};
 use clap::{crate_authors, crate_name, crate_version, Args, Parser, Subcommand, ValueEnum};
 use cpu_time::ProcessTime;
 use rustsat::{
     instances::fio,
     solvers::{SolverResult, SolverStats},
 };
+use scuttle_core::{
+    options::{
+        AfterCbOptions, CoreBoostingOptions, EnumOptions, HeurImprOptions, HeurImprWhen,
+        KernelOptions,
+    },
+    types::{NonDomPoint, ParetoFront},
+    EncodingStats, Limits, Phase, Stats, Termination, WriteSolverLog,
+};
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 
 #[cfg(feature = "div-con")]
-use crate::options::{self, BuildEncodings, DivConOptions};
+use scuttle_core::options::{self, BuildEncodings, DivConOptions};
 
 macro_rules! none_if_zero {
     ($val:expr) => {
@@ -277,7 +277,6 @@ struct LogArgs {
     /// Log SAT oracle calls
     #[arg(long)]
     log_oracle_calls: bool,
-    #[cfg(feature = "sol-tightening")]
     /// Log heuristic objective improvement
     #[arg(long)]
     log_heuristic_obj_improvement: bool,
@@ -302,7 +301,6 @@ impl From<&LogArgs> for LoggerConfig {
             log_solutions: value.log_solutions,
             log_non_dom: value.log_non_dom || value.verbosity >= 1,
             log_oracle_calls: value.log_oracle_calls || value.verbosity >= 3,
-            #[cfg(feature = "sol-tightening")]
             log_heuristic_obj_improvement: value.log_heuristic_obj_improvement
                 || value.verbosity >= 3,
             log_fence: false,
@@ -603,7 +601,7 @@ impl Cli {
             core_exhaustion: shared.core_exhaustion.into(),
             store_cnf,
         };
-        let cli = match CliArgs::parse().command {
+        match CliArgs::parse().command {
             AlgorithmCommand::PMinimal { shared, cb } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
                 Cli {
@@ -758,46 +756,7 @@ impl Cli {
                     }),
                 }
             }
-        };
-        #[cfg(any(not(feature = "sol-tightening"), not(feature = "phasing")))]
-        match &cli.alg {
-            Algorithm::PMinimal(opts, ..)
-            | Algorithm::BiOptSat(opts, ..)
-            | Algorithm::LowerBounding(opts, ..) => {
-                #[cfg(not(feature = "sol-tightening"))]
-                if opts.heuristic_improvements.solution_tightening != HeurImprWhen::Never {
-                    cli.warning(
-                        "requested solution tightening but solver is built without this feature",
-                    )
-                    .expect("IO error during CLI initialization");
-                }
-                #[cfg(not(feature = "phasing"))]
-                if opts.solution_guided_search {
-                    cli.warning(
-                        "requested solution guided search but solver is built without this feature",
-                    )
-                    .expect("IO error during CLI initialization");
-                }
-            }
-            #[cfg(feature = "div-con")]
-            Algorithm::DivCon(DivConOptions { kernel: opts, .. }) => {
-                #[cfg(not(feature = "sol-tightening"))]
-                if opts.heuristic_improvements.solution_tightening != HeurImprWhen::Never {
-                    cli.warning(
-                        "requested solution tightening but solver is built without this feature",
-                    )
-                    .expect("IO error during CLI initialization");
-                }
-                #[cfg(not(feature = "phasing"))]
-                if opts.solution_guided_search {
-                    cli.warning(
-                        "requested solution guided search but solver is built without this feature",
-                    )
-                    .expect("IO error during CLI initialization");
-                }
-            }
         }
-        cli
     }
 
     pub fn new_cli_logger(&self) -> CliLogger {
@@ -1171,7 +1130,6 @@ struct LoggerConfig {
     log_solutions: bool,
     log_non_dom: bool,
     log_oracle_calls: bool,
-    #[cfg(feature = "sol-tightening")]
     log_heuristic_obj_improvement: bool,
     log_fence: bool,
     log_routines: usize,
@@ -1256,7 +1214,6 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    #[cfg(feature = "sol-tightening")]
     fn log_heuristic_obj_improvement(
         &mut self,
         obj_idx: usize,

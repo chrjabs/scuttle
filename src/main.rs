@@ -10,26 +10,26 @@ use rustsat::{
 };
 use rustsat_cadical::CaDiCaL;
 #[cfg(feature = "div-con")]
-use scuttle::solver::divcon::SeqDivCon;
-use scuttle::{
-    self,
-    cli::{Algorithm, CardEncoding, Cli, FileFormat, PbEncoding},
-    solver::CoreBoost,
-    BiOptSat, LowerBounding, MaybeTerminatedError, PMinimal, Solve,
+use scuttle_core::solver::divcon::SeqDivCon;
+use scuttle_core::{
+    self, solver::CoreBoost, BiOptSat, LowerBounding, MaybeTerminatedError, PMinimal, Solve,
 };
+
+mod cli;
+use cli::{Algorithm, CardEncoding, Cli, FileFormat, PbEncoding};
 
 /// The SAT solver used
 type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
-type PMin<VM> = PMinimal<pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause, Oracle>;
+type PMin<VM> = PMinimal<Oracle, pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause>;
 /// BiOptSat Instantiation used
-type Bos<PBE, CE, VM> = BiOptSat<PBE, CE, VM, fn(Assignment) -> Clause, Oracle>;
+type Bos<PBE, CE, VM> = BiOptSat<Oracle, PBE, CE, VM, fn(Assignment) -> Clause>;
 /// Lower-bounding instantiation used
-type Lb<VM> = LowerBounding<pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause, Oracle>;
+type Lb<VM> = LowerBounding<Oracle, pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause>;
 #[cfg(feature = "div-con")]
 /// Divide and Conquer prototype used
-type Dc<VM> = SeqDivCon<VM, Oracle, fn(Assignment) -> Clause>;
+type Dc<VM> = SeqDivCon<Oracle, VM, fn(Assignment) -> Clause>;
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::init();

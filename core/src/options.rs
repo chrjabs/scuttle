@@ -142,7 +142,7 @@ impl Default for HeurImprOptions {
 
 /// Options for when solution improvement can be performed
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "binary-deps", derive(clap::ValueEnum))]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum HeurImprWhen {
     /// Never perform solution improvement
     #[default]
@@ -233,7 +233,7 @@ impl fmt::Display for DivConAnchor {
 
 /// Possible options for building objective encodings in divide and conquer
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "binary-deps", derive(clap::ValueEnum))]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum BuildEncodings {
     /// Only once after the first ideal point
     #[default]

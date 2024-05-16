@@ -23,11 +23,7 @@ use super::Worker;
 #[solve(bounds = "where VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
         O: SolveIncremental + SolveStats + Default")]
-pub struct DivCon<
-    VM = BasicVarManager,
-    O = rustsat_cadical::CaDiCaL<'static, 'static>,
-    BCG = fn(Assignment) -> Clause,
-> {
+pub struct DivCon<O, VM = BasicVarManager, BCG = fn(Assignment) -> Clause> {
     /// The single worker structure
     worker: Worker<VM, O, BCG>,
     /// The index of the last non-dominated point in the Pareto front that has
@@ -40,10 +36,10 @@ pub struct DivCon<
 }
 
 #[oracle_bounds]
-impl<VM, O> DivCon<VM, O, fn(Assignment) -> Clause>
+impl<O, VM> DivCon<O, VM, fn(Assignment) -> Clause>
 where
-    VM: ManageVars,
     O: SolveIncremental,
+    VM: ManageVars,
 {
     pub fn new_default_blocking(
         inst: MultiOptInstance<VM>,
@@ -68,10 +64,10 @@ where
 }
 
 #[oracle_bounds]
-impl<VM, O> DivCon<VM, O, fn(Assignment) -> Clause>
+impl<O, VM> DivCon<O, VM, fn(Assignment) -> Clause>
 where
-    VM: ManageVars,
     O: SolveIncremental + Default,
+    VM: ManageVars,
 {
     pub fn new_defaults(inst: MultiOptInstance<VM>, opts: DivConOptions) -> anyhow::Result<Self> {
         let kernel_opts = KernelOptions {
@@ -91,7 +87,7 @@ where
     }
 }
 
-impl<VM, O, BCG> DivCon<VM, O, BCG>
+impl<O, VM, BCG> DivCon<O, VM, BCG>
 where
     VM: ManageVars,
 {
@@ -108,7 +104,7 @@ where
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> DivCon<VM, O, BCG>
+impl<O, VM, BCG> DivCon<O, VM, BCG>
 where
     VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
