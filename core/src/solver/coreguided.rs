@@ -2,7 +2,7 @@
 
 use rustsat::{
     encodings::{
-        card::dbtotalizer::{Node, TotDb},
+        card::dbtotalizer::{INode, Node, TotDb},
         nodedb::{NodeById, NodeCon, NodeId, NodeLike},
     },
     instances::{Cnf, ManageVars},
@@ -18,14 +18,14 @@ use crate::MaybeTerminatedError::{self, Done};
 
 use super::{Objective, SolverKernel};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TotOutput {
     pub root: NodeId,
     pub oidx: usize,
     pub tot_weight: usize,
 }
 
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
 pub enum Inactives {
     Weighted(RsHashMap<Lit, usize>),
     Unweighted {
@@ -71,6 +71,17 @@ impl Inactives {
         if to_constant {
             *self = Inactives::Constant;
         }
+        if let Inactives::Unweighted { lits, .. } = self {
+            let mut set = RsHashSet::default();
+            for l in lits {
+                if set.contains(&l) {
+                    // change to weighted
+                    *self = Inactives::Weighted(std::mem::take(self).into_map());
+                    break;
+                }
+                set.insert(l);
+            }
+        }
     }
 
     pub fn cleanup(&mut self) {
@@ -81,6 +92,38 @@ impl Inactives {
                 active.clear();
             }
             Inactives::Constant => (),
+        }
+    }
+
+    pub fn add(&mut self, lit: Lit, weight: usize) {
+        debug_assert!(weight > 0);
+        match self {
+            Inactives::Weighted(map) => {
+                if let Some(w) = map.get_mut(&lit) {
+                    *w += weight;
+                } else {
+                    map.insert(lit, weight);
+                }
+            }
+            Inactives::Unweighted { lits, .. } => {
+                if weight > 1 {
+                    *self = Inactives::Weighted(std::mem::take(self).into_map());
+                    self.insert(lit, weight);
+                    return;
+                }
+                lits.push(lit);
+            }
+            Inactives::Constant => {
+                if weight > 1 {
+                    *self = Inactives::Weighted(RsHashMap::default());
+                } else {
+                    *self = Inactives::Unweighted {
+                        lits: vec![],
+                        active: RsHashSet::default(),
+                    };
+                }
+                self.insert(lit, weight);
+            }
         }
     }
 
@@ -120,7 +163,17 @@ impl Inactives {
         self.cleanup();
         match self {
             Inactives::Weighted(map) => map,
-            Inactives::Unweighted { lits, .. } => lits.into_iter().map(|l| (l, 1)).collect(),
+            Inactives::Unweighted { lits, .. } => {
+                let mut map = RsHashMap::default();
+                for l in lits {
+                    if let Some(w) = map.get_mut(&l) {
+                        *w += 1;
+                    } else {
+                        map.insert(l, 1);
+                    }
+                }
+                map
+            }
             Inactives::Constant => RsHashMap::default(),
         }
     }
@@ -175,7 +228,7 @@ impl<'a> Iterator for InactIter<'a> {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
 pub struct OllReformulation {
     /// Inactive literals, aka the reformulated objective
     pub inactives: Inactives,
@@ -203,6 +256,20 @@ impl From<&Objective> for OllReformulation {
                 ..Default::default()
             },
         }
+    }
+}
+
+impl OllReformulation {
+    /// Extends the reformulation with another reformulation
+    pub fn extend(&mut self, other: &OllReformulation) {
+        for (l, w) in other.inactives.iter() {
+            self.inactives.add(*l, *w);
+        }
+        for (l, out) in &other.outputs {
+            debug_assert!(!self.outputs.contains_key(l));
+            self.outputs.insert(*l, *out);
+        }
+        self.offset += other.offset;
     }
 }
 
@@ -399,7 +466,7 @@ where
                             );
                             assumps.push(!new_olit);
                         } else {
-                            let id = tot_db.insert(Node::Leaf(*olit));
+                            let id = tot_db.insert(Node::leaf(*olit));
                             cons.push(NodeCon::full(id));
                         }
                     }

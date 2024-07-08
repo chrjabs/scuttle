@@ -47,6 +47,10 @@ where
     pub fn iter(&self) -> std::slice::Iter<'_, NonDomPoint<S>> {
         self.ndoms.iter()
     }
+
+    pub fn last(&self) -> Option<&NonDomPoint<S>> {
+        self.ndoms.last()
+    }
 }
 
 impl<S: Clone + Eq> Index<usize> for ParetoFront<S> {
@@ -174,7 +178,7 @@ where
     }
 
     /// Gets the costs of the non-dominated point
-    pub fn costs(&self) -> &Vec<isize> {
+    pub fn costs(&self) -> &[isize] {
         &self.costs
     }
 

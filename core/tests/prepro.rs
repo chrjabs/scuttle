@@ -2,7 +2,7 @@ macro_rules! check_pf_shape {
     ($pf:expr, $t:expr) => {{
         let pps_set: rustsat::types::RsHashSet<(Vec<isize>, usize)> = $pf
             .into_iter()
-            .map(|pp| (pp.costs().clone(), pp.n_sols()))
+            .map(|pp| (Vec::from(pp.costs()), pp.n_sols()))
             .collect();
         let shape_set: rustsat::types::RsHashSet<(Vec<isize>, usize)> = $t.into_iter().collect();
         assert_eq!(pps_set, shape_set);

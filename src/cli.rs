@@ -72,6 +72,11 @@ enum AlgorithmCommand {
         #[arg(long)]
         log_fence: bool,
     },
+    /// Paretop-k
+    ParetopK {
+        #[command(flatten)]
+        shared: SharedArgs,
+    },
     /// Divide and conquer prototype
     #[cfg(feature = "div-con")]
     DivCon {
@@ -480,8 +485,8 @@ impl From<CadicalConfig> for rustsat_cadical::Config {
         match cfg {
             CadicalConfig::Default => rustsat_cadical::Config::Default,
             CadicalConfig::Plain => rustsat_cadical::Config::Plain,
-            CadicalConfig::Sat => rustsat_cadical::Config::SAT,
-            CadicalConfig::Unsat => rustsat_cadical::Config::UNSAT,
+            CadicalConfig::Sat => rustsat_cadical::Config::Sat,
+            CadicalConfig::Unsat => rustsat_cadical::Config::Unsat,
         }
     }
 }
@@ -537,6 +542,7 @@ pub enum Algorithm {
         Option<CoreBoostingOptions>,
     ),
     LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
+    ParetopK(KernelOptions),
     #[cfg(feature = "div-con")]
     DivCon(DivConOptions),
 }
@@ -547,6 +553,7 @@ impl fmt::Display for Algorithm {
             Algorithm::PMinimal(..) => write!(f, "p-pminimal"),
             Algorithm::BiOptSat(..) => write!(f, "bioptsat"),
             Algorithm::LowerBounding(..) => write!(f, "lower-bounding"),
+            Algorithm::ParetopK(..) => write!(f, "paretop-k"),
             #[cfg(feature = "div-con")]
             Algorithm::DivCon(..) => write!(f, "div-con"),
         }
@@ -693,6 +700,28 @@ impl Cli {
                     alg: Algorithm::LowerBounding(kernel_opts(shared, store_cnf), cb),
                 }
             }
+            AlgorithmCommand::ParetopK { shared } => Cli {
+                limits: (&shared.limits).into(),
+                file_format: shared.file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: shared.file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: shared.file.inst_path.clone(),
+                preprocessing: shared.prepro.preprocessing.into(),
+                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                reindexing: shared.prepro.reindexing.into(),
+                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                cadical_config: shared.cadical_config.into(),
+                stdout: stdout(shared.log.color),
+                stderr: stderr(shared.log.color),
+                print_solver_config: shared.log.print_solver_config,
+                print_solutions: shared.log.print_solutions,
+                print_stats: !shared.log.no_print_stats,
+                color: shared.log.color,
+                logger_config: (&shared.log).into(),
+                alg: Algorithm::ParetopK(kernel_opts(shared, false)),
+            },
             #[cfg(feature = "div-con")]
             AlgorithmCommand::DivCon {
                 shared,
@@ -872,6 +901,14 @@ impl Cli {
                     Self::print_parameter(&mut buffer, "obj-pb-encoding", pb_enc)?;
                     Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
+                }
+                Algorithm::ParetopK(opts) => {
+                    Self::print_parameter(
+                        &mut buffer,
+                        "enumeration",
+                        EnumPrinter::new(opts.enumeration),
+                    )?;
+                    Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
                 }
                 #[cfg(feature = "div-con")]
                 Algorithm::DivCon(opts) => {

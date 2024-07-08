@@ -5,8 +5,8 @@
 //! ## References
 //!
 //! - \[1\] Joao Cortes and Ines Lynce and Vasco M. Maquinho: _New Core-Guided
-//! and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
-//! TACAS 2023.
+//!     and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
+//!     TACAS 2023.
 
 use rustsat::{
     encodings::{
@@ -35,6 +35,15 @@ use super::{
     SolverKernel,
 };
 
+/// A solver type for the lower-bounding algorithm from Coretes et al.
+///
+/// # Generics
+///
+/// - `O`: the SAT solver backend
+/// - `PBE`: the pseudo-Boolean objective encoding
+/// - `CE`: the cardinality objective encoding
+/// - `VM`: the variable manager of the input
+/// - `BCG`: the blocking clause generator
 #[derive(KernelFunctions, Solve)]
 #[solve(
     bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
@@ -470,12 +479,12 @@ where
             )?;
             self.log_candidate(&costs, Phase::OuterLoop)?;
             self.check_termination()?;
-            self.phase_solution(solution.clone())?;
+            self.phase_solution(&solution)?;
             let (costs, solution, block_switch) =
                 self.p_minimization(costs, solution, base_assumps, obj_encs)?;
 
             let assumps: Vec<_> = self.enforce_dominating(&costs, obj_encs)?.collect();
-            self.yield_solutions(costs, &assumps, solution, collector)?;
+            self.yield_solutions(&costs, &assumps, solution, collector)?;
 
             // Block last Pareto point, if temporarily blocked
             if let Some(block_lit) = block_switch {

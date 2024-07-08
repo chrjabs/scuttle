@@ -2,7 +2,7 @@ macro_rules! check_pf_shape {
     ($pf:expr, $t:expr) => {{
         let pps_set: rustsat::types::RsHashSet<(Vec<isize>, usize)> = $pf
             .into_iter()
-            .map(|pp| (pp.costs().clone(), pp.n_sols()))
+            .map(|pp| (Vec::from(pp.costs()), pp.n_sols()))
             .collect();
         let shape_set: rustsat::types::RsHashSet<(Vec<isize>, usize)> = $t.into_iter().collect();
         assert_eq!(pps_set, shape_set);
@@ -17,6 +17,7 @@ macro_rules! test_dimacs_instance {
         let mut solver = <$s>::new_defaults(inst, $o).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver.pareto_front();
+        println!("{pf:?}");
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
@@ -30,6 +31,7 @@ macro_rules! test_dimacs_instance {
             solver.solve(scuttle_core::Limits::none()).unwrap();
         }
         let pf = solver.pareto_front();
+        println!("{pf:?}");
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
@@ -47,6 +49,7 @@ macro_rules! test_opb_instance {
         let mut solver = <$s>::new_defaults(inst, $o).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver.pareto_front();
+        println!("{pf:?}");
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
@@ -64,6 +67,7 @@ macro_rules! test_opb_instance {
             solver.solve(scuttle_core::Limits::none()).unwrap();
         }
         let pf = solver.pareto_front();
+        println!("{pf:?}");
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
@@ -997,6 +1001,32 @@ mod bioptsat {
             ..Default::default()
         }
     );
+}
+
+mod paretopk {
+    type S = scuttle_core::ParetopK<
+        rustsat_cadical::CaDiCaL<'static, 'static>,
+        rustsat::encodings::pb::DbGte,
+        rustsat::encodings::card::DbTotalizer,
+        rustsat::instances::BasicVarManager,
+        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
+    >;
+    generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
+    //generate_tests!(
+    //    cb,
+    //    super::S,
+    //    scuttle_core::KernelOptions::default(),
+    //    scuttle_core::CoreBoostingOptions::default()
+    //);
+    //generate_tests!(
+    //    cb_rebase,
+    //    super::S,
+    //    scuttle_core::KernelOptions::default(),
+    //    scuttle_core::CoreBoostingOptions {
+    //        rebase: true,
+    //        ..Default::default()
+    //    }
+    //);
 }
 
 #[cfg(feature = "div-con")]

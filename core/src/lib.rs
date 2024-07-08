@@ -23,6 +23,7 @@ pub use solver::Solve;
 // Reexport algorithms
 pub use solver::bioptsat::BiOptSat;
 pub use solver::lowerbounding::LowerBounding;
+pub use solver::paretopk::ParetopK;
 pub use solver::pminimal::PMinimal;
 
 pub(crate) mod termination;

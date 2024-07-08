@@ -12,7 +12,8 @@ use rustsat_cadical::CaDiCaL;
 #[cfg(feature = "div-con")]
 use scuttle_core::solver::divcon::SeqDivCon;
 use scuttle_core::{
-    self, solver::CoreBoost, BiOptSat, LowerBounding, MaybeTerminatedError, PMinimal, Solve,
+    self, solver::CoreBoost, BiOptSat, LowerBounding, MaybeTerminatedError, PMinimal, ParetopK,
+    Solve,
 };
 
 mod cli;
@@ -27,6 +28,8 @@ type PMin<VM> = PMinimal<Oracle, pb::DbGte, card::DbTotalizer, VM, fn(Assignment
 type Bos<PBE, CE, VM> = BiOptSat<Oracle, PBE, CE, VM, fn(Assignment) -> Clause>;
 /// Lower-bounding instantiation used
 type Lb<VM> = LowerBounding<Oracle, pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause>;
+/// ParetopK instantiation used
+type PtK<VM> = ParetopK<Oracle, pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause>;
 #[cfg(feature = "div-con")]
 /// Divide and Conquer prototype used
 type Dc<VM> = SeqDivCon<Oracle, VM, fn(Assignment) -> Clause>;
@@ -141,6 +144,12 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
             if cont {
                 solver.solve(cli.limits)?;
             }
+            post_solve(&mut solver, cli, prepro, reindexer).into()
+        }
+        Algorithm::ParetopK(opts) => {
+            let mut solver = PtK::new_default_blocking(inst, oracle, opts)?;
+            setup_cli_interaction(&mut solver, cli)?;
+            solver.solve(cli.limits)?;
             post_solve(&mut solver, cli, prepro, reindexer).into()
         }
         #[cfg(feature = "div-con")]

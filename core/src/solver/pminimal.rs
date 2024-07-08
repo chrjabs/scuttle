@@ -42,9 +42,15 @@ use super::{
     coreboosting::MergeOllRef, default_blocking_clause, CoreBoost, Objective, SolverKernel,
 };
 
-/// The solver type. Generics the pseudo-boolean encoding to use for weighted
-/// objectives, the cardinality encoding to use for unweighted objectives, the
-/// variable manager to use and the SAT backend.
+/// A solver type for the $P$-minimal algorithm
+///
+/// # Generics
+///
+/// - `O`: the SAT solver backend
+/// - `PBE`: the pseudo-Boolean objective encoding
+/// - `CE`: the cardinality objective encoding
+/// - `VM`: the variable manager of the input
+/// - `BCG`: the blocking clause generator
 #[derive(KernelFunctions, Solve)]
 #[solve(
     bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
@@ -258,7 +264,7 @@ where
             )?;
             self.kernel.log_candidate(&costs, Phase::OuterLoop)?;
             self.kernel.check_termination()?;
-            self.kernel.phase_solution(solution.clone())?;
+            self.kernel.phase_solution(&solution)?;
             let (costs, solution, block_switch) =
                 self.kernel
                     .p_minimization(costs, solution, &[], &mut self.obj_encs)?;
@@ -268,7 +274,7 @@ where
                 .enforce_dominating(&costs, &mut self.obj_encs)?
                 .collect();
             self.kernel
-                .yield_solutions(costs, &assumps, solution, &mut self.pareto_front)?;
+                .yield_solutions(&costs, &assumps, solution, &mut self.pareto_front)?;
 
             // Block last Pareto point, if temporarily blocked
             if let Some(block_lit) = block_switch {
@@ -405,7 +411,7 @@ where
             )?;
             self.log_candidate(&costs, Phase::Minimization)?;
             self.check_termination()?;
-            self.phase_solution(solution.clone())?;
+            self.phase_solution(&solution)?;
         }
     }
 

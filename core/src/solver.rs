@@ -36,6 +36,7 @@ pub mod bioptsat;
 #[cfg(feature = "div-con")]
 pub mod divcon;
 pub mod lowerbounding;
+pub mod paretopk;
 pub mod pminimal;
 
 mod coreboosting;
@@ -576,11 +577,11 @@ where
 {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
-    fn phase_solution(&mut self, solution: Assignment) -> anyhow::Result<()> {
+    fn phase_solution(&mut self, solution: &Assignment) -> anyhow::Result<()> {
         if !self.opts.solution_guided_search {
             return Ok(());
         }
-        for lit in solution.into_iter() {
+        for lit in solution.iter() {
             self.oracle.phase_lit(lit)?;
         }
         Ok(())
@@ -626,7 +627,7 @@ where
     /// ask for enumeration, will enumerate all solutions at this point.
     fn yield_solutions<Col: Extend<NonDomPoint>>(
         &mut self,
-        costs: Vec<usize>,
+        costs: &[usize],
         assumps: &[Lit],
         mut solution: Assignment,
         collector: &mut Col,
@@ -747,7 +748,7 @@ where
         let mut assumps = Vec::from(base_assumps);
         encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager)?;
         assumps.extend(encoding.enforce_ub(cost).unwrap());
-        self.yield_solutions(costs, &assumps, sol, collector)?;
+        self.yield_solutions(&costs, &assumps, sol, collector)?;
         Done(Some(cost))
     }
 }

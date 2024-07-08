@@ -32,6 +32,15 @@ use super::{
     SolverKernel,
 };
 
+/// A solver type for the BiOptSat algorithm
+///
+/// # Generics
+///
+/// - `O`: the SAT solver backend
+/// - `PBE`: the pseudo-Boolean objective encoding
+/// - `CE`: the cardinality objective encoding
+/// - `VM`: the variable manager of the input
+/// - `BCG`: the blocking clause generator
 #[derive(KernelFunctions, Solve)]
 #[solve(
     bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,

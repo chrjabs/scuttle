@@ -6,7 +6,7 @@ use rustsat::{
     encodings::{
         card::{
             self,
-            dbtotalizer::{Node, TotDb},
+            dbtotalizer::{INode, Node, TotDb},
             DbTotalizer,
         },
         nodedb::{NodeById, NodeCon, NodeId, NodeLike},
@@ -62,14 +62,15 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
     ) -> ObjEncoding<Self::PBE, Self::CE> {
         let root = tot_db.merge_thorough(&mut cons);
         if root.multiplier() == 1 {
-            match &tot_db[root.id] {
-                Node::Leaf(_) | Node::Unit(_) => ObjEncoding::Unweighted(
+            match &tot_db[root.id].0 {
+                INode::Leaf(_) | INode::Unit(_) => ObjEncoding::Unweighted(
                     DbTotalizer::from_raw(root.id, tot_db),
                     offset - root.offset(),
                 ),
-                Node::General(_) => {
+                INode::General(_) => {
                     ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
                 }
+                INode::Dummy => unreachable!(),
             }
         } else {
             ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
@@ -116,7 +117,7 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
                     }
                 }
             } else {
-                let node = tot_db.insert(Node::Leaf(*lit));
+                let node = tot_db.insert(Node::leaf(*lit));
                 cons.push(NodeCon::weighted(node, weight));
             }
         }
@@ -305,7 +306,7 @@ where
                     }
                 } else {
                     // original obj literal or introduced by inprocessing
-                    let node = tot_db.insert(Node::Leaf(olit));
+                    let node = tot_db.insert(Node::leaf(olit));
                     cons.push(NodeCon::weighted(node, w));
                 }
             }
