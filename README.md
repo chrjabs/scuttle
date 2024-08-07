@@ -14,7 +14,7 @@ CPAIOR'24 paper is available in the `cpaior24/` directory in this repository.
 
 ## Algorithms
 
-| `--algorithm=`   | Description                                                               |
+| First argument   | Description                                                               |
 | ---------------- | ------------------------------------------------------------------------- |
 | `p-minimal`      | P-Minimal model enumeration as described in \[1\] and \[2\]               |
 | `lower-bounding` | Lower-bounding search as described in \[3\] (called "core-guiding" there) |
@@ -23,7 +23,7 @@ CPAIOR'24 paper is available in the `cpaior24/` directory in this repository.
 ## Building
 
 If you simply want a binary of the solver, you can install it from
-[crates.io](https://crates.io) by running `cargo install scuttle`.
+[crates.io](https://crates.io) by running `cargo install scuttle --locked`.
 
 To build the project from source, you will need to clone
 [RustSAT](https://github.com/chrjabs/rustsat) and
