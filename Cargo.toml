@@ -1,7 +1,7 @@
 [package]
 name = "scuttle"
 authors = ["Christoph Jabs <christoph.jabs@helsinki.fi>"]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 license = "MIT"
 description = "A multi-objective MaxSAT solver."
@@ -16,10 +16,10 @@ rustsat = { version = "0.4.3", path = "../rustsat/rustsat", features = [
   "multiopt",
   "internals",
 ] }
-rustsat-cadical = { optional = true, version = "0.2", path = "../rustsat/cadical", features = [
+rustsat-cadical = { optional = true, version = "0.2.4", path = "../rustsat/cadical", features = [
   "v1-7-2",
 ] }
-maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = [
+maxpre = { version = "=0.2.1", path = "../maxpre-rs", optional = true, features = [
   "multiopt",
 ] }
 cpu-time = { optional = true, version = "1.0.0" }
@@ -29,14 +29,6 @@ termcolor = { optional = true, version = "1.4.1" }
 atty = { optional = true, version = "0.2.14" }
 signal-hook = { optional = true, version = "0.3.17" }
 scuttle-proc = { version = "0.1", path = "./proc" }
-
-[build-dependencies]
-rustsat-cadical = { version = "0.2", path = "../rustsat/cadical", features = [
-  "v1-7-2",
-] }
-maxpre = { version = "0.2", path = "../maxpre-rs", optional = true, features = [
-  "multiopt",
-] }
 
 [features]
 default = [
