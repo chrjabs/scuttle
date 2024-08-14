@@ -480,8 +480,8 @@ impl From<CadicalConfig> for rustsat_cadical::Config {
         match cfg {
             CadicalConfig::Default => rustsat_cadical::Config::Default,
             CadicalConfig::Plain => rustsat_cadical::Config::Plain,
-            CadicalConfig::Sat => rustsat_cadical::Config::SAT,
-            CadicalConfig::Unsat => rustsat_cadical::Config::UNSAT,
+            CadicalConfig::Sat => rustsat_cadical::Config::Sat,
+            CadicalConfig::Unsat => rustsat_cadical::Config::Unsat,
         }
     }
 }

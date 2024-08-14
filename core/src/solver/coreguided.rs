@@ -2,8 +2,8 @@
 
 use rustsat::{
     encodings::{
-        card::dbtotalizer::{Node, TotDb},
         nodedb::{NodeById, NodeCon, NodeId, NodeLike},
+        totdb::{Db as TotDb, Node, Semantics},
     },
     instances::{Cnf, ManageVars},
     solvers::{
@@ -299,9 +299,10 @@ where
                             }
                         }
                         if oidx < tot_db[root].len() {
-                            let olit = tot_db.define_pos_tot(
+                            let olit = tot_db.define_unweighted(
                                 root,
                                 oidx,
+                                Semantics::If,
                                 &mut encs,
                                 &mut self.var_manager,
                             )?;
@@ -382,9 +383,10 @@ where
                             if oidx + 1 >= tot_db[root].len() {
                                 continue;
                             }
-                            let new_olit = tot_db.define_pos_tot(
+                            let new_olit = tot_db.define_unweighted(
                                 root,
                                 oidx + 1,
+                                Semantics::If,
                                 &mut encs,
                                 &mut self.var_manager,
                             )?;
@@ -438,8 +440,13 @@ where
         let mut bound = 1;
         let core_len = tot_db[root].len();
         while bound < core_len {
-            let olit =
-                tot_db.define_pos_tot(root, bound, &mut self.oracle, &mut self.var_manager)?;
+            let olit = tot_db.define_unweighted(
+                root,
+                bound,
+                Semantics::If,
+                &mut self.oracle,
+                &mut self.var_manager,
+            )?;
             #[cfg(feature = "limit-conflicts")]
             self.oracle.limit_conflicts(Some(50000))?;
             assumps[base_assumps.len()] = !olit;

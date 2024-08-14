@@ -4,13 +4,10 @@ use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     clause,
     encodings::{
-        card::{
-            self,
-            dbtotalizer::{Node, TotDb},
-            DbTotalizer,
-        },
+        card::{self, DbTotalizer},
         nodedb::{NodeById, NodeCon, NodeId, NodeLike},
         pb::{self, DbGte},
+        totdb::{Db as TotDb, Node, Semantics},
     },
     instances::ManageVars,
     solvers::{SolveIncremental, SolveStats},
@@ -70,6 +67,7 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
                 Node::General(_) => {
                     ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
                 }
+                Node::Dummy => unreachable!(),
             }
         } else {
             ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
@@ -193,7 +191,7 @@ where
             .collect();
         let mut objs = Vec::with_capacity(reforms.len());
         for (obj_idx, (reform, tot_db)) in reforms.iter_mut().enumerate() {
-            tot_db.reset_encoded();
+            tot_db.reset_encoded(Semantics::IfAndOnlyIf);
             let mut softs = Vec::with_capacity(reform.inactives.len());
             for (lit, weight) in reform.inactives.iter() {
                 if let Some(TotOutput {
@@ -203,9 +201,10 @@ where
                 }) = reform.outputs.get(lit)
                 {
                     for idx in *oidx..tot_db[*root].len() {
-                        let olit = tot_db.define_pos_tot(
+                        let olit = tot_db.define_unweighted(
                             *root,
                             idx,
+                            Semantics::If,
                             &mut orig_cnf,
                             &mut self.var_manager,
                         )?;

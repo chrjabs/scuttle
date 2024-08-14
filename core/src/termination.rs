@@ -83,10 +83,8 @@ impl<T> std::ops::Try for MaybeTerminated<T> {
 
 impl<T> std::ops::FromResidual<MaybeTerminated<std::convert::Infallible>> for MaybeTerminated<T> {
     fn from_residual(residual: <Self as std::ops::Try>::Residual) -> Self {
-        match residual {
-            MaybeTerminated::Done(_) => unreachable!(),
-            MaybeTerminated::Terminated(term) => MaybeTerminated::Terminated(term),
-        }
+        let MaybeTerminated::Terminated(term) = residual;
+        MaybeTerminated::Terminated(term)
     }
 }
 
@@ -160,7 +158,6 @@ impl<T> std::ops::FromResidual<MaybeTerminatedError<std::convert::Infallible>>
 {
     fn from_residual(residual: <Self as std::ops::Try>::Residual) -> Self {
         match residual {
-            MaybeTerminatedError::Done(_) => unreachable!(),
             MaybeTerminatedError::Terminated(term) => MaybeTerminatedError::Terminated(term),
             MaybeTerminatedError::Error(err) => MaybeTerminatedError::Error(err),
         }
@@ -171,10 +168,8 @@ impl<T> std::ops::FromResidual<MaybeTerminated<std::convert::Infallible>>
     for MaybeTerminatedError<T>
 {
     fn from_residual(residual: MaybeTerminated<std::convert::Infallible>) -> Self {
-        match residual {
-            MaybeTerminated::Done(_) => unreachable!(),
-            MaybeTerminated::Terminated(term) => MaybeTerminatedError::Terminated(term),
-        }
+        let MaybeTerminated::Terminated(term) = residual;
+        MaybeTerminatedError::Terminated(term)
     }
 }
 
@@ -183,10 +178,8 @@ where
     E: Into<anyhow::Error>,
 {
     fn from_residual(residual: Result<std::convert::Infallible, E>) -> Self {
-        match residual {
-            Ok(_) => unreachable!(),
-            Err(err) => MaybeTerminatedError::Error(err.into()),
-        }
+        let Err(err) = residual;
+        MaybeTerminatedError::Error(err.into())
     }
 }
 
