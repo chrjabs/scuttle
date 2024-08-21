@@ -69,32 +69,6 @@ pub enum AfterCbOptions {
 
 pub type KernelWithCbOptions = (KernelOptions, Option<CoreBoostingOptions>);
 
-#[cfg(feature = "div-con")]
-#[derive(Clone, Default)]
-pub struct DivConOptions {
-    pub kernel: KernelOptions,
-    /// The recursion anchor to use
-    pub anchor: DivConAnchor,
-    /// When to build the objective encodings
-    pub build_encodings: BuildEncodings,
-    /// If true, don't merge OLL totalizers.
-    pub rebase_encodings: bool,
-    /// Reset the oracle after each global ideal point
-    pub reset_after_global_ideal: bool,
-    /// Whether to do inprocessing and with which techniques
-    pub inpro: Option<String>,
-    #[cfg(feature = "data-helpers")]
-    /// Instead of solving, print some statistics about clauses in the encoding
-    pub enc_clauses_summary: bool,
-}
-
-#[cfg(feature = "div-con")]
-impl DivConOptions {
-    pub fn set_enumeration(&mut self, enumeration: EnumOptions) {
-        self.kernel.set_enumeration(enumeration)
-    }
-}
-
 /// Enumeration options for the $P$-minimal solver
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum EnumOptions {

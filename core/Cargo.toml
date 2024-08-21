@@ -7,6 +7,7 @@ edition = "2021"
 anyhow.workspace = true
 clap = { workspace = true, optional = true }
 maxpre.workspace = true
+pidgeons.workspace = true
 rustsat.workspace = true
 scuttle-proc.workspace = true
 thiserror.workspace = true
@@ -22,6 +23,4 @@ sol-tightening = ["scuttle-proc/sol-tightening"]
 coarse-convergence = []
 limit-conflicts = ["scuttle-proc/limit-conflicts"]
 check-non-dominance = []
-data-helpers = []
-div-con = []
 clap = ["dep:clap"]

@@ -9,45 +9,31 @@ macro_rules! check_pf_shape {
     }};
 }
 
-macro_rules! preprocess_inst {
-    ($inst:expr, $tech:expr) => {{
-        use maxpre::PreproClauses;
-        let mut prepro = <maxpre::MaxPre as maxpre::PreproMultiOpt>::new($inst, false);
-        prepro.preprocess($tech, 0, 1e9);
-        let inst = maxpre::PreproMultiOpt::prepro_instance(&mut prepro);
-        (inst, prepro)
-    }};
-}
-
-macro_rules! test_dimacs_instance {
+macro_rules! test_instance {
     ($s:ty, $o:expr, $tech:expr, $i:expr, $t:expr) => {{
         use maxpre::PreproClauses;
-        use scuttle_core::{KernelFunctions, Solve};
-        let inst: rustsat::instances::MultiOptInstance =
-            rustsat::instances::MultiOptInstance::from_dimacs_path($i).unwrap();
-        let (inst, mut prepro) = preprocess_inst!(inst, $tech);
-        let mut solver = <$s>::new_defaults(inst, $o).unwrap();
-        solver.solve(scuttle_core::Limits::none()).unwrap();
-        let pf = solver
-            .pareto_front()
-            .convert_solutions(&mut |s| prepro.reconstruct(s));
-        assert_eq!(pf.len(), $t.len());
-        check_pf_shape!(pf, $t);
-    }};
-}
-
-macro_rules! test_opb_instance {
-    ($s:ty, $o:expr, $tech:expr, $i:expr, $t:expr) => {{
-        use maxpre::PreproClauses;
-        use scuttle_core::{KernelFunctions, Solve};
-        let inst: rustsat::instances::MultiOptInstance =
-            rustsat::instances::MultiOptInstance::from_opb_path(
+        use scuttle_core::{prepro, KernelFunctions, Solve};
+        let (mut prepro, inst) = prepro::max_pre(
+            prepro::parse(
                 $i,
+                prepro::FileFormat::Infer,
                 rustsat::instances::fio::opb::Options::default(),
             )
-            .unwrap();
-        let (inst, mut prepro) = preprocess_inst!(inst, $tech);
-        let mut solver = <$s>::new_defaults(inst, $o).unwrap();
+            .unwrap(),
+            $tech,
+            true,
+        );
+        let mut solver = <$s>::new(
+            inst.cnf,
+            inst.objs,
+            inst.max_inst_var,
+            inst.max_orig_var,
+            $o,
+            None,
+            Default::default,
+            scuttle_core::solver::default_blocking_clause,
+        )
+        .unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver
             .pareto_front()
@@ -59,7 +45,7 @@ macro_rules! test_opb_instance {
 
 macro_rules! small {
     ($s:ty, $o:expr, $tech:expr) => {{
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $tech,
@@ -71,7 +57,7 @@ macro_rules! small {
 
 macro_rules! medium_single {
     ($s:ty, $o:expr, $tech:expr) => {{
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $tech,
@@ -90,7 +76,7 @@ macro_rules! medium_single {
 
 macro_rules! four {
     ($s:ty, $o:expr, $tech:expr) => {{
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $tech,
@@ -107,7 +93,7 @@ macro_rules! four {
 
 macro_rules! parkinsons {
     ($s:ty, $o:expr, $tech:expr) => {{
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $tech,
@@ -128,7 +114,7 @@ macro_rules! parkinsons {
 
 macro_rules! mushroom {
     ($s:ty, $o:expr, $tech:expr) => {{
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $tech,
@@ -151,7 +137,7 @@ macro_rules! mushroom {
 
 macro_rules! dal {
     ($s:ty, $o:expr, $tech:expr) => {{
-        test_opb_instance!(
+        test_instance!(
             $s,
             $o,
             $tech,
@@ -185,7 +171,7 @@ macro_rules! dal {
 
 macro_rules! set_cover {
     ($s:ty, $o:expr, $tech:expr) => {{
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $tech,
@@ -215,7 +201,7 @@ macro_rules! set_cover {
 
 macro_rules! packup_3 {
     ($s:ty, $o:expr, $tech:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $tech,
@@ -340,9 +326,9 @@ macro_rules! generate_tests {
 mod pmin {
     type S = scuttle_core::PMinimal<
         rustsat_cadical::CaDiCaL<'static, 'static>,
+        fn() -> rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
-        rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     >;
     generate_tests!(
@@ -356,9 +342,9 @@ mod pmin {
 mod lb {
     type S = scuttle_core::LowerBounding<
         rustsat_cadical::CaDiCaL<'static, 'static>,
+        fn() -> rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
-        rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     >;
     generate_tests!(
@@ -372,30 +358,15 @@ mod lb {
 mod bioptsat {
     type S = scuttle_core::BiOptSat<
         rustsat_cadical::CaDiCaL<'static, 'static>,
+        fn() -> rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
-        rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     >;
     generate_biobj_tests!(
         default,
         super::S,
         scuttle_core::KernelOptions::default(),
-        "[[uvsrgc]VRTG]"
-    );
-}
-
-#[cfg(feature = "div-con")]
-mod divcon {
-    type S = scuttle_core::solver::divcon::SeqDivCon<
-        rustsat_cadical::CaDiCaL<'static, 'static>,
-        rustsat::instances::BasicVarManager,
-        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    >;
-    generate_tests!(
-        default,
-        super::S,
-        scuttle_core::DivConOptions::default(),
         "[[uvsrgc]VRTG]"
     );
 }

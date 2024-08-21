@@ -9,56 +9,54 @@ macro_rules! check_pf_shape {
     }};
 }
 
-macro_rules! test_dimacs_instance {
+macro_rules! test_instance {
     ($s:ty, $o:expr, $i:expr, $t:expr) => {{
-        use scuttle_core::{KernelFunctions, Solve};
-        let inst: rustsat::instances::MultiOptInstance =
-            rustsat::instances::MultiOptInstance::from_dimacs_path($i).unwrap();
-        let mut solver = <$s>::new_defaults(inst, $o).unwrap();
+        use scuttle_core::{prepro, KernelFunctions, Solve};
+        let inst = prepro::handle_soft_clauses(
+            prepro::parse(
+                $i,
+                prepro::FileFormat::Infer,
+                rustsat::instances::fio::opb::Options::default(),
+            )
+            .unwrap(),
+        );
+        let mut solver = <$s>::new(
+            inst.cnf,
+            inst.objs,
+            inst.max_inst_var,
+            inst.max_orig_var,
+            $o,
+            None,
+            Default::default,
+            scuttle_core::solver::default_blocking_clause,
+        )
+        .unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver.pareto_front();
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
     ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
-        use scuttle_core::{CoreBoost, KernelFunctions, Solve};
-        let inst: rustsat::instances::MultiOptInstance =
-            rustsat::instances::MultiOptInstance::from_dimacs_path($i).unwrap();
-        let mut solver = <$s>::new_defaults(inst, $o).unwrap();
-        let cont = solver.core_boost($cbo).unwrap();
-        if cont {
-            solver.solve(scuttle_core::Limits::none()).unwrap();
-        }
-        let pf = solver.pareto_front();
-        assert_eq!(pf.len(), $t.len());
-        check_pf_shape!(pf, $t);
-    }};
-}
-
-macro_rules! test_opb_instance {
-    ($s:ty, $o:expr, $i:expr, $t:expr) => {{
-        use scuttle_core::{KernelFunctions, Solve};
-        let inst: rustsat::instances::MultiOptInstance =
-            rustsat::instances::MultiOptInstance::from_opb_path(
+        use scuttle_core::{prepro, CoreBoost, KernelFunctions, Solve};
+        let inst = prepro::handle_soft_clauses(
+            prepro::parse(
                 $i,
+                prepro::FileFormat::Infer,
                 rustsat::instances::fio::opb::Options::default(),
             )
-            .unwrap();
-        let mut solver = <$s>::new_defaults(inst, $o).unwrap();
-        solver.solve(scuttle_core::Limits::none()).unwrap();
-        let pf = solver.pareto_front();
-        assert_eq!(pf.len(), $t.len());
-        check_pf_shape!(pf, $t);
-    }};
-    ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
-        use scuttle_core::{CoreBoost, KernelFunctions, Solve};
-        let inst: rustsat::instances::MultiOptInstance =
-            rustsat::instances::MultiOptInstance::from_opb_path(
-                $i,
-                rustsat::instances::fio::opb::Options::default(),
-            )
-            .unwrap();
-        let mut solver = <$s>::new_defaults(inst, $o).unwrap();
+            .unwrap(),
+        );
+        let mut solver = <$s>::new(
+            inst.cnf,
+            inst.objs,
+            inst.max_inst_var,
+            inst.max_orig_var,
+            $o,
+            None,
+            Default::default,
+            scuttle_core::solver::default_blocking_clause,
+        )
+        .unwrap();
         let cont = solver.core_boost($cbo).unwrap();
         if cont {
             solver.solve(scuttle_core::Limits::none()).unwrap();
@@ -71,7 +69,7 @@ macro_rules! test_opb_instance {
 
 macro_rules! small {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/small.mcnf",
@@ -79,7 +77,7 @@ macro_rules! small {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -91,7 +89,7 @@ macro_rules! small {
 
 macro_rules! medium_single {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/medium.mcnf",
@@ -106,7 +104,7 @@ macro_rules! medium_single {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -125,7 +123,7 @@ macro_rules! medium_single {
 
 macro_rules! medium_all {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/medium.mcnf",
@@ -140,7 +138,7 @@ macro_rules! medium_all {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -159,7 +157,7 @@ macro_rules! medium_all {
 
 macro_rules! four {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/four.mcnf",
@@ -172,7 +170,7 @@ macro_rules! four {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -189,7 +187,7 @@ macro_rules! four {
 
 macro_rules! parkinsons {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/parkinsons_mlic.mcnf",
@@ -206,7 +204,7 @@ macro_rules! parkinsons {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -227,7 +225,7 @@ macro_rules! parkinsons {
 
 macro_rules! mushroom {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/mushroom_mlic.mcnf",
@@ -246,7 +244,7 @@ macro_rules! mushroom {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -269,7 +267,7 @@ macro_rules! mushroom {
 
 macro_rules! dal {
     ($s:ty, $o:expr) => {
-        test_opb_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/dal.opb",
@@ -299,7 +297,7 @@ macro_rules! dal {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_opb_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -333,7 +331,7 @@ macro_rules! dal {
 
 macro_rules! dal2 {
     ($s:ty, $o:expr) => {
-        test_opb_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/dal2.opb",
@@ -352,7 +350,7 @@ macro_rules! dal2 {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_opb_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -375,7 +373,7 @@ macro_rules! dal2 {
 
 macro_rules! set_cover {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/set-cover.mcnf",
@@ -401,7 +399,7 @@ macro_rules! set_cover {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -431,7 +429,7 @@ macro_rules! set_cover {
 
 macro_rules! packup_3 {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/packup-3.mcnf",
@@ -470,7 +468,7 @@ macro_rules! packup_3 {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -513,7 +511,7 @@ macro_rules! packup_3 {
 
 macro_rules! ftp {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/ftp.mcnf",
@@ -528,7 +526,7 @@ macro_rules! ftp {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -547,7 +545,7 @@ macro_rules! ftp {
 
 macro_rules! spot5 {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/spot5.mcnf",
@@ -569,7 +567,7 @@ macro_rules! spot5 {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -595,7 +593,7 @@ macro_rules! spot5 {
 
 macro_rules! set_cover_3 {
     ($s:ty, $o:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             "./data/set-cover-3.mcnf",
@@ -617,7 +615,7 @@ macro_rules! set_cover_3 {
         )
     };
     ($s:ty, $o:expr, $cbo:expr) => {
-        test_dimacs_instance!(
+        test_instance!(
             $s,
             $o,
             $cbo,
@@ -892,9 +890,9 @@ macro_rules! generate_tests {
 mod pmin {
     type S = scuttle_core::PMinimal<
         rustsat_cadical::CaDiCaL<'static, 'static>,
+        fn() -> rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
-        rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     >;
     generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
@@ -950,9 +948,9 @@ mod pmin {
 mod lb {
     type S = scuttle_core::LowerBounding<
         rustsat_cadical::CaDiCaL<'static, 'static>,
+        fn() -> rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
-        rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     >;
     generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
@@ -976,9 +974,9 @@ mod lb {
 mod bioptsat {
     type S = scuttle_core::BiOptSat<
         rustsat_cadical::CaDiCaL<'static, 'static>,
+        fn() -> rustsat_cadical::CaDiCaL<'static, 'static>,
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
-        rustsat::instances::BasicVarManager,
         fn(rustsat::types::Assignment) -> rustsat::types::Clause,
     >;
     generate_biobj_tests!(default, super::S, scuttle_core::KernelOptions::default());
@@ -994,130 +992,6 @@ mod bioptsat {
         scuttle_core::KernelOptions::default(),
         scuttle_core::CoreBoostingOptions {
             rebase: true,
-            ..Default::default()
-        }
-    );
-}
-
-#[cfg(feature = "div-con")]
-mod divcon {
-    type S = scuttle_core::solver::divcon::SeqDivCon<
-        rustsat_cadical::CaDiCaL<'static, 'static>,
-        rustsat::instances::BasicVarManager,
-        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    >;
-    generate_tests!(
-        bioptsat,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::BiOptSat,
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        linsu,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::LinSu,
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        pmin_smaller_0,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::PMinimal(
-                scuttle_core::options::SubProblemSize::Smaller(0)
-            ),
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        lb_smaller_0,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::LowerBounding(
-                scuttle_core::options::SubProblemSize::Smaller(0),
-            ),
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        pmin_smaller_0_inpro,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::PMinimal(
-                scuttle_core::options::SubProblemSize::Smaller(0)
-            ),
-            inpro: Some(String::from("[[uvsrgc]VRTG]")),
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        pmin_smaller_0_reset,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::PMinimal(
-                scuttle_core::options::SubProblemSize::Smaller(0)
-            ),
-            reset_after_global_ideal: true,
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        pmin_smaller_0_rebase,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::PMinimal(
-                scuttle_core::options::SubProblemSize::Smaller(0)
-            ),
-            rebase_encodings: true,
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        pmin_smaller_1,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::PMinimal(
-                scuttle_core::options::SubProblemSize::Smaller(1)
-            ),
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        lb_smaller_1,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::LowerBounding(
-                scuttle_core::options::SubProblemSize::Smaller(1)
-            ),
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        n_minus_1,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::NMinus(1),
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        n_minus_1_rebuild,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::NMinus(1),
-            build_encodings: scuttle_core::options::BuildEncodings::Rebuild,
-            ..Default::default()
-        }
-    );
-    generate_tests!(
-        n_minus_1_clean_rebuild,
-        super::S,
-        scuttle_core::DivConOptions {
-            anchor: scuttle_core::options::DivConAnchor::NMinus(1),
-            build_encodings: scuttle_core::options::BuildEncodings::CleanRebuild,
             ..Default::default()
         }
     );

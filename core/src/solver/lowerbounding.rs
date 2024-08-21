@@ -8,6 +8,8 @@
 //!     and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
 //!     TACAS 2023.
 
+use std::{fs, io};
+
 use rustsat::{
     encodings::{
         self,
@@ -15,9 +17,9 @@ use rustsat::{
         pb::{self, DbGte},
         EncodeStats,
     },
-    instances::{BasicVarManager, Cnf, ManageVars, MultiOptInstance},
+    instances::{Cnf, ManageVars},
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
-    types::{Assignment, Clause, Lit},
+    types::{Assignment, Clause, Lit, Var, WLitIter},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
@@ -30,29 +32,23 @@ use crate::{
     Phase, Solve,
 };
 
-use super::{
-    coreboosting::MergeOllRef, default_blocking_clause, CoreBoost, ObjEncoding, Objective,
-    SolverKernel,
-};
+use super::{coreboosting::MergeOllRef, CoreBoost, ObjEncoding, Objective, SolverKernel};
 
 #[derive(KernelFunctions, Solve)]
-#[solve(
-    bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
+#[solve(bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
         CE: card::BoundUpperIncremental + EncodeStats,
-        VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats",
-    extended_stats
-)]
+        O: SolveIncremental + SolveStats")]
 pub struct LowerBounding<
     O,
+    OFac,
     PBE = DbGte,
     CE = DbTotalizer,
-    VM = BasicVarManager,
     BCG = fn(Assignment) -> Clause,
+    ProofW = io::BufWriter<fs::File>,
 > {
     /// The solver kernel
-    kernel: SolverKernel<VM, O, BCG>,
+    kernel: SolverKernel<O, OFac, BCG, ProofW>,
     /// A cardinality or pseudo-boolean encoding for each objective
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
     /// The current fence
@@ -62,89 +58,47 @@ pub struct LowerBounding<
 }
 
 #[oracle_bounds]
-impl<O, PBE, CE, VM> LowerBounding<O, PBE, CE, VM, fn(Assignment) -> Clause>
+impl<O, OFac, PBE, CE, BCG, ProofW> LowerBounding<O, OFac, PBE, CE, BCG, ProofW>
 where
     O: SolveIncremental + SolveStats,
+    OFac: Fn() -> O,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
-{
-    pub fn new_default_blocking(
-        inst: MultiOptInstance<VM>,
-        oracle: O,
-        opts: KernelOptions,
-    ) -> anyhow::Result<Self> {
-        let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
-            inst,
-            oracle,
-            default_blocking_clause,
-            opts,
-        )?;
-        Ok(Self::init(kernel)?)
-    }
-}
-
-#[oracle_bounds]
-impl<O, PBE, CE, VM, BCG> LowerBounding<O, PBE, CE, VM, BCG>
-where
-    O: SolveIncremental + SolveStats + Default,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
-    BCG: FnMut(Assignment) -> Clause,
-{
-    pub fn new_default_oracle(
-        inst: MultiOptInstance<VM>,
-        opts: KernelOptions,
-        block_clause_gen: BCG,
-    ) -> anyhow::Result<Self> {
-        let kernel = SolverKernel::new(inst, O::default(), block_clause_gen, opts)?;
-        Ok(Self::init(kernel)?)
-    }
-}
-
-#[oracle_bounds]
-impl<O, PBE, CE, VM> LowerBounding<O, PBE, CE, VM, fn(Assignment) -> Clause>
-where
-    O: SolveIncremental + SolveStats + Default,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
-{
-    pub fn new_defaults(inst: MultiOptInstance<VM>, opts: KernelOptions) -> anyhow::Result<Self> {
-        let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
-            inst,
-            O::default(),
-            default_blocking_clause,
-            opts,
-        )?;
-        Ok(Self::init(kernel)?)
-    }
-}
-
-#[oracle_bounds]
-impl<O, PBE, CE, VM, BCG> LowerBounding<O, PBE, CE, VM, BCG>
-where
-    O: SolveIncremental + SolveStats,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
 {
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
-    pub fn new(
-        inst: MultiOptInstance<VM>,
-        oracle: O,
+    pub fn new<Cls, Objs, Obj>(
+        clauses: Cls,
+        objs: Objs,
+        max_inst_var: Var,
+        max_orig_var: Var,
         opts: KernelOptions,
+        proof: Option<pidgeons::Proof<ProofW>>,
+        oracle_factory: OFac,
         block_clause_gen: BCG,
-    ) -> anyhow::Result<Self> {
-        let kernel = SolverKernel::new(inst, oracle, block_clause_gen, opts)?;
+    ) -> anyhow::Result<Self>
+    where
+        Cls: IntoIterator<Item = Clause>,
+        Objs: IntoIterator<Item = (Obj, isize)>,
+        Obj: WLitIter,
+    {
+        let kernel = SolverKernel::new(
+            clauses,
+            objs,
+            max_inst_var,
+            max_orig_var,
+            oracle_factory,
+            block_clause_gen,
+            proof,
+            opts,
+        )?;
         Ok(Self::init(kernel)?)
     }
 }
 
-impl<O, PBE, CE, VM, BCG> ExtendedSolveStats for LowerBounding<O, PBE, CE, VM, BCG>
+impl<O, OFac, PBE, CE, BCG, ProofW> ExtendedSolveStats
+    for LowerBounding<O, OFac, PBE, CE, BCG, ProofW>
 where
     O: SolveStats,
     PBE: encodings::EncodeStats,
@@ -184,15 +138,14 @@ where
     }
 }
 
-impl<O, PBE, CE, VM, BCG> LowerBounding<O, PBE, CE, VM, BCG>
+impl<O, OFac, PBE, CE, BCG, ProofW> LowerBounding<O, OFac, PBE, CE, BCG, ProofW>
 where
     O: SolveIncremental + SolveStats,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
 {
     /// Initializes the solver
-    fn init(mut kernel: SolverKernel<VM, O, BCG>) -> Result<Self, rustsat::OutOfMemory> {
+    fn init(mut kernel: SolverKernel<O, OFac, BCG, ProofW>) -> Result<Self, rustsat::OutOfMemory> {
         // Initialize objective encodings
         let mut obj_encs = Vec::with_capacity(kernel.objs.len());
         let mut fence_data = Vec::with_capacity(kernel.objs.len());
@@ -236,12 +189,11 @@ where
 }
 
 #[oracle_bounds]
-impl<O, PBE, CE, VM, BCG> LowerBounding<O, PBE, CE, VM, BCG>
+impl<O, OFac, PBE, CE, BCG, ProofW> LowerBounding<O, OFac, PBE, CE, BCG, ProofW>
 where
     O: SolveIncremental + SolveStats,
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
-    VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
 {
     /// The solving algorithm main routine.
@@ -290,13 +242,13 @@ where
 }
 
 #[oracle_bounds]
-impl<O, PBE, CE, VM, BCG> CoreBoost for LowerBounding<O, PBE, CE, VM, BCG>
+impl<O, OFac, PBE, CE, BCG, ProofW> CoreBoost for LowerBounding<O, OFac, PBE, CE, BCG, ProofW>
 where
-    O: SolveIncremental + SolveStats + Default,
+    O: SolveIncremental + SolveStats,
+    OFac: Fn() -> O,
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
-    VM: ManageVars,
 {
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
         ensure!(
@@ -375,9 +327,8 @@ impl Fence {
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental + SolveStats,
 {
     pub fn update_fence<PBE, CE>(
@@ -428,9 +379,8 @@ where
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental + SolveStats,
     BCG: FnMut(Assignment) -> Clause,
 {

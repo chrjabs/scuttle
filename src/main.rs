@@ -1,35 +1,30 @@
-use std::{ffi::OsString, path::PathBuf, thread};
+use std::{fs, io, thread};
 
-use maxpre::{MaxPre, PreproClauses, PreproMultiOpt};
+use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::{card, pb},
-    instances::{
-        fio, BasicVarManager, ManageVars, MultiOptInstance, ReindexVars, ReindexingVarManager,
-    },
+    instances::{ReindexVars, ReindexingVarManager},
     types::{Assignment, Clause},
 };
 use rustsat_cadical::CaDiCaL;
-#[cfg(feature = "div-con")]
-use scuttle_core::solver::divcon::SeqDivCon;
 use scuttle_core::{
-    self, solver::CoreBoost, BiOptSat, LowerBounding, MaybeTerminatedError, PMinimal, Solve,
+    self, prepro,
+    solver::{default_blocking_clause, CoreBoost},
+    BiOptSat, LowerBounding, MaybeTerminatedError, PMinimal, Solve,
 };
 
 mod cli;
-use cli::{Algorithm, CardEncoding, Cli, FileFormat, PbEncoding};
+use cli::{Algorithm, CardEncoding, Cli, PbEncoding};
 
 /// The SAT solver used
 type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
-type PMin<VM> = PMinimal<Oracle, pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause>;
+type PMin<OFac> = PMinimal<Oracle, OFac, pb::DbGte, card::DbTotalizer, fn(Assignment) -> Clause>;
 /// BiOptSat Instantiation used
-type Bos<PBE, CE, VM> = BiOptSat<Oracle, PBE, CE, VM, fn(Assignment) -> Clause>;
+type Bos<OFac, PBE, CE> = BiOptSat<Oracle, OFac, PBE, CE, fn(Assignment) -> Clause>;
 /// Lower-bounding instantiation used
-type Lb<VM> = LowerBounding<Oracle, pb::DbGte, card::DbTotalizer, VM, fn(Assignment) -> Clause>;
-#[cfg(feature = "div-con")]
-/// Divide and Conquer prototype used
-type Dc<VM> = SeqDivCon<Oracle, VM, fn(Assignment) -> Clause>;
+type Lb<OFac> = LowerBounding<Oracle, OFac, pb::DbGte, card::DbTotalizer, fn(Assignment) -> Clause>;
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::init();
@@ -49,39 +44,54 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
 
     cli.info(&format!("solving instance {:?}", cli.inst_path))?;
 
-    let inst = parse_instance(cli.inst_path.clone(), cli.file_format, cli.opb_options)?;
+    let parsed = prepro::parse(cli.inst_path.clone(), cli.file_format, cli.opb_options)?;
+
+    // FIXME: set correct number of original constraints
+    let proof = if let Some(path) = &cli.proof_path {
+        Some(pidgeons::Proof::new(
+            io::BufWriter::new(fs::File::open(path)?),
+            0,
+            false,
+        )?)
+    } else {
+        None
+    };
 
     // MaxPre Preprocessing
     let (prepro, inst) = if cli.preprocessing {
-        let mut prepro = <MaxPre as PreproMultiOpt>::new(inst, !cli.maxpre_reindexing);
-        prepro.preprocess(&cli.maxpre_techniques, 0, 1e9);
-        let inst = PreproMultiOpt::prepro_instance(&mut prepro);
+        let (prepro, inst) = prepro::max_pre(parsed, &cli.maxpre_techniques, cli.maxpre_reindexing);
         (Some(prepro), inst)
     } else {
-        (None, inst)
+        (None, prepro::handle_soft_clauses(parsed))
     };
 
     // Reindexing
     let (inst, reindexer) = if cli.reindexing {
-        let reindexer = ReindexingVarManager::default();
-        let (inst, reindexer) = inst
-            .reindex(reindexer)
-            .change_var_manager(|vm| BasicVarManager::from_next_free(vm.max_var().unwrap() + 1));
-        (inst, Some(reindexer))
+        let (reind, inst) = prepro::reindexing(inst);
+        (inst, Some(reind))
     } else {
         (inst, None)
     };
 
-    // TODO: make sure configuration is also set after reset
-    let oracle = {
+    let oracle_factory = || {
         let mut o = Oracle::default();
-        o.set_configuration(cli.cadical_config).unwrap();
+        o.set_configuration(cli.cadical_config)
+            .expect("failed to set cadical config");
         o
     };
 
     match cli.alg {
         Algorithm::PMinimal(opts, ref cb_opts) => {
-            let mut solver = PMin::new_default_blocking(inst, oracle, opts)?;
+            let mut solver = PMin::new(
+                inst.cnf,
+                inst.objs,
+                inst.max_inst_var,
+                inst.max_orig_var,
+                opts,
+                proof,
+                oracle_factory,
+                default_blocking_clause,
+            )?;
             setup_cli_interaction(&mut solver, cli)?;
             let cont = if let Some(cb_opts) = cb_opts {
                 solver.core_boost(cb_opts.clone())?
@@ -94,7 +104,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
             post_solve(&mut solver, cli, prepro, reindexer).into()
         }
         Algorithm::BiOptSat(opts, pb_enc, card_enc, ref cb_opts) => {
-            if inst.n_objectives() != 2 {
+            if inst.objs.len() != 2 {
                 cli.error("the bioptsat algorithm can only be run on bi-objective problems")?;
                 return MaybeTerminatedError::Error(anyhow::anyhow!(Error::InvalidInstance));
             }
@@ -105,8 +115,17 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
             match pb_enc {
                 PbEncoding::Gte => match card_enc {
                     CardEncoding::Tot => {
-                        type S<VM> = Bos<pb::DbGte, card::DbTotalizer, VM>;
-                        let mut solver = S::new_default_blocking(inst, oracle, opts)?;
+                        type S<OFac> = Bos<OFac, pb::DbGte, card::DbTotalizer>;
+                        let mut solver = S::new(
+                            inst.cnf,
+                            inst.objs,
+                            inst.max_inst_var,
+                            inst.max_orig_var,
+                            opts,
+                            proof,
+                            oracle_factory,
+                            default_blocking_clause,
+                        )?;
                         setup_cli_interaction(&mut solver, cli)?;
                         let cont = if let Some(cb_opts) = cb_opts {
                             solver.core_boost(cb_opts.clone())?
@@ -121,8 +140,17 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                 },
                 PbEncoding::Dpw => match card_enc {
                     CardEncoding::Tot => {
-                        type S<VM> = Bos<pb::DynamicPolyWatchdog, card::DbTotalizer, VM>;
-                        let mut solver = S::new_default_blocking(inst, oracle, opts)?;
+                        type S<OFac> = Bos<OFac, pb::DynamicPolyWatchdog, card::DbTotalizer>;
+                        let mut solver = S::new(
+                            inst.cnf,
+                            inst.objs,
+                            inst.max_inst_var,
+                            inst.max_orig_var,
+                            opts,
+                            proof,
+                            oracle_factory,
+                            default_blocking_clause,
+                        )?;
                         setup_cli_interaction(&mut solver, cli)?;
                         solver.solve(cli.limits)?;
                         post_solve(&mut solver, cli, prepro, reindexer).into()
@@ -131,7 +159,16 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
             }
         }
         Algorithm::LowerBounding(opts, ref cb_opts) => {
-            let mut solver = Lb::new_default_blocking(inst, oracle, opts)?;
+            let mut solver = Lb::new(
+                inst.cnf,
+                inst.objs,
+                inst.max_inst_var,
+                inst.max_orig_var,
+                opts,
+                proof,
+                oracle_factory,
+                default_blocking_clause,
+            )?;
             setup_cli_interaction(&mut solver, cli)?;
             let cont = if let Some(cb_opts) = cb_opts {
                 solver.core_boost(cb_opts.clone())?
@@ -141,13 +178,6 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
             if cont {
                 solver.solve(cli.limits)?;
             }
-            post_solve(&mut solver, cli, prepro, reindexer).into()
-        }
-        #[cfg(feature = "div-con")]
-        Algorithm::DivCon(ref opts) => {
-            let mut solver = Dc::new_default_blocking(inst, oracle, opts.clone())?;
-            setup_cli_interaction(&mut solver, cli)?;
-            solver.solve(cli.limits)?;
             post_solve(&mut solver, cli, prepro, reindexer).into()
         }
     }
@@ -216,54 +246,8 @@ fn post_solve<S: Solve>(
     Ok(())
 }
 
-macro_rules! is_one_of {
-    ($a:expr, $($b:expr),*) => {
-        $( $a == $b || )* false
-    }
-}
-
-fn parse_instance(
-    inst_path: PathBuf,
-    file_format: FileFormat,
-    opb_opts: fio::opb::Options,
-) -> anyhow::Result<MultiOptInstance> {
-    match file_format {
-        FileFormat::Infer => {
-            if let Some(ext) = inst_path.extension() {
-                let path_without_compr = inst_path.with_extension("");
-                let ext = if is_one_of!(ext, "gz", "bz2", "xz") {
-                    // Strip compression extension
-                    match path_without_compr.extension() {
-                        Some(ext) => ext,
-                        None => anyhow::bail!(Error::NoFileExtension),
-                    }
-                } else {
-                    ext
-                };
-                Ok(
-                    if is_one_of!(ext, "mcnf", "bicnf", "wcnf", "cnf", "dimacs") {
-                        MultiOptInstance::from_dimacs_path(inst_path)?
-                    } else if is_one_of!(ext, "opb", "mopb", "pbmo") {
-                        MultiOptInstance::from_opb_path(inst_path, opb_opts)?
-                    } else {
-                        anyhow::bail!(Error::UnknownFileExtension(OsString::from(ext)))
-                    },
-                )
-            } else {
-                anyhow::bail!(Error::NoFileExtension)
-            }
-        }
-        FileFormat::Dimacs => Ok(MultiOptInstance::from_dimacs_path(inst_path)?),
-        FileFormat::Opb => Ok(MultiOptInstance::from_opb_path(inst_path, opb_opts)?),
-    }
-}
-
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 enum Error {
-    #[error("Cannot infer file format from extension {0:?}")]
-    UnknownFileExtension(OsString),
-    #[error("To infer the file format, the file needs to have a file extension")]
-    NoFileExtension,
     #[error("Invalid instance")]
     InvalidInstance,
     #[error("Invalid configuration")]

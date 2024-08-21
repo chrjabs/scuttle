@@ -15,16 +15,18 @@
 //! - \[2\] Miyuki Koshimura and Hidetomo Nabeshima and Hiroshi Fujita and Ryuzo
 //!     Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
 //!     2009.
+use std::{fs, io};
+
 use rustsat::{
-    encodings,
     encodings::{
+        self,
         card::{self, DbTotalizer},
         pb::{self, DbGte},
         EncodeStats,
     },
-    instances::{BasicVarManager, Cnf, ManageVars, MultiOptInstance},
+    instances::{Cnf, ManageVars},
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
-    types::{Assignment, Clause, Lit},
+    types::{Assignment, Clause, Lit, Var, WLitIter},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
 
@@ -38,31 +40,26 @@ use crate::{
     Phase, Solve,
 };
 
-use super::{
-    coreboosting::MergeOllRef, default_blocking_clause, CoreBoost, Objective, SolverKernel,
-};
+use super::{coreboosting::MergeOllRef, CoreBoost, Objective, SolverKernel};
 
 /// The solver type. Generics the pseudo-boolean encoding to use for weighted
 /// objectives, the cardinality encoding to use for unweighted objectives, the
 /// variable manager to use and the SAT backend.
 #[derive(KernelFunctions, Solve)]
-#[solve(
-    bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
+#[solve(bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
         CE: card::BoundUpperIncremental + EncodeStats,
-        VM: ManageVars,
         BCG: FnMut(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats",
-    extended_stats
-)]
+        O: SolveIncremental + SolveStats")]
 pub struct PMinimal<
     O,
+    OFac,
     PBE = DbGte,
     CE = DbTotalizer,
-    VM = BasicVarManager,
     BCG = fn(Assignment) -> Clause,
+    ProofW = io::BufWriter<fs::File>,
 > {
     /// The solver kernel
-    kernel: SolverKernel<VM, O, BCG>,
+    kernel: SolverKernel<O, OFac, BCG, ProofW>,
     /// A cardinality or pseudo-boolean encoding for each objective
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
     /// The Pareto front discovered so far
@@ -70,89 +67,46 @@ pub struct PMinimal<
 }
 
 #[oracle_bounds]
-impl<O, PBE, CE, VM> PMinimal<O, PBE, CE, VM, fn(Assignment) -> Clause>
+impl<O, OFac, PBE, CE, BCG, ProofW> PMinimal<O, OFac, PBE, CE, BCG, ProofW>
 where
     O: SolveIncremental,
+    OFac: Fn() -> O,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
-{
-    pub fn new_default_blocking(
-        inst: MultiOptInstance<VM>,
-        oracle: O,
-        opts: KernelOptions,
-    ) -> anyhow::Result<Self> {
-        let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
-            inst,
-            oracle,
-            default_blocking_clause,
-            opts,
-        )?;
-        Ok(Self::init(kernel))
-    }
-}
-
-#[oracle_bounds]
-impl<O, PBE, CE, VM, BCG> PMinimal<O, PBE, CE, VM, BCG>
-where
-    O: SolveIncremental + Default,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
-    BCG: FnMut(Assignment) -> Clause,
-{
-    pub fn new_default_oracle(
-        inst: MultiOptInstance<VM>,
-        opts: KernelOptions,
-        block_clause_gen: BCG,
-    ) -> anyhow::Result<Self> {
-        let kernel = SolverKernel::new(inst, O::default(), block_clause_gen, opts)?;
-        Ok(Self::init(kernel))
-    }
-}
-
-#[oracle_bounds]
-impl<O, PBE, CE, VM> PMinimal<O, PBE, CE, VM, fn(Assignment) -> Clause>
-where
-    O: SolveIncremental + Default,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
-{
-    pub fn new_defaults(inst: MultiOptInstance<VM>, opts: KernelOptions) -> anyhow::Result<Self> {
-        let kernel = SolverKernel::<_, _, fn(Assignment) -> Clause>::new(
-            inst,
-            O::default(),
-            default_blocking_clause,
-            opts,
-        )?;
-        Ok(Self::init(kernel))
-    }
-}
-
-#[oracle_bounds]
-impl<O, PBE, CE, VM, BCG> PMinimal<O, PBE, CE, VM, BCG>
-where
-    O: SolveIncremental,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
 {
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
-    pub fn new(
-        inst: MultiOptInstance<VM>,
-        oracle: O,
+    pub fn new<Cls, Objs, Obj>(
+        clauses: Cls,
+        objs: Objs,
+        max_inst_var: Var,
+        max_orig_var: Var,
         opts: KernelOptions,
+        proof: Option<pidgeons::Proof<ProofW>>,
+        oracle_factory: OFac,
         block_clause_gen: BCG,
-    ) -> anyhow::Result<Self> {
-        let kernel = SolverKernel::new(inst, oracle, block_clause_gen, opts)?;
+    ) -> anyhow::Result<Self>
+    where
+        Cls: IntoIterator<Item = Clause>,
+        Objs: IntoIterator<Item = (Obj, isize)>,
+        Obj: WLitIter,
+    {
+        let kernel = SolverKernel::new(
+            clauses,
+            objs,
+            max_inst_var,
+            max_orig_var,
+            oracle_factory,
+            block_clause_gen,
+            proof,
+            opts,
+        )?;
         Ok(Self::init(kernel))
     }
 }
 
-impl<O, PBE, CE, VM, BCG> ExtendedSolveStats for PMinimal<O, PBE, CE, VM, BCG>
+impl<O, OFac, PBE, CE, BCG, ProofW> ExtendedSolveStats for PMinimal<O, OFac, PBE, CE, BCG, ProofW>
 where
     O: SolveStats,
     PBE: encodings::EncodeStats,
@@ -192,14 +146,13 @@ where
     }
 }
 
-impl<O, PBE, CE, VM, BCG> PMinimal<O, PBE, CE, VM, BCG>
+impl<O, OFac, PBE, CE, BCG, ProofW> PMinimal<O, OFac, PBE, CE, BCG, ProofW>
 where
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    VM: ManageVars,
 {
     /// Initializes the solver
-    fn init(mut kernel: SolverKernel<VM, O, BCG>) -> Self {
+    fn init(mut kernel: SolverKernel<O, OFac, BCG, ProofW>) -> Self {
         // Initialize objective encodings
         let obj_encs = kernel
             .objs
@@ -227,12 +180,11 @@ where
 }
 
 #[oracle_bounds]
-impl<O, PBE, CE, VM, BCG> PMinimal<O, PBE, CE, VM, BCG>
+impl<O, OFac, PBE, CE, BCG, ProofW> PMinimal<O, OFac, PBE, CE, BCG, ProofW>
 where
     O: SolveIncremental + SolveStats,
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
-    VM: ManageVars,
     BCG: FnMut(Assignment) -> Clause,
 {
     /// The solving algorithm main routine.
@@ -279,11 +231,11 @@ where
 }
 
 #[oracle_bounds]
-impl<O, PBE, CE, VM, BCG> CoreBoost for PMinimal<O, PBE, CE, VM, BCG>
+impl<O, OFac, PBE, CE, BCG, ProofW> CoreBoost for PMinimal<O, OFac, PBE, CE, BCG, ProofW>
 where
-    O: SolveIncremental + SolveStats + Default,
+    O: SolveIncremental + SolveStats,
+    OFac: Fn() -> O,
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
-    VM: ManageVars,
 {
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
         ensure!(
@@ -325,9 +277,8 @@ where
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental + SolveStats,
 {
     /// Executes P-minimization from a cost and solution starting point

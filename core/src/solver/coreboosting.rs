@@ -123,9 +123,8 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental + SolveStats,
 {
     /// Performs core boosting on the instance by executing single-objective OLL
@@ -159,10 +158,10 @@ where
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
-    O: SolveIncremental + SolveStats + Default,
+    O: SolveIncremental + SolveStats,
+    OFac: Fn() -> O,
 {
     /// Performs inprocessing, i.e., preprocessing with MaxPre after core boosting.
     pub fn inprocess<PBE, CE>(
@@ -178,7 +177,7 @@ where
             "cannot reset oracle without having stored the CNF"
         );
         // Reset oracle
-        self.oracle = O::default();
+        self.oracle = (self.oracle_factory)();
         #[cfg(feature = "interrupt-oracle")]
         {
             *self.oracle_interrupter.lock().unwrap() = Box::new(self.oracle.interrupter());

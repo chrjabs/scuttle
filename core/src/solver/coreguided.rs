@@ -213,9 +213,8 @@ struct CoreData {
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental + SolveStats,
 {
     /// OLL core-guided search over an objective. The implementation includes the following

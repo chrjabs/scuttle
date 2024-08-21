@@ -14,6 +14,7 @@ use rustsat::{
     instances::fio,
     solvers::{SolverResult, SolverStats},
 };
+use scuttle_core::prepro::FileFormat;
 use scuttle_core::{
     options::{
         AfterCbOptions, CoreBoostingOptions, EnumOptions, HeurImprOptions, HeurImprWhen,
@@ -23,9 +24,6 @@ use scuttle_core::{
     EncodingStats, Limits, Phase, Stats, Termination, WriteSolverLog,
 };
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
-
-#[cfg(feature = "div-con")]
-use scuttle_core::options::{self, BuildEncodings, DivConOptions};
 
 macro_rules! none_if_zero {
     ($val:expr) => {
@@ -72,31 +70,6 @@ enum AlgorithmCommand {
         #[arg(long)]
         log_fence: bool,
     },
-    /// Divide and conquer prototype
-    #[cfg(feature = "div-con")]
-    DivCon {
-        #[command(flatten)]
-        shared: SharedArgs,
-        /// The divide and conquer recursion anchor to use
-        #[arg(long, default_value_t = DivConAnchor::from(DivConOptions::default().anchor))]
-        anchor: DivConAnchor,
-        /// When/how to (re)build the objective encodings for upper bounding search
-        #[arg(long, default_value_t = DivConOptions::default().build_encodings)]
-        build_encodings: BuildEncodings,
-        /// If true, don't merge OLL totalizers into GTE but ignore the totalizer structure.
-        #[arg(long, default_value_t = DivConOptions::default().rebase_encodings.into())]
-        rebase_encodings: Bool,
-        /// Whether to reset the oracle after finding a global ideal point, i.e., core boosting
-        #[arg(long, default_value_t = DivConOptions::default().reset_after_global_ideal.into())]
-        reset_after_cb: Bool,
-        /// Whether to perform inprocessing after finding the first ideal point
-        #[arg(long, default_value_t = DivConOptions::default().inpro.is_some().into())]
-        inprocessing: Bool,
-        /// Instead of solving, print some statistics about clauses in the encoding
-        #[cfg(feature = "data-helpers")]
-        #[arg(long)]
-        enc_clauses_summary: bool,
-    },
 }
 
 #[derive(Args)]
@@ -132,6 +105,8 @@ struct SharedArgs {
     file: FileArgs,
     #[command(flatten)]
     log: LogArgs,
+    #[command(flatten)]
+    proof: ProofArgs,
 }
 
 #[derive(Args)]
@@ -294,6 +269,12 @@ struct LogArgs {
     log_inprocessing: bool,
 }
 
+#[derive(Args)]
+struct ProofArgs {
+    /// The path to write the VeriPB proof to
+    proof_path: Option<PathBuf>,
+}
+
 impl From<&LogArgs> for LoggerConfig {
     fn from(value: &LogArgs) -> Self {
         LoggerConfig {
@@ -345,57 +326,6 @@ impl fmt::Display for CardEncoding {
     }
 }
 
-#[cfg(feature = "div-con")]
-#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
-pub enum DivConAnchor {
-    /// Linear Sat-Unsat for single-objective subproblems
-    LinSu,
-    /// BiOptSat (Sat-Unsat) for bi-objective subproblems
-    Bioptsat,
-    /// P-Minimal after the first ideal point was found
-    PMinimal,
-    /// Lower-bounding search after the first ideal point was found
-    LowerBounding,
-    /// Run an appropriate anchor (Linear Sat-Unsat / BiOptSat / P-Minimal) at
-    /// subproblems of size `n-1`.
-    NMinusOne,
-    /// Run P-Minimal at subproblems of size `n-1`.
-    PMinNMinusOne,
-}
-
-#[cfg(feature = "div-con")]
-impl fmt::Display for DivConAnchor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DivConAnchor::LinSu => write!(f, "lin-su"),
-            DivConAnchor::Bioptsat => write!(f, "bioptsat"),
-            DivConAnchor::PMinimal => write!(f, "p-minimal"),
-            DivConAnchor::LowerBounding => write!(f, "lower-bounding"),
-            DivConAnchor::NMinusOne => write!(f, "n-minus-one"),
-            DivConAnchor::PMinNMinusOne => write!(f, "p-min-n-minus-once"),
-        }
-    }
-}
-
-#[cfg(feature = "div-con")]
-impl From<options::DivConAnchor> for DivConAnchor {
-    fn from(value: options::DivConAnchor) -> Self {
-        match value {
-            options::DivConAnchor::LinSu => DivConAnchor::LinSu,
-            options::DivConAnchor::BiOptSat => DivConAnchor::Bioptsat,
-            options::DivConAnchor::LowerBounding(_) => DivConAnchor::LowerBounding,
-            options::DivConAnchor::PMinimal(size) => match size {
-                options::SubProblemSize::Abs(_) => DivConAnchor::PMinimal,
-                options::SubProblemSize::Smaller(x) => match x {
-                    1 => DivConAnchor::PMinNMinusOne,
-                    _ => DivConAnchor::PMinimal,
-                },
-            },
-            options::DivConAnchor::NMinus(_) => DivConAnchor::NMinusOne,
-        }
-    }
-}
-
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum Bool {
     /// Turn on feature
@@ -425,29 +355,6 @@ impl From<bool> for Bool {
             Bool::True
         } else {
             Bool::False
-        }
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
-pub enum FileFormat {
-    /// Infer the file format from the file extension. `.mcnf`, `.bicnf`,
-    /// `.cnf`, `.wcnf` or `.dimacs` are all interpreted as DIMACS files and
-    /// `.opb` as an OPB file. All file extensions can also be prepended with
-    /// `.bz2` or `.gz` if compression is used.
-    Infer,
-    /// A DIMACS MCNF file
-    Dimacs,
-    /// A multi-objective OPB file
-    Opb,
-}
-
-impl fmt::Display for FileFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FileFormat::Infer => write!(f, "infer"),
-            FileFormat::Dimacs => write!(f, "dimacs"),
-            FileFormat::Opb => write!(f, "opb"),
         }
     }
 }
@@ -526,6 +433,7 @@ pub struct Cli {
     color: concolor_clap::Color,
     logger_config: LoggerConfig,
     pub alg: Algorithm,
+    pub proof_path: Option<PathBuf>,
 }
 
 pub enum Algorithm {
@@ -537,8 +445,6 @@ pub enum Algorithm {
         Option<CoreBoostingOptions>,
     ),
     LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
-    #[cfg(feature = "div-con")]
-    DivCon(DivConOptions),
 }
 
 impl fmt::Display for Algorithm {
@@ -547,8 +453,6 @@ impl fmt::Display for Algorithm {
             Algorithm::PMinimal(..) => write!(f, "p-pminimal"),
             Algorithm::BiOptSat(..) => write!(f, "bioptsat"),
             Algorithm::LowerBounding(..) => write!(f, "lower-bounding"),
-            #[cfg(feature = "div-con")]
-            Algorithm::DivCon(..) => write!(f, "div-con"),
         }
     }
 }
@@ -604,6 +508,7 @@ impl Cli {
         match CliArgs::parse().command {
             AlgorithmCommand::PMinimal { shared, cb } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
+                let proof_path = shared.proof.proof_path.clone();
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -625,6 +530,7 @@ impl Cli {
                     color: shared.log.color,
                     logger_config: (&shared.log).into(),
                     alg: Algorithm::PMinimal(kernel_opts(shared, store_cnf), cb),
+                    proof_path,
                 }
             }
             AlgorithmCommand::Bioptsat {
@@ -633,6 +539,7 @@ impl Cli {
                 cb,
             } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
+                let proof_path = shared.proof.proof_path.clone();
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -659,6 +566,7 @@ impl Cli {
                         obj_encs.obj_card_encoding,
                         cb,
                     ),
+                    proof_path,
                 }
             }
             AlgorithmCommand::LowerBounding {
@@ -667,6 +575,7 @@ impl Cli {
                 cb,
             } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
+                let proof_path = shared.proof.proof_path.clone();
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -691,69 +600,7 @@ impl Cli {
                         ..(&shared.log).into()
                     },
                     alg: Algorithm::LowerBounding(kernel_opts(shared, store_cnf), cb),
-                }
-            }
-            #[cfg(feature = "div-con")]
-            AlgorithmCommand::DivCon {
-                shared,
-                anchor,
-                build_encodings,
-                rebase_encodings,
-                reset_after_cb,
-                inprocessing,
-                #[cfg(feature = "data-helpers")]
-                enc_clauses_summary,
-            } => {
-                let inpro = if inprocessing.into() {
-                    Some(shared.prepro.maxpre_techniques.clone())
-                } else {
-                    None
-                };
-                Cli {
-                    limits: (&shared.limits).into(),
-                    file_format: shared.file.file_format,
-                    opb_options: fio::opb::Options {
-                        first_var_idx: shared.file.first_var_idx,
-                        ..Default::default()
-                    },
-                    inst_path: shared.file.inst_path.clone(),
-                    preprocessing: shared.prepro.preprocessing.into(),
-                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                    reindexing: shared.prepro.reindexing.into(),
-                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                    cadical_config: shared.cadical_config.into(),
-                    stdout: stdout(shared.log.color),
-                    stderr: stderr(shared.log.color),
-                    print_solver_config: shared.log.print_solver_config,
-                    print_solutions: shared.log.print_solutions,
-                    print_stats: !shared.log.no_print_stats,
-                    color: shared.log.color,
-                    logger_config: LoggerConfig {
-                        ..(&shared.log).into()
-                    },
-                    alg: Algorithm::DivCon(DivConOptions {
-                        kernel: kernel_opts(shared, false),
-                        anchor: match anchor {
-                            DivConAnchor::LinSu => options::DivConAnchor::LinSu,
-                            DivConAnchor::Bioptsat => options::DivConAnchor::BiOptSat,
-                            DivConAnchor::PMinimal => {
-                                options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(0))
-                            }
-                            DivConAnchor::LowerBounding => options::DivConAnchor::LowerBounding(
-                                options::SubProblemSize::Smaller(0),
-                            ),
-                            DivConAnchor::NMinusOne => options::DivConAnchor::NMinus(1),
-                            DivConAnchor::PMinNMinusOne => {
-                                options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(1))
-                            }
-                        },
-                        build_encodings,
-                        rebase_encodings: rebase_encodings.into(),
-                        reset_after_global_ideal: reset_after_cb.into(),
-                        inpro,
-                        #[cfg(feature = "data-helpers")]
-                        enc_clauses_summary,
-                    }),
+                    proof_path,
                 }
             }
         }
@@ -872,20 +719,6 @@ impl Cli {
                     Self::print_parameter(&mut buffer, "obj-pb-encoding", pb_enc)?;
                     Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
-                }
-                #[cfg(feature = "div-con")]
-                Algorithm::DivCon(opts) => {
-                    Self::print_parameter(
-                        &mut buffer,
-                        "enumeration",
-                        EnumPrinter::new(opts.kernel.enumeration),
-                    )?;
-                    Self::print_parameter(
-                        &mut buffer,
-                        "reserve-enc-vars",
-                        opts.kernel.reserve_enc_vars,
-                    )?;
-                    Self::print_parameter(&mut buffer, "anchor", opts.anchor)?;
                 }
             }
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;

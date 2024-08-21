@@ -8,12 +8,12 @@ use std::fmt;
 use rustsat::solvers::{SolverResult, SolverStats};
 
 pub mod options;
-#[cfg(feature = "div-con")]
-pub use options::DivConOptions;
 pub use options::{CoreBoostingOptions, KernelOptions, Limits};
 
 pub mod types;
 use types::NonDomPoint;
+
+pub mod prepro;
 
 pub mod solver;
 pub use solver::CoreBoost;

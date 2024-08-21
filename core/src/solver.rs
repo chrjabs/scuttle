@@ -1,7 +1,7 @@
 //! Core solver functionality shared between different algorithms
 
 use std::{
-    ops::{Not, Range},
+    ops::Not,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -14,10 +14,10 @@ use std::sync::Mutex;
 use anyhow::Context;
 use maxpre::MaxPre;
 use rustsat::{
-    encodings::{card, pb, CollectClauses},
-    instances::{Cnf, ManageVars, MultiOptInstance},
+    encodings::{card, pb},
+    instances::{BasicVarManager, Cnf, ManageVars},
     solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
-    types::{Assignment, Clause, Lit, LitIter, RsHashMap, TernaryVal, Var, WLitIter},
+    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var, WLitIter},
 };
 use scuttle_proc::oracle_bounds;
 
@@ -26,15 +26,13 @@ use maxpre::PreproClauses;
 
 use crate::{
     options::{CoreBoostingOptions, EnumOptions},
-    types::{NonDomPoint, ParetoFront},
+    types::{NonDomPoint, ObjEncoding, ObjLitData, Objective, ParetoFront},
     EncodingStats, KernelOptions, Limits, MaybeTerminated,
     MaybeTerminatedError::{self, Done, Error, Terminated},
     Phase, Stats, Termination, WriteSolverLog,
 };
 
 pub mod bioptsat;
-#[cfg(feature = "div-con")]
-pub mod divcon;
 pub mod lowerbounding;
 pub mod pminimal;
 
@@ -96,11 +94,13 @@ impl Interrupter {
 }
 
 /// Kernel struct shared between all solvers
-struct SolverKernel<VM, O, BCG> {
+struct SolverKernel<O, OFac, BCG, ProofW> {
     /// The SAT solver backend
     oracle: O,
+    /// The oracle factory for initializing a new oracle
+    oracle_factory: OFac,
     /// The variable manager keeping track of variables
-    var_manager: VM,
+    var_manager: BasicVarManager,
     #[cfg(feature = "sol-tightening")]
     /// Objective literal data
     obj_lit_data: RsHashMap<Lit, ObjLitData>,
@@ -130,46 +130,64 @@ struct SolverKernel<VM, O, BCG> {
     /// The oracle interrupter
     #[cfg(feature = "interrupt-oracle")]
     oracle_interrupter: Arc<Mutex<Box<dyn rustsat::solvers::InterruptSolver + Send>>>,
+    /// The VeriPB proof
+    proof: Option<pidgeons::Proof<ProofW>>,
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental,
+    OFac: Fn() -> O,
     BCG: FnMut(Assignment) -> Clause,
 {
-    pub fn new(
-        inst: MultiOptInstance<VM>,
-        mut oracle: O,
+    pub fn new<Cls, Objs, Obj>(
+        clauses: Cls,
+        objs: Objs,
+        max_inst_var: Var,
+        max_orig_var: Var,
+        oracle_factory: OFac,
         bcg: BCG,
+        proof: Option<pidgeons::Proof<ProofW>>,
         opts: KernelOptions,
-    ) -> anyhow::Result<Self> {
-        let (constr, objs) = inst.decompose();
-        anyhow::ensure!(constr.max_var().is_some(), "instance contains no variables");
-        let max_inst_var = constr.max_var().unwrap();
-        let (cnf, mut var_manager) = constr.into_cnf();
-        #[cfg(feature = "sol-tightening")]
+    ) -> anyhow::Result<Self>
+    where
+        Cls: IntoIterator<Item = Clause>,
+        Objs: IntoIterator<Item = (Obj, isize)>,
+        Obj: WLitIter,
+    {
         let mut stats = Stats {
-            n_objs: objs.len(),
-            n_real_objs: objs.len(),
-            n_orig_clauses: cnf.len(),
+            n_objs: 0,
+            n_real_objs: 0,
+            n_orig_clauses: 0,
             ..Default::default()
         };
-        #[cfg(not(feature = "sol-tightening"))]
-        let stats = Stats {
-            n_objs: objs.len(),
-            n_real_objs: objs.len(),
-            n_orig_clauses: cnf.len(),
-            ..Default::default()
+        let mut oracle = oracle_factory();
+        oracle.reserve(max_orig_var)?;
+        let orig_cnf = if opts.store_cnf {
+            let cnf: Cnf = clauses.into_iter().collect();
+            stats.n_orig_clauses = cnf.len();
+            oracle.add_cnf_ref(&cnf)?;
+            Some(cnf)
+        } else {
+            for cl in clauses.into_iter() {
+                stats.n_orig_clauses += 1;
+                oracle.add_clause(cl)?;
+            }
+            None
         };
-        // Add objectives to solver
-        let mut obj_cnf = Cnf::new();
-        let mut blits = RsHashMap::default();
         let objs: Vec<_> = objs
             .into_iter()
-            .map(|obj| absorb_objective(obj, &mut obj_cnf, &mut blits, &mut var_manager))
+            .map(|(wlits, offset)| Objective::new(wlits, offset))
             .collect();
+        stats.n_objs = objs.len();
+        stats.n_real_objs = objs.iter().fold(0, |cnt, o| {
+            if matches!(o, Objective::Constant { .. }) {
+                cnt
+            } else {
+                cnt + 1
+            }
+        });
         // Record objective literal occurrences
         #[cfg(feature = "sol-tightening")]
         let obj_lit_data = {
@@ -196,23 +214,11 @@ where
                             }
                         }
                     }
-                    Objective::Constant { .. } => stats.n_real_objs -= 1,
+                    Objective::Constant { .. } => (),
                 }
             }
             obj_lit_data
         };
-        // Store original clauses, if needed
-        let orig_cnf = if opts.store_cnf {
-            let mut orig_cnf = cnf.clone();
-            orig_cnf.extend(obj_cnf.clone());
-            Some(orig_cnf)
-        } else {
-            None
-        };
-        // Add hard clauses and relaxed soft clauses to oracle
-        oracle.reserve(var_manager.max_var().unwrap())?;
-        oracle.add_cnf(cnf)?;
-        oracle.add_cnf(obj_cnf)?;
         #[cfg(feature = "sol-tightening")]
         // Freeze objective variables so that they are not removed
         for o in &objs {
@@ -220,12 +226,12 @@ where
                 oracle.freeze_var(l.var())?;
             }
         }
-        let max_orig_var = var_manager.max_var().unwrap();
         #[cfg(feature = "interrupt-oracle")]
         let interrupter = oracle.interrupter();
         Ok(Self {
             oracle,
-            var_manager,
+            oracle_factory,
+            var_manager: BasicVarManager::from_next_free(max_orig_var + 1),
             #[cfg(feature = "sol-tightening")]
             obj_lit_data,
             max_inst_var,
@@ -241,11 +247,12 @@ where
             term_flag: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "interrupt-oracle")]
             oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
+            proof,
         })
     }
 }
 
-impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW> {
     fn start_solving(&mut self, limits: Limits) {
         self.stats.n_solve_calls += 1;
         self.lims = limits;
@@ -285,35 +292,6 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
                 Objective::Constant { offset } => {
                     debug_assert_eq!(cst, 0);
                     offset
-                }
-            })
-            .collect()
-    }
-
-    #[cfg(feature = "div-con")]
-    /// Converts an external cost vector to an internal one.
-    fn internalize_external_costs(&self, costs: &[isize]) -> Vec<usize> {
-        debug_assert_eq!(costs.len(), self.stats.n_objs);
-        costs
-            .iter()
-            .enumerate()
-            .map(|(idx, &cst)| match self.objs[idx] {
-                Objective::Weighted { offset, .. } => (cst - offset)
-                    .try_into()
-                    .expect("internalized external cost is negative"),
-                Objective::Unweighted {
-                    offset,
-                    unit_weight,
-                    ..
-                } => {
-                    let multi_cost: usize = (cst - offset)
-                        .try_into()
-                        .expect("internalized external cost is negative");
-                    multi_cost / unit_weight
-                }
-                Objective::Constant { offset } => {
-                    debug_assert_eq!(cst, offset);
-                    0
                 }
             })
             .collect()
@@ -450,20 +428,10 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
         }
         Ok(())
     }
-
-    #[cfg(all(feature = "div-con", feature = "data-helpers"))]
-    /// Logs a string message
-    fn log_message(&mut self, msg: &str) -> anyhow::Result<()> {
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger.log_message(msg).context("logger failed")?;
-        }
-        Ok(())
-    }
 }
 
 #[cfg(feature = "interrupt-oracle")]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
     O: rustsat::solvers::Interrupt,
 {
@@ -476,7 +444,7 @@ where
 }
 
 #[cfg(not(feature = "interrupt-oracle"))]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW> {
     fn interrupter(&mut self) -> Interrupter {
         Interrupter {
             term_flag: self.term_flag.clone(),
@@ -485,9 +453,8 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
 }
 
 #[cfg(feature = "sol-tightening")]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental + rustsat::solvers::FlipLit,
 {
     /// Performs heuristic solution improvement and computes the improved
@@ -543,9 +510,8 @@ where
 }
 
 #[cfg(not(feature = "sol-tightening"))]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental,
 {
     /// Performs heuristic solution improvement and computes the improved
@@ -569,9 +535,8 @@ where
 }
 
 #[cfg(feature = "phasing")]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: rustsat::solvers::PhaseLit,
 {
     /// If solution-guided search is turned on, phases the entire solution in
@@ -600,7 +565,7 @@ where
 }
 
 #[cfg(not(feature = "phasing"))]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW> {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
     fn phase_solution(&mut self, _solution: Assignment) -> anyhow::Result<()> {
@@ -615,9 +580,8 @@ impl<VM, O, BCG> SolverKernel<VM, O, BCG> {
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental,
     BCG: FnMut(Assignment) -> Clause,
 {
@@ -706,9 +670,8 @@ where
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental + SolveStats,
     BCG: FnMut(Assignment) -> Clause,
 {
@@ -753,9 +716,8 @@ where
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    VM: ManageVars,
     O: SolveIncremental + SolveStats,
 {
     /// Gets the current objective costs without offset or multiplier. The phase
@@ -860,7 +822,7 @@ where
     }
 }
 
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
     O: SolveIncremental,
 {
@@ -888,10 +850,10 @@ where
 }
 
 #[oracle_bounds]
-impl<VM, O, BCG> SolverKernel<VM, O, BCG>
+impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
 where
-    O: SolveIncremental + Default,
-    VM: ManageVars,
+    O: SolveIncremental,
+    OFac: Fn() -> O,
 {
     /// Resets the oracle and returns an error when the original [`Cnf`] was not stored.
     fn reset_oracle(&mut self, include_var_manager: bool) -> anyhow::Result<()> {
@@ -900,7 +862,7 @@ where
             "cannot reset oracle without having stored the CNF"
         );
         self.log_routine_start("reset-oracle")?;
-        self.oracle = O::default();
+        self.oracle = (self.oracle_factory)();
         if include_var_manager {
             self.oracle.reserve(self.max_orig_var)?;
         } else {
@@ -924,271 +886,6 @@ where
         self.log_routine_end()?;
         Ok(())
     }
-}
-
-fn absorb_objective<VM: ManageVars>(
-    obj: rustsat::instances::Objective,
-    cnf: &mut Cnf,
-    blits: &mut RsHashMap<Clause, Lit>,
-    vm: &mut VM,
-) -> Objective {
-    if obj.constant() {
-        return Objective::Constant {
-            offset: obj.offset(),
-        };
-    }
-    if obj.weighted() {
-        let (soft_cls, offset) = obj.into_soft_cls();
-        let lits_iter = soft_cls
-            .into_iter()
-            .map(|(cl, w)| (absorb_soft_clause(cl, cnf, blits, vm), w));
-        Objective::Weighted {
-            offset,
-            lits: lits_iter.collect(),
-        }
-    } else {
-        let (soft_cls, unit_weight, offset) = obj.into_unweighted_soft_cls();
-        let lits_iter = soft_cls
-            .into_iter()
-            .map(|cl| absorb_soft_clause(cl, cnf, blits, vm));
-        Objective::Unweighted {
-            offset,
-            unit_weight,
-            lits: lits_iter.collect(),
-        }
-    }
-}
-
-fn absorb_soft_clause<VM: ManageVars>(
-    mut cl: Clause,
-    cnf: &mut Cnf,
-    blits: &mut RsHashMap<Clause, Lit>,
-    vm: &mut VM,
-) -> Lit {
-    if cl.len() == 1 {
-        // No blit needed
-        return !cl[0];
-    }
-    if blits.contains_key(&cl) {
-        // Reuse clause with blit that was already added
-        return blits[&cl];
-    }
-    // Get new blit
-    let blit = vm.new_var().pos_lit();
-    // Save blit in case same soft clause reappears
-    // TODO: find way to not have to clone the clause here
-    blits.insert(cl.clone(), blit);
-    // Relax clause and add it to the CNF
-    cl.add(blit);
-    cnf.add_clause(cl);
-    blit
-}
-
-/// Data regarding an objective
-enum Objective {
-    Weighted {
-        offset: isize,
-        lits: RsHashMap<Lit, usize>,
-    },
-    Unweighted {
-        offset: isize,
-        unit_weight: usize,
-        lits: Vec<Lit>,
-    },
-    Constant {
-        offset: isize,
-    },
-}
-
-impl Objective {
-    /// Gets the offset of the encoding
-    fn offset(&self) -> isize {
-        match self {
-            Objective::Weighted { offset, .. } => *offset,
-            Objective::Unweighted { offset, .. } => *offset,
-            Objective::Constant { offset } => *offset,
-        }
-    }
-
-    /// Unified iterator over encodings
-    fn iter(&self) -> ObjIter<'_> {
-        match self {
-            Objective::Weighted { lits, .. } => ObjIter::Weighted(lits.iter()),
-            Objective::Unweighted { lits, .. } => ObjIter::Unweighted(lits.iter()),
-            Objective::Constant { .. } => ObjIter::Constant,
-        }
-    }
-}
-
-enum ObjIter<'a> {
-    Weighted(std::collections::hash_map::Iter<'a, Lit, usize>),
-    Unweighted(std::slice::Iter<'a, Lit>),
-    Constant,
-}
-
-impl Iterator for ObjIter<'_> {
-    type Item = (Lit, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            ObjIter::Weighted(iter) => iter.next().map(|(&l, &w)| (l, w)),
-            ObjIter::Unweighted(iter) => iter.next().map(|&l| (l, 1)),
-            ObjIter::Constant => None,
-        }
-    }
-}
-
-/// An objective encoding for either a weighted or an unweighted objective
-enum ObjEncoding<PBE, CE> {
-    Weighted(PBE, usize),
-    Unweighted(CE, usize),
-    Constant,
-}
-
-impl<PBE, CE> ObjEncoding<PBE, CE>
-where
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-{
-    /// Initializes a new objective encoding for a weighted objective
-    fn new_weighted<VM: ManageVars, LI: WLitIter>(
-        lits: LI,
-        reserve: bool,
-        var_manager: &mut VM,
-    ) -> Self {
-        let mut encoding = PBE::from_iter(lits);
-        if reserve {
-            encoding.reserve(var_manager);
-        }
-        ObjEncoding::Weighted(encoding, 0)
-    }
-}
-
-impl<PBE, CE> ObjEncoding<PBE, CE>
-where
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
-{
-    /// Initializes a new objective encoding for a weighted objective
-    fn new_unweighted<VM: ManageVars, LI: LitIter>(
-        lits: LI,
-        reserve: bool,
-        var_manager: &mut VM,
-    ) -> Self {
-        let mut encoding = CE::from_iter(lits);
-        if reserve {
-            encoding.reserve(var_manager);
-        }
-        ObjEncoding::Unweighted(encoding, 0)
-    }
-}
-
-impl<PBE, CE> ObjEncoding<PBE, CE> {
-    /// Gets the offset of the encoding
-    fn offset(&self) -> usize {
-        match self {
-            ObjEncoding::Weighted(_, offset) => *offset,
-            ObjEncoding::Unweighted(_, offset) => *offset,
-            ObjEncoding::Constant => 0,
-        }
-    }
-}
-
-impl<PBE, CE> ObjEncoding<PBE, CE>
-where
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
-{
-    /// Gets the next higher objective value
-    fn next_higher(&self, val: usize) -> usize {
-        match self {
-            ObjEncoding::Weighted(enc, offset) => enc.next_higher(val - offset) + offset,
-            ObjEncoding::Unweighted(..) => val + 1,
-            ObjEncoding::Constant => val,
-        }
-    }
-
-    /// Encodes the given range
-    fn encode_ub_change<Col>(
-        &mut self,
-        range: Range<usize>,
-        collector: &mut Col,
-        var_manager: &mut dyn ManageVars,
-    ) -> Result<(), rustsat::OutOfMemory>
-    where
-        Col: CollectClauses,
-    {
-        match self {
-            ObjEncoding::Weighted(enc, offset) => enc.encode_ub_change(
-                if range.start >= *offset {
-                    range.start - *offset
-                } else {
-                    0
-                }..if range.end >= *offset {
-                    range.end - *offset
-                } else {
-                    0
-                },
-                collector,
-                var_manager,
-            ),
-            ObjEncoding::Unweighted(enc, offset) => enc.encode_ub_change(
-                if range.start >= *offset {
-                    range.start - *offset
-                } else {
-                    0
-                }..if range.end >= *offset {
-                    range.end - *offset
-                } else {
-                    0
-                },
-                collector,
-                var_manager,
-            ),
-            ObjEncoding::Constant => Ok(()),
-        }
-    }
-
-    /// Enforces the given upper bound
-    fn enforce_ub(&mut self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::Error> {
-        match self {
-            ObjEncoding::Weighted(enc, offset) => {
-                if ub >= *offset {
-                    enc.enforce_ub(ub - *offset)
-                } else {
-                    Err(rustsat::encodings::Error::Unsat)
-                }
-            }
-            ObjEncoding::Unweighted(enc, offset) => {
-                if ub >= *offset {
-                    enc.enforce_ub(ub - *offset)
-                } else {
-                    Err(rustsat::encodings::Error::Unsat)
-                }
-            }
-            ObjEncoding::Constant => Ok(vec![]),
-        }
-    }
-
-    /// Gets a coarse upper bound
-    #[cfg(feature = "coarse-convergence")]
-    fn coarse_ub(&self, ub: usize) -> usize {
-        match self {
-            ObjEncoding::Weighted(enc, offset) => {
-                if ub >= *offset {
-                    enc.coarse_ub(ub - *offset) + offset
-                } else {
-                    ub
-                }
-            }
-            _ => ub,
-        }
-    }
-}
-
-#[cfg(feature = "sol-tightening")]
-/// Data regarding an objective literal
-struct ObjLitData {
-    /// Objectives that the literal appears in
-    objs: Vec<usize>,
 }
 
 /// The default blocking clause generator

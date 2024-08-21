@@ -2,9 +2,13 @@
 //!
 //! Shared types for the $P$-minimal solver.
 
-use std::ops::Index;
+use std::ops::{Index, Range};
 
-use rustsat::types::Assignment;
+use rustsat::{
+    encodings::{card, pb, CollectClauses},
+    instances::ManageVars,
+    types::{Assignment, Lit, LitIter, RsHashMap, WLitIter},
+};
 
 /// The Pareto front of an instance. This is the return type of the solver.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -208,4 +212,240 @@ where
     fn into_iter(self) -> Self::IntoIter {
         self.sols.into_iter()
     }
+}
+
+/// Data regarding an objective
+pub(crate) enum Objective {
+    Weighted {
+        offset: isize,
+        lits: RsHashMap<Lit, usize>,
+    },
+    Unweighted {
+        offset: isize,
+        unit_weight: usize,
+        lits: Vec<Lit>,
+    },
+    Constant {
+        offset: isize,
+    },
+}
+
+impl Objective {
+    /// Initializes the objective from a soft lit iterator and an offset
+    pub fn new<Iter: WLitIter>(lits: Iter, offset: isize) -> Self {
+        let lits: Vec<_> = lits.into_iter().collect();
+        if lits.is_empty() {
+            return Objective::Constant { offset };
+        }
+        let unit_weight = lits[0].1;
+        let weighted = 'detect_weighted: {
+            for (_, w) in &lits {
+                if *w != unit_weight {
+                    break 'detect_weighted true;
+                }
+            }
+            false
+        };
+        if weighted {
+            Objective::Weighted {
+                offset,
+                lits: lits.into_iter().collect(),
+            }
+        } else {
+            Objective::Unweighted {
+                offset,
+                unit_weight,
+                lits: lits.into_iter().map(|(l, _)| l).collect(),
+            }
+        }
+    }
+
+    /// Gets the offset of the encoding
+    pub fn offset(&self) -> isize {
+        match self {
+            Objective::Weighted { offset, .. } => *offset,
+            Objective::Unweighted { offset, .. } => *offset,
+            Objective::Constant { offset } => *offset,
+        }
+    }
+
+    /// Unified iterator over encodings
+    pub fn iter(&self) -> ObjIter<'_> {
+        match self {
+            Objective::Weighted { lits, .. } => ObjIter::Weighted(lits.iter()),
+            Objective::Unweighted { lits, .. } => ObjIter::Unweighted(lits.iter()),
+            Objective::Constant { .. } => ObjIter::Constant,
+        }
+    }
+}
+
+pub(crate) enum ObjIter<'a> {
+    Weighted(std::collections::hash_map::Iter<'a, Lit, usize>),
+    Unweighted(std::slice::Iter<'a, Lit>),
+    Constant,
+}
+
+impl Iterator for ObjIter<'_> {
+    type Item = (Lit, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ObjIter::Weighted(iter) => iter.next().map(|(&l, &w)| (l, w)),
+            ObjIter::Unweighted(iter) => iter.next().map(|&l| (l, 1)),
+            ObjIter::Constant => None,
+        }
+    }
+}
+
+/// An objective encoding for either a weighted or an unweighted objective
+pub(crate) enum ObjEncoding<PBE, CE> {
+    Weighted(PBE, usize),
+    Unweighted(CE, usize),
+    Constant,
+}
+
+impl<PBE, CE> ObjEncoding<PBE, CE>
+where
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
+{
+    /// Initializes a new objective encoding for a weighted objective
+    pub fn new_weighted<VM: ManageVars, LI: WLitIter>(
+        lits: LI,
+        reserve: bool,
+        var_manager: &mut VM,
+    ) -> Self {
+        let mut encoding = PBE::from_iter(lits);
+        if reserve {
+            encoding.reserve(var_manager);
+        }
+        ObjEncoding::Weighted(encoding, 0)
+    }
+}
+
+impl<PBE, CE> ObjEncoding<PBE, CE>
+where
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
+{
+    /// Initializes a new objective encoding for a weighted objective
+    pub fn new_unweighted<VM: ManageVars, LI: LitIter>(
+        lits: LI,
+        reserve: bool,
+        var_manager: &mut VM,
+    ) -> Self {
+        let mut encoding = CE::from_iter(lits);
+        if reserve {
+            encoding.reserve(var_manager);
+        }
+        ObjEncoding::Unweighted(encoding, 0)
+    }
+}
+
+impl<PBE, CE> ObjEncoding<PBE, CE> {
+    /// Gets the offset of the encoding
+    pub fn offset(&self) -> usize {
+        match self {
+            ObjEncoding::Weighted(_, offset) => *offset,
+            ObjEncoding::Unweighted(_, offset) => *offset,
+            ObjEncoding::Constant => 0,
+        }
+    }
+}
+
+impl<PBE, CE> ObjEncoding<PBE, CE>
+where
+    PBE: pb::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental,
+{
+    /// Gets the next higher objective value
+    pub fn next_higher(&self, val: usize) -> usize {
+        match self {
+            ObjEncoding::Weighted(enc, offset) => enc.next_higher(val - offset) + offset,
+            ObjEncoding::Unweighted(..) => val + 1,
+            ObjEncoding::Constant => val,
+        }
+    }
+
+    /// Encodes the given range
+    pub fn encode_ub_change<Col>(
+        &mut self,
+        range: Range<usize>,
+        collector: &mut Col,
+        var_manager: &mut dyn ManageVars,
+    ) -> Result<(), rustsat::OutOfMemory>
+    where
+        Col: CollectClauses,
+    {
+        match self {
+            ObjEncoding::Weighted(enc, offset) => enc.encode_ub_change(
+                if range.start >= *offset {
+                    range.start - *offset
+                } else {
+                    0
+                }..if range.end >= *offset {
+                    range.end - *offset
+                } else {
+                    0
+                },
+                collector,
+                var_manager,
+            ),
+            ObjEncoding::Unweighted(enc, offset) => enc.encode_ub_change(
+                if range.start >= *offset {
+                    range.start - *offset
+                } else {
+                    0
+                }..if range.end >= *offset {
+                    range.end - *offset
+                } else {
+                    0
+                },
+                collector,
+                var_manager,
+            ),
+            ObjEncoding::Constant => Ok(()),
+        }
+    }
+
+    /// Enforces the given upper bound
+    pub fn enforce_ub(&mut self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::Error> {
+        match self {
+            ObjEncoding::Weighted(enc, offset) => {
+                if ub >= *offset {
+                    enc.enforce_ub(ub - *offset)
+                } else {
+                    Err(rustsat::encodings::Error::Unsat)
+                }
+            }
+            ObjEncoding::Unweighted(enc, offset) => {
+                if ub >= *offset {
+                    enc.enforce_ub(ub - *offset)
+                } else {
+                    Err(rustsat::encodings::Error::Unsat)
+                }
+            }
+            ObjEncoding::Constant => Ok(vec![]),
+        }
+    }
+
+    /// Gets a coarse upper bound
+    #[cfg(feature = "coarse-convergence")]
+    pub fn coarse_ub(&self, ub: usize) -> usize {
+        match self {
+            ObjEncoding::Weighted(enc, offset) => {
+                if ub >= *offset {
+                    enc.coarse_ub(ub - *offset) + offset
+                } else {
+                    ub
+                }
+            }
+            _ => ub,
+        }
+    }
+}
+
+#[cfg(feature = "sol-tightening")]
+/// Data regarding an objective literal
+pub(crate) struct ObjLitData {
+    /// Objectives that the literal appears in
+    pub objs: Vec<usize>,
 }

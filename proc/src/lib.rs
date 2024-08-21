@@ -1,7 +1,7 @@
 use darling::FromDeriveInput;
 use proc_macro::{self, TokenStream};
 use quote::quote;
-use syn::{self, parse_macro_input, TypeParamBound, WherePredicate};
+use syn::{self, parse_macro_input};
 
 #[derive(FromDeriveInput, Default)]
 #[darling(default, attributes(kernel))]
@@ -97,7 +97,6 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
 #[darling(default, attributes(solve))]
 struct SolveOpts {
     bounds: Option<syn::WhereClause>,
-    extended_stats: bool,
     oracle_stats: bool,
 }
 
@@ -171,71 +170,22 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
             .extend(add_bounds.predicates)
     }
 
-    // If O: SolveStats is satisfied, add oracle stats
-    // (this doesn't actually check that this bound is on O)
-    let mut oracle_stats = false;
-    if !sopts.extended_stats {
-        if let Some(ref where_clause) = ast.generics.where_clause {
-            for pred in where_clause.predicates.iter() {
-                if let WherePredicate::Type(typ) = pred {
-                    for bound in typ.bounds.iter() {
-                        if let TypeParamBound::Trait(tb) = bound {
-                            if tb.path.segments.last().unwrap().ident == "SolveStats" {
-                                oracle_stats = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    if sopts.extended_stats {
-        quote! {
-            impl #impl_generics Solve for #name #ty_generics #where_clause {
-                fn solve(&mut self, limits: Limits) -> crate::MaybeTerminatedError {
-                    #kernel.start_solving(limits);
-                    self.alg_main()
-                }
+    quote! {
+        impl #impl_generics Solve for #name #ty_generics #where_clause {
+            fn solve(&mut self, limits: Limits) -> crate::MaybeTerminatedError {
+                #kernel.start_solving(limits);
+                self.alg_main()
+            }
 
-                fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
-                    use crate::ExtendedSolveStats;
-                    (#kernel.stats, Some(self.oracle_stats()),
-                    Some(self.encoding_stats()))
-                }
+            fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
+                use crate::ExtendedSolveStats;
+                (#kernel.stats, Some(self.oracle_stats()),
+                Some(self.encoding_stats()))
             }
         }
-    } else if oracle_stats {
-        quote!{
-            impl #impl_generics Solve for #name #ty_generics #where_clause {
-                fn solve(&mut self, limits: Limits) -> crate::MaybeTerminatedError {
-                    #kernel.start_solving(limits);
-                    self.alg_main()
-                }
-
-                fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
-                    use rustsat::solvers::SolveStats;
-                    (#kernel.stats, Some(#kernel.oracle.stats()), None)
-                }
-            }
-        }
-    } else {
-        quote!{
-            impl #impl_generics Solve for #name #ty_generics #where_clause {
-                fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
-                    #kernel.start_solving(limits);
-                    self.alg_main()
-                }
-
-                fn all_stats(&self) -> (crate::Stats, Option<rustsat::solvers::SolverStats>, Option<Vec<crate::EncodingStats>>) {
-                    (#kernel.stats, None, None)
-                }
-            }
-        }
-    }
-    .into()
+    }.into()
 }
 
 #[proc_macro_attribute]
