@@ -11,7 +11,7 @@ macro_rules! check_pf_shape {
 
 macro_rules! test_instance {
     ($s:ty, $o:expr, $i:expr, $t:expr) => {{
-        use scuttle_core::{prepro, KernelFunctions, Solve};
+        use scuttle_core::{prepro, InitDefaultBlock, KernelFunctions, Solve};
         let inst = prepro::handle_soft_clauses(
             prepro::parse(
                 $i,
@@ -20,24 +20,14 @@ macro_rules! test_instance {
             )
             .unwrap(),
         );
-        let mut solver = <$s>::new(
-            inst.cnf,
-            inst.objs,
-            inst.max_inst_var,
-            inst.max_orig_var,
-            $o,
-            None,
-            Default::default,
-            scuttle_core::solver::default_blocking_clause,
-        )
-        .unwrap();
+        let mut solver = <$s>::from_instance_default_blocking(inst, $o, None).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver.pareto_front();
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
     }};
     ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
-        use scuttle_core::{prepro, CoreBoost, KernelFunctions, Solve};
+        use scuttle_core::{prepro, CoreBoost, InitDefaultBlock, KernelFunctions, Solve};
         let inst = prepro::handle_soft_clauses(
             prepro::parse(
                 $i,
@@ -46,17 +36,7 @@ macro_rules! test_instance {
             )
             .unwrap(),
         );
-        let mut solver = <$s>::new(
-            inst.cnf,
-            inst.objs,
-            inst.max_inst_var,
-            inst.max_orig_var,
-            $o,
-            None,
-            Default::default,
-            scuttle_core::solver::default_blocking_clause,
-        )
-        .unwrap();
+        let mut solver = <$s>::from_instance_default_blocking(inst, $o, None).unwrap();
         let cont = solver.core_boost($cbo).unwrap();
         if cont {
             solver.solve(scuttle_core::Limits::none()).unwrap();
@@ -888,13 +868,7 @@ macro_rules! generate_tests {
 }
 
 mod pmin {
-    type S = scuttle_core::PMinimal<
-        rustsat_cadical::CaDiCaL<'static, 'static>,
-        fn() -> rustsat_cadical::CaDiCaL<'static, 'static>,
-        rustsat::encodings::pb::DbGte,
-        rustsat::encodings::card::DbTotalizer,
-        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    >;
+    type S = scuttle_core::PMinimal<rustsat_cadical::CaDiCaL<'static, 'static>>;
     generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
     generate_tests!(
         no_heur,
@@ -946,13 +920,7 @@ mod pmin {
 }
 
 mod lb {
-    type S = scuttle_core::LowerBounding<
-        rustsat_cadical::CaDiCaL<'static, 'static>,
-        fn() -> rustsat_cadical::CaDiCaL<'static, 'static>,
-        rustsat::encodings::pb::DbGte,
-        rustsat::encodings::card::DbTotalizer,
-        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    >;
+    type S = scuttle_core::LowerBounding<rustsat_cadical::CaDiCaL<'static, 'static>>;
     generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
     generate_tests!(
         cb,
@@ -972,13 +940,7 @@ mod lb {
 }
 
 mod bioptsat {
-    type S = scuttle_core::BiOptSat<
-        rustsat_cadical::CaDiCaL<'static, 'static>,
-        fn() -> rustsat_cadical::CaDiCaL<'static, 'static>,
-        rustsat::encodings::pb::DbGte,
-        rustsat::encodings::card::DbTotalizer,
-        fn(rustsat::types::Assignment) -> rustsat::types::Clause,
-    >;
+    type S = scuttle_core::BiOptSat<rustsat_cadical::CaDiCaL<'static, 'static>>;
     generate_biobj_tests!(default, super::S, scuttle_core::KernelOptions::default());
     generate_biobj_tests!(
         cb,

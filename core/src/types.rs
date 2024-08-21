@@ -2,12 +2,15 @@
 //!
 //! Shared types for the $P$-minimal solver.
 
-use std::ops::{Index, Range};
+use std::{
+    cmp,
+    ops::{Index, Range},
+};
 
 use rustsat::{
     encodings::{card, pb, CollectClauses},
-    instances::ManageVars,
-    types::{Assignment, Lit, LitIter, RsHashMap, WLitIter},
+    instances::{Cnf, ManageVars, ReindexVars},
+    types::{Assignment, Lit, LitIter, RsHashMap, Var, WLitIter},
 };
 
 /// The Pareto front of an instance. This is the return type of the solver.
@@ -215,6 +218,7 @@ where
 }
 
 /// Data regarding an objective
+#[derive(Debug, Clone)]
 pub(crate) enum Objective {
     Weighted {
         offset: isize,
@@ -448,4 +452,206 @@ where
 pub(crate) struct ObjLitData {
     /// Objectives that the literal appears in
     pub objs: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct VarManager {
+    next_var: Var,
+    max_orig_var: Var,
+    max_enc_var: Var,
+}
+
+impl VarManager {
+    /// Creates a new varaible manager, keeping track of different variable types
+    ///
+    /// - `max_orig_var` is the maximum variable in the _original_ instance, (e.g., the OPB file)
+    /// - `max_enc_var` is the maximum variable in the encoded CNF instance with a linear
+    ///     objective, i.e., this might include variables used for encoding PB constraints and for
+    ///     relaxing soft clauses
+    ///
+    /// # Panics
+    ///
+    /// If `max_enc_var < max_orig_var`
+    pub fn new(max_orig_var: Var, max_enc_var: Var) -> Self {
+        assert!(max_enc_var >= max_orig_var);
+        VarManager {
+            max_orig_var,
+            max_enc_var,
+            next_var: max_enc_var + 1,
+        }
+    }
+
+    pub(crate) fn mark_max_orig_var(&mut self) {
+        self.max_orig_var = self.next_var - 1;
+        self.max_enc_var = cmp::max(self.max_enc_var, self.max_orig_var);
+    }
+
+    pub(crate) fn mark_max_enc_var(&mut self) {
+        self.max_enc_var = self.next_var - 1;
+    }
+
+    pub fn max_orig_var(&self) -> Var {
+        self.max_orig_var
+    }
+
+    pub fn max_enc_var(&self) -> Var {
+        self.max_enc_var
+    }
+}
+
+impl Default for VarManager {
+    fn default() -> Self {
+        Self {
+            next_var: Var::new(0),
+            max_orig_var: Var::new(0),
+            max_enc_var: Var::new(0),
+        }
+    }
+}
+
+impl ManageVars for VarManager {
+    fn new_var(&mut self) -> Var {
+        let v = self.next_var;
+        self.next_var += 1;
+        v
+    }
+
+    fn max_var(&self) -> Option<Var> {
+        if self.next_var == Var::new(0) {
+            None
+        } else {
+            Some(self.next_var - 1)
+        }
+    }
+
+    fn increase_next_free(&mut self, v: Var) -> bool {
+        if v > self.next_var {
+            self.next_var = v;
+            return true;
+        };
+        false
+    }
+
+    fn combine(&mut self, other: Self) {
+        if other.next_var > self.next_var {
+            self.next_var = other.next_var;
+        };
+    }
+
+    fn n_used(&self) -> u32 {
+        self.next_var.idx32()
+    }
+
+    fn forget_from(&mut self, min_var: Var) {
+        self.next_var = std::cmp::min(self.next_var, min_var);
+    }
+}
+
+/// Manager for reindexing an existing instance
+#[derive(PartialEq, Eq)]
+pub struct Reindexer {
+    next_var: Var,
+    in_map: RsHashMap<Var, Var>,
+    out_map: Vec<Var>,
+    old_max_orig_var: Var,
+}
+
+impl Reindexer {
+    pub fn new(old_max_orig_var: Var) -> Self {
+        Reindexer {
+            next_var: Var::new(0),
+            in_map: RsHashMap::default(),
+            out_map: Vec::default(),
+            old_max_orig_var,
+        }
+    }
+
+    pub fn old_max_orig_var(&self) -> Var {
+        self.old_max_orig_var
+    }
+}
+
+impl ReindexVars for Reindexer {
+    fn reindex(&mut self, in_var: Var) -> Var {
+        if let Some(v) = self.in_map.get(&in_var) {
+            *v
+        } else {
+            let v = self.new_var();
+            self.in_map.insert(in_var, v);
+            self.out_map.push(in_var);
+            v
+        }
+    }
+
+    fn reverse(&self, out_var: Var) -> Option<Var> {
+        if out_var.idx() >= self.out_map.len() {
+            return None;
+        }
+        Some(self.out_map[out_var.idx()])
+    }
+}
+
+impl ManageVars for Reindexer {
+    fn new_var(&mut self) -> Var {
+        let v = self.next_var;
+        self.next_var = v + 1;
+        v
+    }
+
+    fn max_var(&self) -> Option<Var> {
+        if self.next_var == Var::new(0) {
+            None
+        } else {
+            Some(self.next_var - 1)
+        }
+    }
+
+    fn increase_next_free(&mut self, v: Var) -> bool {
+        if v > self.next_var {
+            self.next_var = v;
+            return true;
+        };
+        false
+    }
+
+    fn combine(&mut self, other: Self) {
+        if other.next_var > self.next_var {
+            self.next_var = other.next_var;
+        };
+        self.in_map.extend(other.in_map);
+    }
+
+    fn n_used(&self) -> u32 {
+        self.next_var.idx32()
+    }
+
+    fn forget_from(&mut self, min_var: Var) {
+        self.in_map.retain(|_, v| *v < min_var);
+        self.out_map.truncate(min_var.idx() + 1);
+        self.next_var = std::cmp::min(self.next_var, min_var);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Parsed {
+    pub(crate) cnf: Cnf,
+    pub(crate) objs: Vec<rustsat::instances::Objective>,
+    pub(crate) vm: VarManager,
+}
+
+#[derive(Debug, Clone)]
+pub struct Instance {
+    pub(crate) cnf: Cnf,
+    pub(crate) objs: Vec<(Vec<(Lit, usize)>, isize)>,
+    pub(crate) vm: VarManager,
+}
+
+impl Instance {
+    pub fn n_clauses(&self) -> usize {
+        self.cnf.n_clauses()
+    }
+
+    pub fn n_objs(&self) -> usize {
+        self.objs.len()
+    }
 }

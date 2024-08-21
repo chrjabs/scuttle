@@ -1,6 +1,7 @@
 //! Core solver functionality shared between different algorithms
 
 use std::{
+    marker::PhantomData,
     ops::Not,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -15,9 +16,11 @@ use anyhow::Context;
 use maxpre::MaxPre;
 use rustsat::{
     encodings::{card, pb},
-    instances::{BasicVarManager, Cnf, ManageVars},
-    solvers::{SolveIncremental, SolveStats, SolverResult, SolverStats},
-    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var, WLitIter},
+    instances::{Cnf, ManageVars},
+    solvers::{
+        DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
+    },
+    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, WLitIter},
 };
 use scuttle_proc::oracle_bounds;
 
@@ -26,7 +29,7 @@ use maxpre::PreproClauses;
 
 use crate::{
     options::{CoreBoostingOptions, EnumOptions},
-    types::{NonDomPoint, ObjEncoding, ObjLitData, Objective, ParetoFront},
+    types::{Instance, NonDomPoint, ObjEncoding, ObjLitData, Objective, ParetoFront, VarManager},
     EncodingStats, KernelOptions, Limits, MaybeTerminated,
     MaybeTerminatedError::{self, Done, Error, Terminated},
     Phase, Stats, Termination, WriteSolverLog,
@@ -38,6 +41,81 @@ pub mod pminimal;
 
 mod coreboosting;
 mod coreguided;
+
+/// Trait for initializing algorithms
+pub trait Init: Sized {
+    type Oracle: SolveIncremental;
+    type BlockClauseGen: Fn(Assignment) -> Clause;
+    type ProofWriter;
+
+    /// Initialization of the algorithm providing all optional input
+    fn new<Cls, Objs, Obj>(
+        clauses: Cls,
+        objs: Objs,
+        var_manager: VarManager,
+        opts: KernelOptions,
+        proof: Option<pidgeons::Proof<Self::ProofWriter>>,
+        block_clause_gen: Self::BlockClauseGen,
+    ) -> anyhow::Result<Self>
+    where
+        Cls: IntoIterator<Item = Clause>,
+        Objs: IntoIterator<Item = (Obj, isize)>,
+        Obj: WLitIter;
+
+    /// Initialization of the algorithm using an [`Instance`] rather than iterators
+    fn from_instance(
+        inst: Instance,
+        opts: KernelOptions,
+        proof: Option<pidgeons::Proof<Self::ProofWriter>>,
+        block_clause_gen: Self::BlockClauseGen,
+    ) -> anyhow::Result<Self> {
+        Self::new(inst.cnf, inst.objs, inst.vm, opts, proof, block_clause_gen)
+    }
+}
+
+pub trait InitDefaultBlock: Init<BlockClauseGen = fn(Assignment) -> Clause> {
+    /// Initializes the algorithm with the default blocking clause generator
+    fn new_default_blocking<Cls, Objs, Obj>(
+        clauses: Cls,
+        objs: Objs,
+        var_manager: VarManager,
+        opts: KernelOptions,
+        proof: Option<pidgeons::Proof<Self::ProofWriter>>,
+    ) -> anyhow::Result<Self>
+    where
+        Cls: IntoIterator<Item = Clause>,
+        Objs: IntoIterator<Item = (Obj, isize)>,
+        Obj: WLitIter,
+    {
+        Self::new(
+            clauses,
+            objs,
+            var_manager,
+            opts,
+            proof,
+            default_blocking_clause,
+        )
+    }
+
+    /// Initializes the algorithm using an [`Instance`] rather than iterators with the default
+    /// blocking clause generator
+    fn from_instance_default_blocking(
+        inst: Instance,
+        opts: KernelOptions,
+        proof: Option<pidgeons::Proof<Self::ProofWriter>>,
+    ) -> anyhow::Result<Self> {
+        Self::new(
+            inst.cnf,
+            inst.objs,
+            inst.vm,
+            opts,
+            proof,
+            default_blocking_clause,
+        )
+    }
+}
+
+impl<Alg> InitDefaultBlock for Alg where Alg: Init<BlockClauseGen = fn(Assignment) -> Clause> {}
 
 /// Solving interface for each algorithm
 pub trait Solve: KernelFunctions {
@@ -94,21 +172,21 @@ impl Interrupter {
 }
 
 /// Kernel struct shared between all solvers
-struct SolverKernel<O, OFac, BCG, ProofW> {
+///
+/// # Generics
+///
+/// - `O`: the SAT solver oracle
+/// - `ProofW`: the proof writer
+/// - `OInit`: the oracle initializer
+/// - `BCG`: the blocking clause generator
+struct SolverKernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) -> Clause> {
     /// The SAT solver backend
     oracle: O,
-    /// The oracle factory for initializing a new oracle
-    oracle_factory: OFac,
     /// The variable manager keeping track of variables
-    var_manager: BasicVarManager,
+    var_manager: VarManager,
     #[cfg(feature = "sol-tightening")]
     /// Objective literal data
     obj_lit_data: RsHashMap<Lit, ObjLitData>,
-    /// The maximum variable in the instance
-    max_inst_var: Var,
-    /// The maximum variable of the original encoding after introducing blocking
-    /// variables
-    max_orig_var: Var,
     /// The objectives
     objs: Vec<Objective>,
     /// The stored original clauses, if needed
@@ -132,21 +210,21 @@ struct SolverKernel<O, OFac, BCG, ProofW> {
     oracle_interrupter: Arc<Mutex<Box<dyn rustsat::solvers::InterruptSolver + Send>>>,
     /// The VeriPB proof
     proof: Option<pidgeons::Proof<ProofW>>,
+    /// Phantom marker for oracle factory
+    _factory: PhantomData<OInit>,
 }
 
 #[oracle_bounds]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
-    OFac: Fn() -> O,
-    BCG: FnMut(Assignment) -> Clause,
+    OInit: Initialize<O>,
+    BCG: Fn(Assignment) -> Clause,
 {
     pub fn new<Cls, Objs, Obj>(
         clauses: Cls,
         objs: Objs,
-        max_inst_var: Var,
-        max_orig_var: Var,
-        oracle_factory: OFac,
+        var_manager: VarManager,
         bcg: BCG,
         proof: Option<pidgeons::Proof<ProofW>>,
         opts: KernelOptions,
@@ -162,8 +240,8 @@ where
             n_orig_clauses: 0,
             ..Default::default()
         };
-        let mut oracle = oracle_factory();
-        oracle.reserve(max_orig_var)?;
+        let mut oracle = OInit::init();
+        oracle.reserve(var_manager.max_var().unwrap())?;
         let orig_cnf = if opts.store_cnf {
             let cnf: Cnf = clauses.into_iter().collect();
             stats.n_orig_clauses = cnf.len();
@@ -230,12 +308,9 @@ where
         let interrupter = oracle.interrupter();
         Ok(Self {
             oracle,
-            oracle_factory,
-            var_manager: BasicVarManager::from_next_free(max_orig_var + 1),
+            var_manager,
             #[cfg(feature = "sol-tightening")]
             obj_lit_data,
-            max_inst_var,
-            max_orig_var,
             objs,
             orig_cnf,
             block_clause_gen: bcg,
@@ -248,11 +323,12 @@ where
             #[cfg(feature = "interrupt-oracle")]
             oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
             proof,
+            _factory: PhantomData,
         })
     }
 }
 
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW> {
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG> {
     fn start_solving(&mut self, limits: Limits) {
         self.stats.n_solve_calls += 1;
         self.lims = limits;
@@ -431,7 +507,7 @@ impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW> {
 }
 
 #[cfg(feature = "interrupt-oracle")]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: rustsat::solvers::Interrupt,
 {
@@ -444,7 +520,7 @@ where
 }
 
 #[cfg(not(feature = "interrupt-oracle"))]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW> {
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG> {
     fn interrupter(&mut self) -> Interrupter {
         Interrupter {
             term_flag: self.term_flag.clone(),
@@ -453,7 +529,7 @@ impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW> {
 }
 
 #[cfg(feature = "sol-tightening")]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + rustsat::solvers::FlipLit,
 {
@@ -510,7 +586,7 @@ where
 }
 
 #[cfg(not(feature = "sol-tightening"))]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG, ProofW> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
 {
@@ -535,7 +611,7 @@ where
 }
 
 #[cfg(feature = "phasing")]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: rustsat::solvers::PhaseLit,
 {
@@ -565,7 +641,7 @@ where
 }
 
 #[cfg(not(feature = "phasing"))]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW> {
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG> {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
     fn phase_solution(&mut self, _solution: Assignment) -> anyhow::Result<()> {
@@ -580,10 +656,10 @@ impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW> {
 }
 
 #[oracle_bounds]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
-    BCG: FnMut(Assignment) -> Clause,
+    BCG: Fn(Assignment) -> Clause,
 {
     /// Yields Pareto-optimal solutions. The given assumptions must only allow
     /// for solutions at the non-dominated point with given cost. If the options
@@ -614,7 +690,7 @@ where
             );
 
             // Truncate internal solution to only include instance variables
-            solution = solution.truncate(self.max_inst_var);
+            solution = solution.truncate(self.var_manager.max_orig_var());
 
             non_dominated.add_sol(solution.clone());
             match self.log_solution() {
@@ -670,10 +746,10 @@ where
 }
 
 #[oracle_bounds]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
-    BCG: FnMut(Assignment) -> Clause,
+    BCG: Fn(Assignment) -> Clause,
 {
     /// Performs linear sat-unsat search on a given objective and yields
     /// solutions found at the optimum.
@@ -716,7 +792,7 @@ where
 }
 
 #[oracle_bounds]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
 {
@@ -761,7 +837,7 @@ where
                 self.log_routine_end()?;
                 return Done(None);
             }
-            let mut sol = self.oracle.solution(self.max_inst_var)?;
+            let mut sol = self.oracle.solution(self.var_manager.max_orig_var())?;
             let cost = self.get_cost_with_heuristic_improvements(obj_idx, &mut sol, true)?;
             (cost, Some(sol))
         };
@@ -780,7 +856,7 @@ where
             assumps.extend(encoding.enforce_ub(bound).unwrap());
             match self.solve_assumps(&assumps)? {
                 SolverResult::Sat => {
-                    let mut thissol = self.oracle.solution(self.max_inst_var)?;
+                    let mut thissol = self.oracle.solution(self.var_manager.max_orig_var())?;
                     let new_cost =
                         self.get_cost_with_heuristic_improvements(obj_idx, &mut thissol, false)?;
                     debug_assert!(new_cost < cost);
@@ -815,14 +891,14 @@ where
             assumps.extend(encoding.enforce_ub(cost).unwrap());
             let res = self.solve_assumps(&assumps)?;
             debug_assert_eq!(res, SolverResult::Sat);
-            sol = Some(self.oracle.solution(self.max_inst_var)?);
+            sol = Some(self.oracle.solution(self.var_manager.max_orig_var())?);
         }
         self.log_routine_end()?;
         Done(Some((cost, sol.unwrap())))
     }
 }
 
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
 {
@@ -850,10 +926,10 @@ where
 }
 
 #[oracle_bounds]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
-    OFac: Fn() -> O,
+    OInit: Initialize<O>,
 {
     /// Resets the oracle and returns an error when the original [`Cnf`] was not stored.
     fn reset_oracle(&mut self, include_var_manager: bool) -> anyhow::Result<()> {
@@ -862,9 +938,9 @@ where
             "cannot reset oracle without having stored the CNF"
         );
         self.log_routine_start("reset-oracle")?;
-        self.oracle = (self.oracle_factory)();
+        self.oracle = OInit::init();
         if include_var_manager {
-            self.oracle.reserve(self.max_orig_var)?;
+            self.oracle.reserve(self.var_manager.max_enc_var())?;
         } else {
             self.oracle.reserve(self.var_manager.max_var().unwrap())?;
         }
@@ -881,7 +957,8 @@ where
             }
         }
         if include_var_manager {
-            self.var_manager.forget_from(self.max_orig_var + 1);
+            self.var_manager
+                .forget_from(self.var_manager.max_enc_var() + 1);
         }
         self.log_routine_end()?;
         Ok(())

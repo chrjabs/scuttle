@@ -360,7 +360,7 @@ impl From<bool> for Bool {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
-enum CadicalConfig {
+pub enum CadicalConfig {
     /// Set default advanced internal options
     Default,
     /// Disable all internal preprocessing options
@@ -424,7 +424,7 @@ pub struct Cli {
     pub maxpre_techniques: String,
     pub reindexing: bool,
     pub maxpre_reindexing: bool,
-    pub cadical_config: rustsat_cadical::Config,
+    pub cadical_config: CadicalConfig,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,

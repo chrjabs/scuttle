@@ -15,15 +15,13 @@ use types::NonDomPoint;
 
 pub mod prepro;
 
-pub mod solver;
-pub use solver::CoreBoost;
-pub use solver::KernelFunctions;
-pub use solver::Solve;
+pub mod algs;
+pub use algs::{CoreBoost, Init, InitDefaultBlock, KernelFunctions, Solve};
 
 // Reexport algorithms
-pub use solver::bioptsat::BiOptSat;
-pub use solver::lowerbounding::LowerBounding;
-pub use solver::pminimal::PMinimal;
+pub use algs::bioptsat::BiOptSat;
+pub use algs::lowerbounding::LowerBounding;
+pub use algs::pminimal::PMinimal;
 
 pub(crate) mod termination;
 pub use termination::MaybeTerminated;

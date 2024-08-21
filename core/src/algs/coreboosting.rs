@@ -10,7 +10,7 @@ use rustsat::{
         totdb::{Db as TotDb, Node, Semantics},
     },
     instances::ManageVars,
-    solvers::{SolveIncremental, SolveStats},
+    solvers::{Initialize, SolveIncremental, SolveStats},
     types::RsHashMap,
 };
 use scuttle_proc::oracle_bounds;
@@ -123,7 +123,7 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
 }
 
 #[oracle_bounds]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
 {
@@ -158,10 +158,10 @@ where
 }
 
 #[oracle_bounds]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
-    OFac: Fn() -> O,
+    OInit: Initialize<O>,
 {
     /// Performs inprocessing, i.e., preprocessing with MaxPre after core boosting.
     pub fn inprocess<PBE, CE>(
@@ -177,7 +177,7 @@ where
             "cannot reset oracle without having stored the CNF"
         );
         // Reset oracle
-        self.oracle = (self.oracle_factory)();
+        self.oracle = OInit::init();
         #[cfg(feature = "interrupt-oracle")]
         {
             *self.oracle_interrupter.lock().unwrap() = Box::new(self.oracle.interrupter());

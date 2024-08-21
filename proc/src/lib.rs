@@ -85,7 +85,7 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
                 #kernel.detach_logger()
             }
 
-            fn interrupter(&mut self) -> crate::solver::Interrupter {
+            fn interrupter(&mut self) -> crate::algs::Interrupter {
                 #kernel.interrupter()
             }
         }

@@ -1,30 +1,37 @@
+#![feature(min_specialization)]
+
 use std::{fs, io, thread};
 
 use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::{card, pb},
-    instances::{ReindexVars, ReindexingVarManager},
-    types::{Assignment, Clause},
+    instances::ReindexVars,
+    solvers::{DefaultInitializer, Initialize},
+    types::Assignment,
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle_core::{
     self, prepro,
-    solver::{default_blocking_clause, CoreBoost},
-    BiOptSat, LowerBounding, MaybeTerminatedError, PMinimal, Solve,
+    types::{Instance, Reindexer},
+    BiOptSat, CoreBoost, CoreBoostingOptions, Init, InitDefaultBlock, KernelOptions, LowerBounding,
+    MaybeTerminatedError, PMinimal, Solve,
 };
 
 mod cli;
-use cli::{Algorithm, CardEncoding, Cli, PbEncoding};
+use cli::{Algorithm, CadicalConfig, CardEncoding, Cli, PbEncoding};
 
 /// The SAT solver used
 type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
-type PMin<OFac> = PMinimal<Oracle, OFac, pb::DbGte, card::DbTotalizer, fn(Assignment) -> Clause>;
+type PMin<OInit = DefaultInitializer> =
+    PMinimal<Oracle, pb::DbGte, card::DbTotalizer, io::BufWriter<fs::File>, OInit>;
 /// BiOptSat Instantiation used
-type Bos<OFac, PBE, CE> = BiOptSat<Oracle, OFac, PBE, CE, fn(Assignment) -> Clause>;
+type Bos<PBE, CE, OInit = DefaultInitializer> =
+    BiOptSat<Oracle, PBE, CE, io::BufWriter<fs::File>, OInit>;
 /// Lower-bounding instantiation used
-type Lb<OFac> = LowerBounding<Oracle, OFac, pb::DbGte, card::DbTotalizer, fn(Assignment) -> Clause>;
+type Lb<OInit = DefaultInitializer> =
+    LowerBounding<Oracle, pb::DbGte, card::DbTotalizer, io::BufWriter<fs::File>, OInit>;
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::init();
@@ -73,38 +80,23 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
         (inst, None)
     };
 
-    let oracle_factory = || {
-        let mut o = Oracle::default();
-        o.set_configuration(cli.cadical_config)
-            .expect("failed to set cadical config");
-        o
-    };
-
     match cli.alg {
-        Algorithm::PMinimal(opts, ref cb_opts) => {
-            let mut solver = PMin::new(
-                inst.cnf,
-                inst.objs,
-                inst.max_inst_var,
-                inst.max_orig_var,
-                opts,
-                proof,
-                oracle_factory,
-                default_blocking_clause,
-            )?;
-            setup_cli_interaction(&mut solver, cli)?;
-            let cont = if let Some(cb_opts) = cb_opts {
-                solver.core_boost(cb_opts.clone())?
-            } else {
-                true
-            };
-            if cont {
-                solver.solve(cli.limits)?;
+        Algorithm::PMinimal(opts, ref cb_opts) => match cli.cadical_config {
+            CadicalConfig::Default => {
+                run_alg::<PMin>(cli, inst, proof, opts, prepro, reindexer, cb_opts)
             }
-            post_solve(&mut solver, cli, prepro, reindexer).into()
-        }
+            CadicalConfig::Plain => run_alg::<PMin<CaDiCalPlainInit>>(
+                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+            ),
+            CadicalConfig::Sat => {
+                run_alg::<PMin<CaDiCalSatInit>>(cli, inst, proof, opts, prepro, reindexer, cb_opts)
+            }
+            CadicalConfig::Unsat => run_alg::<PMin<CaDiCalUnsatInit>>(
+                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+            ),
+        },
         Algorithm::BiOptSat(opts, pb_enc, card_enc, ref cb_opts) => {
-            if inst.objs.len() != 2 {
+            if inst.n_objs() != 2 {
                 cli.error("the bioptsat algorithm can only be run on bi-objective problems")?;
                 return MaybeTerminatedError::Error(anyhow::anyhow!(Error::InvalidInstance));
             }
@@ -115,75 +107,78 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
             match pb_enc {
                 PbEncoding::Gte => match card_enc {
                     CardEncoding::Tot => {
-                        type S<OFac> = Bos<OFac, pb::DbGte, card::DbTotalizer>;
-                        let mut solver = S::new(
-                            inst.cnf,
-                            inst.objs,
-                            inst.max_inst_var,
-                            inst.max_orig_var,
-                            opts,
-                            proof,
-                            oracle_factory,
-                            default_blocking_clause,
-                        )?;
-                        setup_cli_interaction(&mut solver, cli)?;
-                        let cont = if let Some(cb_opts) = cb_opts {
-                            solver.core_boost(cb_opts.clone())?
-                        } else {
-                            true
-                        };
-                        if cont {
-                            solver.solve(cli.limits)?;
+                        type BosEnc<OInit = DefaultInitializer> =
+                            Bos<pb::DbGte, card::DbTotalizer, OInit>;
+                        match cli.cadical_config {
+                            CadicalConfig::Default => run_alg::<BosEnc>(
+                                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+                            ),
+                            CadicalConfig::Plain => run_alg::<BosEnc<CaDiCalPlainInit>>(
+                                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+                            ),
+                            CadicalConfig::Sat => run_alg::<BosEnc<CaDiCalSatInit>>(
+                                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+                            ),
+                            CadicalConfig::Unsat => run_alg::<BosEnc<CaDiCalUnsatInit>>(
+                                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+                            ),
                         }
-                        post_solve(&mut solver, cli, prepro, reindexer).into()
                     }
                 },
                 PbEncoding::Dpw => match card_enc {
                     CardEncoding::Tot => {
-                        type S<OFac> = Bos<OFac, pb::DynamicPolyWatchdog, card::DbTotalizer>;
-                        let mut solver = S::new(
-                            inst.cnf,
-                            inst.objs,
-                            inst.max_inst_var,
-                            inst.max_orig_var,
-                            opts,
-                            proof,
-                            oracle_factory,
-                            default_blocking_clause,
-                        )?;
-                        setup_cli_interaction(&mut solver, cli)?;
-                        solver.solve(cli.limits)?;
-                        post_solve(&mut solver, cli, prepro, reindexer).into()
+                        type BosEnc<OInit = DefaultInitializer> =
+                            Bos<pb::DynamicPolyWatchdog, card::DbTotalizer, OInit>;
+                        match cli.cadical_config {
+                            CadicalConfig::Default => run_alg::<BosEnc>(
+                                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+                            ),
+                            CadicalConfig::Plain => run_alg::<BosEnc<CaDiCalPlainInit>>(
+                                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+                            ),
+                            CadicalConfig::Sat => run_alg::<BosEnc<CaDiCalSatInit>>(
+                                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+                            ),
+                            CadicalConfig::Unsat => run_alg::<BosEnc<CaDiCalUnsatInit>>(
+                                cli, inst, proof, opts, prepro, reindexer, cb_opts,
+                            ),
+                        }
                     }
                 },
             }
         }
-        Algorithm::LowerBounding(opts, ref cb_opts) => {
-            let mut solver = Lb::new(
-                inst.cnf,
-                inst.objs,
-                inst.max_inst_var,
-                inst.max_orig_var,
-                opts,
-                proof,
-                oracle_factory,
-                default_blocking_clause,
-            )?;
-            setup_cli_interaction(&mut solver, cli)?;
-            let cont = if let Some(cb_opts) = cb_opts {
-                solver.core_boost(cb_opts.clone())?
-            } else {
-                true
-            };
-            if cont {
-                solver.solve(cli.limits)?;
+        Algorithm::LowerBounding(opts, ref cb_opts) => match cli.cadical_config {
+            CadicalConfig::Default => {
+                run_alg::<Lb>(cli, inst, proof, opts, prepro, reindexer, cb_opts)
             }
-            post_solve(&mut solver, cli, prepro, reindexer).into()
-        }
+            CadicalConfig::Plain => {
+                run_alg::<Lb<CaDiCalPlainInit>>(cli, inst, proof, opts, prepro, reindexer, cb_opts)
+            }
+            CadicalConfig::Sat => {
+                run_alg::<Lb<CaDiCalSatInit>>(cli, inst, proof, opts, prepro, reindexer, cb_opts)
+            }
+            CadicalConfig::Unsat => {
+                run_alg::<Lb<CaDiCalUnsatInit>>(cli, inst, proof, opts, prepro, reindexer, cb_opts)
+            }
+        },
     }
 }
 
-fn setup_cli_interaction<S: Solve>(solver: &mut S, cli: &Cli) -> anyhow::Result<()> {
+fn run_alg<Alg>(
+    cli: &Cli,
+    inst: Instance,
+    proof: Option<pidgeons::Proof<<Alg as Init>::ProofWriter>>,
+    opts: KernelOptions,
+    mut prepro: Option<MaxPre>,
+    reindexer: Option<Reindexer>,
+    cb_opts: &Option<CoreBoostingOptions>,
+) -> MaybeTerminatedError
+where
+    Alg: InitDefaultBlock + Solve,
+{
+    let mut solver = Alg::from_instance_default_blocking(inst, opts, proof)?;
+
+    // === Set up CLI interaction ===
     // Set up signal handling
     let mut interrupter = solver.interrupter();
     let mut signals = signal_hook::iterator::Signals::new([
@@ -200,23 +195,25 @@ fn setup_cli_interaction<S: Solve>(solver: &mut S, cli: &Cli) -> anyhow::Result<
     });
 
     solver.attach_logger(cli.new_cli_logger());
-    Ok(())
-}
 
-fn post_solve<S: Solve>(
-    solver: &mut S,
-    cli: &Cli,
-    mut prepro: Option<MaxPre>,
-    reindexer: Option<ReindexingVarManager>,
-) -> anyhow::Result<()> {
-    cli.info("finished solving the instance")?;
+    // === Core boosting ===
+    let cont = core_boosting(&mut solver, cb_opts)?;
 
+    // === Solving ===
+    if cont {
+        solver.solve(cli.limits)?;
+    }
+
+    // === Post solve ===
     let pareto_front = solver.pareto_front();
 
     // Reverse reindexing
     let pareto_front = if let Some(reindexer) = reindexer {
         let reverse = |l| reindexer.reverse_lit(l);
-        pareto_front.convert_solutions(&mut |s| s.into_iter().filter_map(reverse).collect())
+        pareto_front.convert_solutions(&mut |s| {
+            let s: Assignment = s.into_iter().filter_map(reverse).collect();
+            s.truncate(reindexer.old_max_orig_var())
+        })
     } else {
         pareto_front
     };
@@ -243,7 +240,32 @@ fn post_solve<S: Solve>(
         cli.print_maxpre_stats(prepro.stats())?;
     }
 
-    Ok(())
+    MaybeTerminatedError::Done(())
+}
+
+/// Perform core boosting. This is the default implementation (when core boosting is not supported)
+/// that only checks that core boosting is not called for.
+fn core_boosting<Alg>(
+    _alg: &mut Alg,
+    opts: &Option<CoreBoostingOptions>,
+) -> MaybeTerminatedError<bool> {
+    assert!(opts.is_none());
+    MaybeTerminatedError::Done(true)
+}
+
+/// Specialized variant for when core boosting is implemented
+fn core_boostin<Alg>(
+    alg: &mut Alg,
+    opts: &Option<CoreBoostingOptions>,
+) -> MaybeTerminatedError<bool>
+where
+    Alg: CoreBoost,
+{
+    if let Some(opts) = opts {
+        alg.core_boost(opts.clone())
+    } else {
+        MaybeTerminatedError::Done(true)
+    }
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
@@ -252,4 +274,37 @@ enum Error {
     InvalidInstance,
     #[error("Invalid configuration")]
     InvalidConfig,
+}
+
+struct CaDiCalPlainInit;
+
+impl Initialize<CaDiCaL<'static, 'static>> for CaDiCalPlainInit {
+    fn init() -> CaDiCaL<'static, 'static> {
+        let mut slv = CaDiCaL::default();
+        slv.set_configuration(rustsat_cadical::Config::Plain)
+            .expect("failed to set cadical config");
+        slv
+    }
+}
+
+struct CaDiCalSatInit;
+
+impl Initialize<CaDiCaL<'static, 'static>> for CaDiCalSatInit {
+    fn init() -> CaDiCaL<'static, 'static> {
+        let mut slv = CaDiCaL::default();
+        slv.set_configuration(rustsat_cadical::Config::Sat)
+            .expect("failed to set cadical config");
+        slv
+    }
+}
+
+struct CaDiCalUnsatInit;
+
+impl Initialize<CaDiCaL<'static, 'static>> for CaDiCalUnsatInit {
+    fn init() -> CaDiCaL<'static, 'static> {
+        let mut slv = CaDiCaL::default();
+        slv.set_configuration(rustsat_cadical::Config::Unsat)
+            .expect("failed to set cadical config");
+        slv
+    }
 }

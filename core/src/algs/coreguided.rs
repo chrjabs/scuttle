@@ -213,7 +213,7 @@ struct CoreData {
 }
 
 #[oracle_bounds]
-impl<O, OFac, BCG, ProofW> SolverKernel<O, OFac, BCG, ProofW>
+impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
 {

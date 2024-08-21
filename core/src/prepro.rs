@@ -5,12 +5,11 @@ use std::{cmp, ffi::OsString, fmt, path::Path};
 use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::CollectClauses,
-    instances::{
-        fio, BasicVarManager, Cnf, ManageVars, MultiOptInstance, Objective, ReindexVars,
-        ReindexingVarManager,
-    },
+    instances::{fio, ManageVars, MultiOptInstance, Objective, ReindexVars},
     types::{Clause, Lit, RsHashMap, Var},
 };
+
+use crate::types::{Instance, Parsed, Reindexer, VarManager};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
@@ -56,7 +55,7 @@ pub fn parse<P: AsRef<Path>>(
     opb_opts: fio::opb::Options,
 ) -> anyhow::Result<Parsed> {
     let inst_path = inst_path.as_ref();
-    let inst: MultiOptInstance = match file_format {
+    let inst: MultiOptInstance<VarManager> = match file_format {
         FileFormat::Infer => {
             if let Some(ext) = inst_path.extension() {
                 let path_without_compr = inst_path.with_extension("");
@@ -84,22 +83,11 @@ pub fn parse<P: AsRef<Path>>(
         FileFormat::Opb => MultiOptInstance::from_opb_path(inst_path, opb_opts)?,
     };
     // FIXME: make sure constraint order is preserved
-    let (constr, objs) = inst.decompose();
-    let max_inst_var = constr.max_var().unwrap();
-    let (cnf, vm) = constr.into_cnf();
-    Ok(Parsed {
-        cnf,
-        objs,
-        max_inst_var,
-        vm,
-    })
-}
-
-pub struct Parsed {
-    cnf: Cnf,
-    objs: Vec<Objective>,
-    max_inst_var: Var,
-    vm: BasicVarManager,
+    let (mut constr, objs) = inst.decompose();
+    constr.var_manager_mut().mark_max_orig_var();
+    let (cnf, mut vm) = constr.into_cnf();
+    vm.mark_max_enc_var();
+    Ok(Parsed { cnf, objs, vm })
 }
 
 pub fn max_pre(parsed: Parsed, techniques: &str, reindexing: bool) -> (MaxPre, Instance) {
@@ -129,22 +117,14 @@ pub fn max_pre(parsed: Parsed, techniques: &str, reindexing: bool) -> (MaxPre, I
     let max_var = cnf.iter().fold(Var::new(0), |max, cl| {
         cl.iter().fold(max, |max, l| cmp::max(max, l.var()))
     });
-    (
-        prepro,
-        Instance {
-            cnf,
-            objs,
-            max_inst_var: max_var,
-            max_orig_var: max_var,
-        },
-    )
+    let vm = VarManager::new(max_var, max_var);
+    (prepro, Instance { cnf, objs, vm })
 }
 
 pub fn handle_soft_clauses(parsed: Parsed) -> Instance {
     let Parsed {
         mut cnf,
         objs,
-        max_inst_var,
         mut vm,
     } = parsed;
     let mut blits = RsHashMap::default();
@@ -152,26 +132,15 @@ pub fn handle_soft_clauses(parsed: Parsed) -> Instance {
         .into_iter()
         .map(|o| process_objective(o, &mut cnf, &mut blits, &mut vm))
         .collect();
-    Instance {
-        cnf,
-        objs,
-        max_orig_var: vm.max_var().unwrap(),
-        max_inst_var,
-    }
+    vm.mark_max_enc_var();
+    Instance { cnf, objs, vm }
 }
 
-pub struct Instance {
-    pub cnf: Cnf,
-    pub objs: Vec<(Vec<(Lit, usize)>, isize)>,
-    pub max_orig_var: Var,
-    pub max_inst_var: Var,
-}
-
-fn process_objective<Col: CollectClauses>(
+fn process_objective<Col: CollectClauses, VM: ManageVars>(
     obj: Objective,
     col: &mut Col,
     blits: &mut RsHashMap<Clause, Lit>,
-    vm: &mut BasicVarManager,
+    vm: &mut VM,
 ) -> (Vec<(Lit, usize)>, isize) {
     let (soft_cls, offset) = obj.into_soft_cls();
     let mut soft_lits = Vec::new();
@@ -197,11 +166,14 @@ fn process_objective<Col: CollectClauses>(
     (soft_lits, offset)
 }
 
-pub fn reindexing(inst: Instance) -> (ReindexingVarManager, Instance) {
+pub fn reindexing(inst: Instance) -> (Reindexer, Instance) {
     let Instance {
-        mut cnf, mut objs, ..
+        mut cnf,
+        mut objs,
+        vm,
+        ..
     } = inst;
-    let mut reindexer = ReindexingVarManager::default();
+    let mut reindexer = Reindexer::new(vm.max_orig_var());
     for (softs, _) in &mut objs {
         for (l, _) in softs {
             *l = reindexer.reindex_lit(*l);
@@ -213,13 +185,6 @@ pub fn reindexing(inst: Instance) -> (ReindexingVarManager, Instance) {
         }
     }
     let max_var = reindexer.max_var().unwrap();
-    (
-        reindexer,
-        Instance {
-            cnf,
-            objs,
-            max_inst_var: max_var,
-            max_orig_var: max_var,
-        },
-    )
+    let vm = VarManager::new(max_var, max_var);
+    (reindexer, Instance { cnf, objs, vm })
 }
