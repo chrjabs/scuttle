@@ -42,7 +42,7 @@ use crate::{
     Phase, Solve,
 };
 
-use super::{coreboosting::MergeOllRef, CoreBoost, Objective, SolverKernel};
+use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, Objective};
 
 /// The $P$-minimal algorithm type
 ///
@@ -68,7 +68,7 @@ pub struct PMinimal<
     BCG = fn(Assignment) -> Clause,
 > {
     /// The solver kernel
-    kernel: SolverKernel<O, ProofW, OInit, BCG>,
+    kernel: Kernel<O, ProofW, OInit, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
     /// The Pareto front discovered so far
@@ -103,7 +103,7 @@ where
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
-        let kernel = SolverKernel::new(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
+        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
         Ok(Self::init(kernel))
     }
 }
@@ -154,7 +154,7 @@ where
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
 {
     /// Initializes the solver
-    fn init(mut kernel: SolverKernel<O, ProofW, OInit, BCG>) -> Self {
+    fn init(mut kernel: Kernel<O, ProofW, OInit, BCG>) -> Self {
         // Initialize objective encodings
         let obj_encs = kernel
             .objs
@@ -279,7 +279,7 @@ where
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
 {

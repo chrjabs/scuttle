@@ -41,6 +41,7 @@ pub mod pminimal;
 
 mod coreboosting;
 mod coreguided;
+mod proofs;
 
 /// Trait for initializing algorithms
 pub trait Init: Sized {
@@ -132,7 +133,7 @@ pub trait CoreBoost {
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool>;
 }
 
-/// Shared functionality provided by the [`SolverKernel`]
+/// Shared functionality provided by the [`Kernel`]
 pub trait KernelFunctions {
     /// Gets the Pareto front discovered so far
     fn pareto_front(&self) -> ParetoFront;
@@ -179,7 +180,7 @@ impl Interrupter {
 /// - `ProofW`: the proof writer
 /// - `OInit`: the oracle initializer
 /// - `BCG`: the blocking clause generator
-struct SolverKernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) -> Clause> {
+struct Kernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) -> Clause> {
     /// The SAT solver backend
     oracle: O,
     /// The variable manager keeping track of variables
@@ -215,7 +216,7 @@ struct SolverKernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) 
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
     OInit: Initialize<O>,
@@ -328,7 +329,7 @@ where
     }
 }
 
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG> {
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG> {
     fn start_solving(&mut self, limits: Limits) {
         self.stats.n_solve_calls += 1;
         self.lims = limits;
@@ -507,7 +508,7 @@ impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG> {
 }
 
 #[cfg(feature = "interrupt-oracle")]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: rustsat::solvers::Interrupt,
 {
@@ -520,7 +521,7 @@ where
 }
 
 #[cfg(not(feature = "interrupt-oracle"))]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG> {
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG> {
     fn interrupter(&mut self) -> Interrupter {
         Interrupter {
             term_flag: self.term_flag.clone(),
@@ -529,7 +530,7 @@ impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG> {
 }
 
 #[cfg(feature = "sol-tightening")]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + rustsat::solvers::FlipLit,
 {
@@ -586,7 +587,7 @@ where
 }
 
 #[cfg(not(feature = "sol-tightening"))]
-impl<O, ProofW, OInit, BCG, ProofW> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG, ProofW> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
 {
@@ -611,7 +612,7 @@ where
 }
 
 #[cfg(feature = "phasing")]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: rustsat::solvers::PhaseLit,
 {
@@ -641,7 +642,7 @@ where
 }
 
 #[cfg(not(feature = "phasing"))]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG> {
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG> {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
     fn phase_solution(&mut self, _solution: Assignment) -> anyhow::Result<()> {
@@ -656,7 +657,7 @@ impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG> {
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
     BCG: Fn(Assignment) -> Clause,
@@ -746,7 +747,7 @@ where
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
     BCG: Fn(Assignment) -> Clause,
@@ -792,7 +793,7 @@ where
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
 {
@@ -898,7 +899,7 @@ where
     }
 }
 
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
 {
@@ -926,7 +927,7 @@ where
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
     OInit: Initialize<O>,

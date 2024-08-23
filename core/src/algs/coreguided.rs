@@ -16,7 +16,7 @@ use scuttle_proc::oracle_bounds;
 
 use crate::MaybeTerminatedError::{self, Done};
 
-use super::{Objective, SolverKernel};
+use super::{Kernel, Objective};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct TotOutput {
@@ -213,7 +213,7 @@ struct CoreData {
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
 {

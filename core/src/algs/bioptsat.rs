@@ -30,7 +30,7 @@ use crate::{
     Solve,
 };
 
-use super::{coreboosting::MergeOllRef, CoreBoost, ObjEncoding, Objective, SolverKernel};
+use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective};
 
 /// The BiOptSat algorithm type
 ///
@@ -56,7 +56,7 @@ pub struct BiOptSat<
     BCG = fn(Assignment) -> Clause,
 > {
     /// The solver kernel
-    kernel: SolverKernel<O, ProofW, OInit, BCG>,
+    kernel: Kernel<O, ProofW, OInit, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
     obj_encs: (ObjEncoding<PBE, CE>, ObjEncoding<PBE, CE>),
     /// The Pareto front discovered so far
@@ -91,7 +91,7 @@ where
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
-        let kernel = SolverKernel::new(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
+        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
         Ok(Self::init(kernel))
     }
 }
@@ -143,7 +143,7 @@ where
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
 {
     /// Initializes the solver
-    fn init(mut kernel: SolverKernel<O, ProofW, OInit, BCG>) -> Self {
+    fn init(mut kernel: Kernel<O, ProofW, OInit, BCG>) -> Self {
         assert_eq!(kernel.stats.n_objs, 2);
         // Initialize objective encodings
         let inc_enc = match &kernel.objs[0] {
@@ -255,7 +255,7 @@ where
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
     BCG: Fn(Assignment) -> Clause,

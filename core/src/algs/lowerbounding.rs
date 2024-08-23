@@ -34,7 +34,7 @@ use crate::{
     Phase, Solve,
 };
 
-use super::{coreboosting::MergeOllRef, CoreBoost, ObjEncoding, Objective, SolverKernel};
+use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective};
 
 /// The lower-bounding algorithm type
 ///
@@ -60,7 +60,7 @@ pub struct LowerBounding<
     BCG = fn(Assignment) -> Clause,
 > {
     /// The solver kernel
-    kernel: SolverKernel<O, ProofW, OInit, BCG>,
+    kernel: Kernel<O, ProofW, OInit, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
     /// The current fence
@@ -97,7 +97,7 @@ where
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
-        let kernel = SolverKernel::new(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
+        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
         Ok(Self::init(kernel)?)
     }
 }
@@ -150,7 +150,7 @@ where
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
 {
     /// Initializes the solver
-    fn init(mut kernel: SolverKernel<O, ProofW, OInit, BCG>) -> Result<Self, rustsat::OutOfMemory> {
+    fn init(mut kernel: Kernel<O, ProofW, OInit, BCG>) -> Result<Self, rustsat::OutOfMemory> {
         // Initialize objective encodings
         let mut obj_encs = Vec::with_capacity(kernel.objs.len());
         let mut fence_data = Vec::with_capacity(kernel.objs.len());
@@ -332,7 +332,7 @@ impl Fence {
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
 {
@@ -384,7 +384,7 @@ where
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
     BCG: Fn(Assignment) -> Clause,

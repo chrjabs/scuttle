@@ -22,7 +22,7 @@ use crate::{
 
 use super::{
     coreguided::{Inactives, OllReformulation, TotOutput},
-    ObjEncoding, Objective, SolverKernel,
+    Kernel, ObjEncoding, Objective,
 };
 
 pub(super) trait MergeOllRef {
@@ -123,7 +123,7 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
 {
@@ -158,7 +158,7 @@ where
 }
 
 #[oracle_bounds]
-impl<O, ProofW, OInit, BCG> SolverKernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
     OInit: Initialize<O>,
