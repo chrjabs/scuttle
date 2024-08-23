@@ -1,6 +1,7 @@
 //! Core solver functionality shared between different algorithms
 
 use std::{
+    io,
     marker::PhantomData,
     ops::Not,
     sync::{
@@ -219,6 +220,7 @@ struct Kernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) -> Cla
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
+    ProofW: io::Write,
     OInit: Initialize<O>,
     BCG: Fn(Assignment) -> Clause,
 {
@@ -227,7 +229,7 @@ where
         objs: Objs,
         var_manager: VarManager,
         bcg: BCG,
-        proof: Option<pidgeons::Proof<ProofW>>,
+        mut proof: Option<pidgeons::Proof<ProofW>>,
         opts: KernelOptions,
     ) -> anyhow::Result<Self>
     where
@@ -235,6 +237,24 @@ where
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
+        // Proof logging: write out OPB file to use as VeriPB input
+        // FIXME: This is temporary for getting something off the ground quickly. Long term, also
+        // proof log encoding built before to ensure original files can be used
+        let clauses = if proof.is_some() {
+            let mut writer = std::io::BufWriter::new(std::fs::File::open("veripb-input.opb")?);
+            let cnf: Cnf = clauses.into_iter().collect();
+            let iter = cnf
+                .iter()
+                .map(|cl| rustsat::instances::fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
+            rustsat::instances::fio::opb::write_opb_lines(
+                &mut writer,
+                iter,
+                rustsat::instances::fio::opb::Options::default(),
+            )?;
+            cnf
+        } else {
+            clauses.into_iter().collect()
+        };
         let mut stats = Stats {
             n_objs: 0,
             n_real_objs: 0,
@@ -307,6 +327,12 @@ where
         }
         #[cfg(feature = "interrupt-oracle")]
         let interrupter = oracle.interrupter();
+        // Proof logging: write order to proof
+        if let Some(proof) = &mut proof {
+            let order = proofs::objectives_as_order(&objs);
+            proof.define_order(&order)?;
+            proof.load_order(order.name(), order.used_vars())?;
+        }
         Ok(Self {
             oracle,
             var_manager,

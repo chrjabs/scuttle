@@ -8,7 +8,7 @@ use std::{
 };
 
 use rustsat::{
-    encodings::{card, pb, CollectClauses},
+    encodings::{card, pb, CollectCertClauses, CollectClauses},
     instances::{Cnf, ManageVars, ReindexVars},
     types::{Assignment, Lit, LitIter, RsHashMap, Var, WLitIter},
 };
@@ -264,12 +264,20 @@ impl Objective {
         }
     }
 
-    /// Gets the offset of the encoding
+    /// Gets the offset of the objective
     pub fn offset(&self) -> isize {
         match self {
             Objective::Weighted { offset, .. } => *offset,
             Objective::Unweighted { offset, .. } => *offset,
             Objective::Constant { offset } => *offset,
+        }
+    }
+
+    /// Gets the unit weight of the objective
+    pub fn unit_weight(&self) -> usize {
+        match self {
+            Objective::Weighted { .. } | Objective::Constant { .. } => 1,
+            Objective::Unweighted { unit_weight, .. } => *unit_weight,
         }
     }
 
@@ -444,6 +452,94 @@ where
             }
             _ => ub,
         }
+    }
+}
+
+impl<PBE, CE> ObjEncoding<PBE, CE>
+where
+    PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
+{
+    /// Encodes the given range
+    pub fn encode_ub_change_cert<Col, ProofW>(
+        &mut self,
+        range: Range<usize>,
+        collector: &mut Col,
+        var_manager: &mut dyn ManageVars,
+        proof: Option<&mut pidgeons::Proof<ProofW>>,
+    ) -> anyhow::Result<()>
+    where
+        Col: CollectCertClauses,
+        ProofW: std::io::Write,
+    {
+        match self {
+            ObjEncoding::Weighted(enc, offset) => {
+                if let Some(proof) = proof {
+                    enc.encode_ub_change_cert(
+                        if range.start >= *offset {
+                            range.start - *offset
+                        } else {
+                            0
+                        }..if range.end >= *offset {
+                            range.end - *offset
+                        } else {
+                            0
+                        },
+                        collector,
+                        var_manager,
+                        proof,
+                    )?;
+                } else {
+                    enc.encode_ub_change(
+                        if range.start >= *offset {
+                            range.start - *offset
+                        } else {
+                            0
+                        }..if range.end >= *offset {
+                            range.end - *offset
+                        } else {
+                            0
+                        },
+                        collector,
+                        var_manager,
+                    )?;
+                }
+            }
+            ObjEncoding::Unweighted(enc, offset) => {
+                if let Some(proof) = proof {
+                    enc.encode_ub_change_cert(
+                        if range.start >= *offset {
+                            range.start - *offset
+                        } else {
+                            0
+                        }..if range.end >= *offset {
+                            range.end - *offset
+                        } else {
+                            0
+                        },
+                        collector,
+                        var_manager,
+                        proof,
+                    )?;
+                } else {
+                    enc.encode_ub_change(
+                        if range.start >= *offset {
+                            range.start - *offset
+                        } else {
+                            0
+                        }..if range.end >= *offset {
+                            range.end - *offset
+                        } else {
+                            0
+                        },
+                        collector,
+                        var_manager,
+                    )?;
+                }
+            }
+            ObjEncoding::Constant => (),
+        }
+        Ok(())
     }
 }
 
