@@ -1,7 +1,6 @@
 //! Core solver functionality shared between different algorithms
 
 use std::{
-    io,
     marker::PhantomData,
     ops::Not,
     sync::{
@@ -14,6 +13,7 @@ use std::{
 use std::sync::Mutex;
 
 use anyhow::Context;
+use cadical_veripb_tracer::CadicalTracer;
 use maxpre::MaxPre;
 use rustsat::{
     encodings::{card, pb},
@@ -43,12 +43,12 @@ pub mod pminimal;
 mod coreboosting;
 mod coreguided;
 mod proofs;
+pub use proofs::{InitCert, InitCertDefaultBlock};
 
 /// Trait for initializing algorithms
 pub trait Init: Sized {
     type Oracle: SolveIncremental;
     type BlockClauseGen: Fn(Assignment) -> Clause;
-    type ProofWriter;
 
     /// Initialization of the algorithm providing all optional input
     fn new<Cls, Objs, Obj>(
@@ -56,7 +56,6 @@ pub trait Init: Sized {
         objs: Objs,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: Option<pidgeons::Proof<Self::ProofWriter>>,
         block_clause_gen: Self::BlockClauseGen,
     ) -> anyhow::Result<Self>
     where
@@ -68,10 +67,9 @@ pub trait Init: Sized {
     fn from_instance(
         inst: Instance,
         opts: KernelOptions,
-        proof: Option<pidgeons::Proof<Self::ProofWriter>>,
         block_clause_gen: Self::BlockClauseGen,
     ) -> anyhow::Result<Self> {
-        Self::new(inst.cnf, inst.objs, inst.vm, opts, proof, block_clause_gen)
+        Self::new(inst.cnf, inst.objs, inst.vm, opts, block_clause_gen)
     }
 }
 
@@ -82,38 +80,19 @@ pub trait InitDefaultBlock: Init<BlockClauseGen = fn(Assignment) -> Clause> {
         objs: Objs,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: Option<pidgeons::Proof<Self::ProofWriter>>,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
-        Self::new(
-            clauses,
-            objs,
-            var_manager,
-            opts,
-            proof,
-            default_blocking_clause,
-        )
+        Self::new(clauses, objs, var_manager, opts, default_blocking_clause)
     }
 
     /// Initializes the algorithm using an [`Instance`] rather than iterators with the default
     /// blocking clause generator
-    fn from_instance_default_blocking(
-        inst: Instance,
-        opts: KernelOptions,
-        proof: Option<pidgeons::Proof<Self::ProofWriter>>,
-    ) -> anyhow::Result<Self> {
-        Self::new(
-            inst.cnf,
-            inst.objs,
-            inst.vm,
-            opts,
-            proof,
-            default_blocking_clause,
-        )
+    fn from_instance_default_blocking(inst: Instance, opts: KernelOptions) -> anyhow::Result<Self> {
+        Self::new(inst.cnf, inst.objs, inst.vm, opts, default_blocking_clause)
     }
 }
 
@@ -210,8 +189,8 @@ struct Kernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) -> Cla
     /// The oracle interrupter
     #[cfg(feature = "interrupt-oracle")]
     oracle_interrupter: Arc<Mutex<Box<dyn rustsat::solvers::InterruptSolver + Send>>>,
-    /// The VeriPB proof
-    proof: Option<pidgeons::Proof<ProofW>>,
+    /// The handle of the proof tracer, when proof logging
+    pt_handle: Option<rustsat_cadical::ProofTracerHandle<CadicalTracer<ProofW>>>,
     /// Phantom marker for oracle factory
     _factory: PhantomData<OInit>,
 }
@@ -220,7 +199,6 @@ struct Kernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) -> Cla
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
-    ProofW: io::Write,
     OInit: Initialize<O>,
     BCG: Fn(Assignment) -> Clause,
 {
@@ -229,7 +207,6 @@ where
         objs: Objs,
         var_manager: VarManager,
         bcg: BCG,
-        mut proof: Option<pidgeons::Proof<ProofW>>,
         opts: KernelOptions,
     ) -> anyhow::Result<Self>
     where
@@ -237,24 +214,6 @@ where
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
-        // Proof logging: write out OPB file to use as VeriPB input
-        // FIXME: This is temporary for getting something off the ground quickly. Long term, also
-        // proof log encoding built before to ensure original files can be used
-        let clauses = if proof.is_some() {
-            let mut writer = std::io::BufWriter::new(std::fs::File::open("veripb-input.opb")?);
-            let cnf: Cnf = clauses.into_iter().collect();
-            let iter = cnf
-                .iter()
-                .map(|cl| rustsat::instances::fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
-            rustsat::instances::fio::opb::write_opb_lines(
-                &mut writer,
-                iter,
-                rustsat::instances::fio::opb::Options::default(),
-            )?;
-            cnf
-        } else {
-            clauses.into_iter().collect()
-        };
         let mut stats = Stats {
             n_objs: 0,
             n_real_objs: 0,
@@ -327,12 +286,6 @@ where
         }
         #[cfg(feature = "interrupt-oracle")]
         let interrupter = oracle.interrupter();
-        // Proof logging: write order to proof
-        if let Some(proof) = &mut proof {
-            let order = proofs::objectives_as_order(&objs);
-            proof.define_order(&order)?;
-            proof.load_order(order.name(), order.used_vars())?;
-        }
         Ok(Self {
             oracle,
             var_manager,
@@ -349,7 +302,7 @@ where
             term_flag: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "interrupt-oracle")]
             oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
-            proof,
+            pt_handle: None,
             _factory: PhantomData,
         })
     }

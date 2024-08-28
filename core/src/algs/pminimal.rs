@@ -17,6 +17,7 @@
 //!     2009.
 use std::{fs, io};
 
+use cadical_veripb_tracer::CadicalCertCollector;
 use rustsat::{
     encodings::{
         self,
@@ -81,13 +82,11 @@ where
     O: SolveIncremental,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    ProofW: io::Write,
     OInit: Initialize<O>,
     BCG: Fn(Assignment) -> Clause,
 {
     type Oracle = O;
     type BlockClauseGen = BCG;
-    type ProofWriter = ProofW;
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
@@ -96,7 +95,6 @@ where
         objs: Objs,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: Option<pidgeons::Proof<ProofW>>,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
@@ -104,7 +102,38 @@ where
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
-        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
+        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, opts)?;
+        Ok(Self::init(kernel))
+    }
+}
+
+impl<'term, 'learn, PBE, CE, ProofW, OInit, BCG> super::InitCert
+    for PMinimal<rustsat_cadical::CaDiCaL<'term, 'learn>, PBE, CE, ProofW, OInit, BCG>
+where
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
+    OInit: Initialize<rustsat_cadical::CaDiCaL<'term, 'learn>>,
+    ProofW: io::Write + 'static,
+    BCG: Fn(Assignment) -> Clause,
+{
+    type ProofWriter = ProofW;
+
+    /// Initializes a default solver with a configured oracle and options. The
+    /// oracle should _not_ have any clauses loaded yet.
+    fn new_cert<Cls, Objs, Obj>(
+        clauses: Cls,
+        objs: Objs,
+        var_manager: VarManager,
+        opts: KernelOptions,
+        proof: pidgeons::Proof<Self::ProofWriter>,
+        block_clause_gen: BCG,
+    ) -> anyhow::Result<Self>
+    where
+        Cls: IntoIterator<Item = Clause>,
+        Objs: IntoIterator<Item = (Obj, isize)>,
+        Obj: WLitIter,
+    {
+        let kernel = Kernel::new_cert(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
         Ok(Self::init(kernel))
     }
 }
@@ -440,6 +469,178 @@ where
         let block_lit = self.var_manager.new_var().pos_lit();
         clause.add(block_lit);
         self.oracle.add_clause(clause).unwrap();
+        Ok(!block_lit)
+    }
+}
+
+impl<'term, 'learn, ProofW, OInit, BCG>
+    Kernel<rustsat_cadical::CaDiCaL<'term, 'learn>, ProofW, OInit, BCG>
+where
+    ProofW: io::Write + 'static,
+{
+    /// Executes P-minimization from a cost and solution starting point
+    pub fn p_minimization_cert<PBE, CE>(
+        &mut self,
+        mut costs: Vec<usize>,
+        mut solution: Assignment,
+        base_assumps: &[Lit],
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
+    ) -> MaybeTerminatedError<(Vec<usize>, Assignment, Option<Lit>)>
+    where
+        PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
+    {
+        use rustsat::solvers::Solve;
+
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        self.log_routine_start("p minimization")?;
+        let mut block_switch = None;
+        let mut assumps = Vec::from(base_assumps);
+        #[cfg(feature = "coarse-convergence")]
+        let mut coarse = true;
+        loop {
+            #[cfg(feature = "coarse-convergence")]
+            let bound_costs: Vec<_> = costs
+                .iter()
+                .enumerate()
+                .map(|(_oidx, &c)| {
+                    if coarse {
+                        return obj_encs[_oidx].coarse_ub(c);
+                    }
+                    c
+                })
+                .collect();
+            // Force next solution to dominate the current one
+            assumps.drain(base_assumps.len()..);
+            #[cfg(not(feature = "coarse-convergence"))]
+            assumps.extend(self.enforce_dominating(&costs, obj_encs)?);
+            #[cfg(feature = "coarse-convergence")]
+            assumps.extend(self.enforce_dominating(&bound_costs, obj_encs)?);
+            // Block solutions dominated by the current one
+            if self.opts.enumeration == EnumOptions::NoEnum {
+                // Block permanently since no enumeration at Pareto point
+                let block_clause = self.dominated_block_clause_cert(&costs, obj_encs)?;
+                self.oracle.add_clause(block_clause)?;
+                // TODO: convince veripb
+            } else {
+                // Permanently block last candidate
+                if let Some(block_lit) = block_switch {
+                    self.oracle.add_unit(block_lit)?;
+                    // TODO: convince veripb
+                }
+                // Temporarily block to allow for enumeration at Pareto point
+                let block_lit = self.tmp_block_dominated_cert(&costs, obj_encs)?;
+                block_switch = Some(block_lit);
+                assumps.push(block_lit);
+            }
+
+            // Check if dominating solution exists
+            let res = self.solve_assumps(&assumps)?;
+            if res == SolverResult::Unsat {
+                #[cfg(feature = "coarse-convergence")]
+                if bound_costs != costs {
+                    // Switch to fine convergence
+                    coarse = false;
+                    continue;
+                }
+                self.log_routine_end()?;
+                // Termination criteria, return last solution and costs
+                return Done((costs, solution, block_switch));
+            }
+            self.check_termination()?;
+
+            (costs, solution) = self.get_solution_and_internal_costs(
+                self.opts
+                    .heuristic_improvements
+                    .solution_tightening
+                    .wanted(Phase::Minimization),
+            )?;
+            // TODO: log solution
+            self.log_candidate(&costs, Phase::Minimization)?;
+            self.check_termination()?;
+            self.phase_solution(solution.clone())?;
+        }
+    }
+
+    /// Gets a clause blocking solutions (weakly) dominated by the given cost point,
+    /// given objective encodings.
+    pub fn dominated_block_clause_cert<PBE, CE>(
+        &mut self,
+        costs: &[usize],
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
+    ) -> anyhow::Result<Clause>
+    where
+        PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
+    {
+        use rustsat::solvers::Solve;
+
+        debug_assert_eq!(costs.len(), obj_encs.len());
+        let mut clause = Clause::default();
+        for (idx, &cst) in costs.iter().enumerate() {
+            // Don't block
+            if cst <= obj_encs[idx].offset() {
+                continue;
+            }
+            let enc = &mut obj_encs[idx];
+            if let ObjEncoding::Constant = enc {
+                continue;
+            }
+            // Encode and add to solver
+            if let Some(pt_handle) = &self.pt_handle {
+                let mut proof = self.oracle.proof_tracer_mut(pt_handle).take_proof();
+                let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
+                enc.encode_ub_change_cert(
+                    cst - 1..cst,
+                    &mut collector,
+                    &mut self.var_manager,
+                    &mut proof,
+                )?;
+                self.oracle.proof_tracer_mut(pt_handle).replace_proof(proof);
+            } else {
+                enc.encode_ub_change(cst - 1..cst, &mut self.oracle, &mut self.var_manager)?;
+            }
+            let assumps = enc.enforce_ub(cst - 1).unwrap();
+            if assumps.len() == 1 {
+                clause.add(assumps[0]);
+            } else {
+                let mut and_impl = Cnf::new();
+                let and_lit = self.var_manager.new_var().pos_lit();
+                and_impl.add_lit_impl_cube(and_lit, &assumps);
+                self.oracle.add_cnf(and_impl).unwrap();
+                clause.add(and_lit)
+            }
+        }
+        Ok(clause)
+    }
+
+    /// Temporarily blocks solutions dominated by the given cost point. Returns
+    /// and assumption that needs to be enforced in order for the blocking to be
+    /// enforced.
+    pub fn tmp_block_dominated_cert<PBE, CE>(
+        &mut self,
+        costs: &[usize],
+        obj_encs: &mut [ObjEncoding<PBE, CE>],
+    ) -> anyhow::Result<Lit>
+    where
+        PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
+    {
+        use rustsat::solvers::Solve;
+
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        let mut clause = self.dominated_block_clause_cert(costs, obj_encs)?;
+        let block_lit = self.var_manager.new_var().pos_lit();
+        clause.add(block_lit);
+        self.oracle.add_clause_ref(&clause).unwrap();
+        if let Some(pt_handle) = &self.pt_handle {
+            let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+            proof.redundant(
+                &clause,
+                &[pidgeons::Substitution::new(&block_lit.var(), true.into())],
+                None,
+            )?;
+        }
         Ok(!block_lit)
     }
 }

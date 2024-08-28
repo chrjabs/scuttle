@@ -466,7 +466,7 @@ where
         range: Range<usize>,
         collector: &mut Col,
         var_manager: &mut dyn ManageVars,
-        proof: Option<&mut pidgeons::Proof<ProofW>>,
+        proof: &mut pidgeons::Proof<ProofW>,
     ) -> anyhow::Result<()>
     where
         Col: CollectCertClauses,
@@ -474,68 +474,36 @@ where
     {
         match self {
             ObjEncoding::Weighted(enc, offset) => {
-                if let Some(proof) = proof {
-                    enc.encode_ub_change_cert(
-                        if range.start >= *offset {
-                            range.start - *offset
-                        } else {
-                            0
-                        }..if range.end >= *offset {
-                            range.end - *offset
-                        } else {
-                            0
-                        },
-                        collector,
-                        var_manager,
-                        proof,
-                    )?;
-                } else {
-                    enc.encode_ub_change(
-                        if range.start >= *offset {
-                            range.start - *offset
-                        } else {
-                            0
-                        }..if range.end >= *offset {
-                            range.end - *offset
-                        } else {
-                            0
-                        },
-                        collector,
-                        var_manager,
-                    )?;
-                }
+                enc.encode_ub_change_cert(
+                    if range.start >= *offset {
+                        range.start - *offset
+                    } else {
+                        0
+                    }..if range.end >= *offset {
+                        range.end - *offset
+                    } else {
+                        0
+                    },
+                    collector,
+                    var_manager,
+                    proof,
+                )?;
             }
             ObjEncoding::Unweighted(enc, offset) => {
-                if let Some(proof) = proof {
-                    enc.encode_ub_change_cert(
-                        if range.start >= *offset {
-                            range.start - *offset
-                        } else {
-                            0
-                        }..if range.end >= *offset {
-                            range.end - *offset
-                        } else {
-                            0
-                        },
-                        collector,
-                        var_manager,
-                        proof,
-                    )?;
-                } else {
-                    enc.encode_ub_change(
-                        if range.start >= *offset {
-                            range.start - *offset
-                        } else {
-                            0
-                        }..if range.end >= *offset {
-                            range.end - *offset
-                        } else {
-                            0
-                        },
-                        collector,
-                        var_manager,
-                    )?;
-                }
+                enc.encode_ub_change_cert(
+                    if range.start >= *offset {
+                        range.start - *offset
+                    } else {
+                        0
+                    }..if range.end >= *offset {
+                        range.end - *offset
+                    } else {
+                        0
+                    },
+                    collector,
+                    var_manager,
+                    proof,
+                )?;
             }
             ObjEncoding::Constant => (),
         }

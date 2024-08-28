@@ -75,13 +75,11 @@ where
     O: SolveIncremental + SolveStats,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    ProofW: io::Write,
     OInit: Initialize<O>,
     BCG: Fn(Assignment) -> Clause,
 {
     type Oracle = O;
     type BlockClauseGen = BCG;
-    type ProofWriter = ProofW;
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
@@ -90,7 +88,6 @@ where
         objs: Objs,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: Option<pidgeons::Proof<ProofW>>,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
@@ -98,7 +95,38 @@ where
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
-        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
+        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, opts)?;
+        Ok(Self::init(kernel)?)
+    }
+}
+
+impl<'term, 'learn, PBE, CE, ProofW, OInit, BCG> super::InitCert
+    for LowerBounding<rustsat_cadical::CaDiCaL<'term, 'learn>, PBE, CE, ProofW, OInit, BCG>
+where
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
+    OInit: Initialize<rustsat_cadical::CaDiCaL<'term, 'learn>>,
+    ProofW: io::Write + 'static,
+    BCG: Fn(Assignment) -> Clause,
+{
+    type ProofWriter = ProofW;
+
+    /// Initializes a default solver with a configured oracle and options. The
+    /// oracle should _not_ have any clauses loaded yet.
+    fn new_cert<Cls, Objs, Obj>(
+        clauses: Cls,
+        objs: Objs,
+        var_manager: VarManager,
+        opts: KernelOptions,
+        proof: pidgeons::Proof<Self::ProofWriter>,
+        block_clause_gen: BCG,
+    ) -> anyhow::Result<Self>
+    where
+        Cls: IntoIterator<Item = Clause>,
+        Objs: IntoIterator<Item = (Obj, isize)>,
+        Obj: WLitIter,
+    {
+        let kernel = Kernel::new_cert(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
         Ok(Self::init(kernel)?)
     }
 }

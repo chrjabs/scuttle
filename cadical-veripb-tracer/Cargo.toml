@@ -1,0 +1,14 @@
+[package]
+name = "cadical-veripb-tracer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cfg-if.workspace = true
+pidgeons.workspace = true
+rustsat.workspace = true
+rustsat-cadical.workspace = true
+
+[features]
+rup-with-hints = []
+verbose = []

@@ -5,16 +5,17 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
+cadical-veripb-tracer.workspace = true
 clap = { workspace = true, optional = true }
 itertools.workspace = true
 maxpre.workspace = true
 pidgeons.workspace = true
 rustsat.workspace = true
+rustsat-cadical.workspace = true
 scuttle-proc.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-rustsat-cadical.workspace = true
 tempfile.workspace = true
 
 [features]

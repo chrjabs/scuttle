@@ -83,7 +83,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
     match cli.alg {
         Algorithm::PMinimal(opts, ref cb_opts) => match cli.cadical_config {
             CadicalConfig::Default => {
-                let mut alg = setup_alg::<PMin>(cli, inst, proof, opts)?;
+                let mut alg = setup_alg::<PMin>(cli, inst, opts)?;
                 let cont = if let Some(opts) = cb_opts {
                     alg.core_boost(opts.clone())?
                 } else {
@@ -95,7 +95,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                 post_solve(alg, cli, prepro, reindexer)
             }
             CadicalConfig::Plain => {
-                let mut alg = setup_alg::<PMin<CaDiCaLPlainInit>>(cli, inst, proof, opts)?;
+                let mut alg = setup_alg::<PMin<CaDiCaLPlainInit>>(cli, inst, opts)?;
                 let cont = if let Some(opts) = cb_opts {
                     alg.core_boost(opts.clone())?
                 } else {
@@ -107,7 +107,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                 post_solve(alg, cli, prepro, reindexer)
             }
             CadicalConfig::Sat => {
-                let mut alg = setup_alg::<PMin<CaDiCaLSatInit>>(cli, inst, proof, opts)?;
+                let mut alg = setup_alg::<PMin<CaDiCaLSatInit>>(cli, inst, opts)?;
                 let cont = if let Some(opts) = cb_opts {
                     alg.core_boost(opts.clone())?
                 } else {
@@ -119,7 +119,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                 post_solve(alg, cli, prepro, reindexer)
             }
             CadicalConfig::Unsat => {
-                let mut alg = setup_alg::<PMin<CaDiCaLUnsatInit>>(cli, inst, proof, opts)?;
+                let mut alg = setup_alg::<PMin<CaDiCaLUnsatInit>>(cli, inst, opts)?;
                 let cont = if let Some(opts) = cb_opts {
                     alg.core_boost(opts.clone())?
                 } else {
@@ -147,7 +147,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                             Bos<pb::DbGte, card::DbTotalizer, OInit>;
                         match cli.cadical_config {
                             CadicalConfig::Default => {
-                                let mut alg = setup_alg::<BosEnc>(cli, inst, proof, opts)?;
+                                let mut alg = setup_alg::<BosEnc>(cli, inst, opts)?;
                                 let cont = if let Some(opts) = cb_opts {
                                     alg.core_boost(opts.clone())?
                                 } else {
@@ -160,7 +160,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                             }
                             CadicalConfig::Plain => {
                                 let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLPlainInit>>(cli, inst, proof, opts)?;
+                                    setup_alg::<BosEnc<CaDiCaLPlainInit>>(cli, inst, opts)?;
                                 let cont = if let Some(opts) = cb_opts {
                                     alg.core_boost(opts.clone())?
                                 } else {
@@ -172,8 +172,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                                 post_solve(alg, cli, prepro, reindexer)
                             }
                             CadicalConfig::Sat => {
-                                let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLSatInit>>(cli, inst, proof, opts)?;
+                                let mut alg = setup_alg::<BosEnc<CaDiCaLSatInit>>(cli, inst, opts)?;
                                 let cont = if let Some(opts) = cb_opts {
                                     alg.core_boost(opts.clone())?
                                 } else {
@@ -186,7 +185,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                             }
                             CadicalConfig::Unsat => {
                                 let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLUnsatInit>>(cli, inst, proof, opts)?;
+                                    setup_alg::<BosEnc<CaDiCaLUnsatInit>>(cli, inst, opts)?;
                                 let cont = if let Some(opts) = cb_opts {
                                     alg.core_boost(opts.clone())?
                                 } else {
@@ -206,25 +205,24 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                             Bos<pb::DynamicPolyWatchdog, card::DbTotalizer, OInit>;
                         match cli.cadical_config {
                             CadicalConfig::Default => {
-                                let mut alg = setup_alg::<BosEnc>(cli, inst, proof, opts)?;
+                                let mut alg = setup_alg::<BosEnc>(cli, inst, opts)?;
                                 alg.solve(cli.limits)?;
                                 post_solve(alg, cli, prepro, reindexer)
                             }
                             CadicalConfig::Plain => {
                                 let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLPlainInit>>(cli, inst, proof, opts)?;
+                                    setup_alg::<BosEnc<CaDiCaLPlainInit>>(cli, inst, opts)?;
                                 alg.solve(cli.limits)?;
                                 post_solve(alg, cli, prepro, reindexer)
                             }
                             CadicalConfig::Sat => {
-                                let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLSatInit>>(cli, inst, proof, opts)?;
+                                let mut alg = setup_alg::<BosEnc<CaDiCaLSatInit>>(cli, inst, opts)?;
                                 alg.solve(cli.limits)?;
                                 post_solve(alg, cli, prepro, reindexer)
                             }
                             CadicalConfig::Unsat => {
                                 let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLUnsatInit>>(cli, inst, proof, opts)?;
+                                    setup_alg::<BosEnc<CaDiCaLUnsatInit>>(cli, inst, opts)?;
                                 alg.solve(cli.limits)?;
                                 post_solve(alg, cli, prepro, reindexer)
                             }
@@ -235,7 +233,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
         }
         Algorithm::LowerBounding(opts, ref cb_opts) => match cli.cadical_config {
             CadicalConfig::Default => {
-                let mut alg = setup_alg::<Lb>(cli, inst, proof, opts)?;
+                let mut alg = setup_alg::<Lb>(cli, inst, opts)?;
                 let cont = if let Some(opts) = cb_opts {
                     alg.core_boost(opts.clone())?
                 } else {
@@ -247,7 +245,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                 post_solve(alg, cli, prepro, reindexer)
             }
             CadicalConfig::Plain => {
-                let mut alg = setup_alg::<Lb<CaDiCaLPlainInit>>(cli, inst, proof, opts)?;
+                let mut alg = setup_alg::<Lb<CaDiCaLPlainInit>>(cli, inst, opts)?;
                 let cont = if let Some(opts) = cb_opts {
                     alg.core_boost(opts.clone())?
                 } else {
@@ -259,7 +257,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                 post_solve(alg, cli, prepro, reindexer)
             }
             CadicalConfig::Sat => {
-                let mut alg = setup_alg::<Lb<CaDiCaLSatInit>>(cli, inst, proof, opts)?;
+                let mut alg = setup_alg::<Lb<CaDiCaLSatInit>>(cli, inst, opts)?;
                 let cont = if let Some(opts) = cb_opts {
                     alg.core_boost(opts.clone())?
                 } else {
@@ -271,7 +269,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                 post_solve(alg, cli, prepro, reindexer)
             }
             CadicalConfig::Unsat => {
-                let mut alg = setup_alg::<Lb<CaDiCaLUnsatInit>>(cli, inst, proof, opts)?;
+                let mut alg = setup_alg::<Lb<CaDiCaLUnsatInit>>(cli, inst, opts)?;
                 let cont = if let Some(opts) = cb_opts {
                     alg.core_boost(opts.clone())?
                 } else {
@@ -286,16 +284,11 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
     }
 }
 
-fn setup_alg<Alg>(
-    cli: &Cli,
-    inst: Instance,
-    proof: Option<pidgeons::Proof<<Alg as Init>::ProofWriter>>,
-    opts: KernelOptions,
-) -> anyhow::Result<Alg>
+fn setup_alg<Alg>(cli: &Cli, inst: Instance, opts: KernelOptions) -> anyhow::Result<Alg>
 where
     Alg: InitDefaultBlock + KernelFunctions,
 {
-    let mut alg = Alg::from_instance_default_blocking(inst, opts, proof)?;
+    let mut alg = Alg::from_instance_default_blocking(inst, opts)?;
 
     // === Set up CLI interaction ===
     // Set up signal handling
