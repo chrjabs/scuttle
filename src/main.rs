@@ -9,9 +9,11 @@ use rustsat::{
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle_core::{
-    self, prepro,
+    self,
+    algs::InitCertDefaultBlock,
+    prepro,
     types::{Instance, Reindexer},
-    BiOptSat, CoreBoost, Init, InitDefaultBlock, KernelFunctions, KernelOptions, LowerBounding,
+    BiOptSat, CoreBoost, InitDefaultBlock, KernelFunctions, KernelOptions, LowerBounding,
     MaybeTerminatedError, PMinimal, Solve,
 };
 
@@ -37,7 +39,10 @@ fn main() -> anyhow::Result<()> {
     match sub_main(&cli) {
         MaybeTerminatedError::Done(_) => (),
         MaybeTerminatedError::Terminated(term) => cli.log_termination(&term)?,
-        MaybeTerminatedError::Error(err) => cli.error(&format!("{err}"))?,
+        MaybeTerminatedError::Error(err) => {
+            cli.error(&format!("{err}"))?;
+            cli.error(&format!("{}", err.backtrace()))?;
+        }
     };
 
     Ok(())
@@ -54,7 +59,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
     // FIXME: set correct number of original constraints
     let proof = if let Some(path) = &cli.proof_path {
         Some(pidgeons::Proof::new(
-            io::BufWriter::new(fs::File::open(path)?),
+            io::BufWriter::new(fs::File::create(path)?),
             0,
             false,
         )?)
@@ -83,16 +88,29 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
     match cli.alg {
         Algorithm::PMinimal(opts, ref cb_opts) => match cli.cadical_config {
             CadicalConfig::Default => {
-                let mut alg = setup_alg::<PMin>(cli, inst, opts)?;
-                let cont = if let Some(opts) = cb_opts {
-                    alg.core_boost(opts.clone())?
+                if let Some(proof) = proof {
+                    let mut alg = setup_alg_cert::<PMin>(cli, inst, opts, proof)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
                 } else {
-                    true
-                };
-                if cont {
-                    alg.solve(cli.limits)?;
-                };
-                post_solve(alg, cli, prepro, reindexer)
+                    let mut alg = setup_alg::<PMin>(cli, inst, opts)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
+                }
             }
             CadicalConfig::Plain => {
                 let mut alg = setup_alg::<PMin<CaDiCaLPlainInit>>(cli, inst, opts)?;
@@ -289,6 +307,38 @@ where
     Alg: InitDefaultBlock + KernelFunctions,
 {
     let mut alg = Alg::from_instance_default_blocking(inst, opts)?;
+
+    // === Set up CLI interaction ===
+    // Set up signal handling
+    let mut interrupter = alg.interrupter();
+    let mut signals = signal_hook::iterator::Signals::new([
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGXCPU,
+        signal_hook::consts::SIGABRT,
+    ])?;
+    // Thread for catching incoming signals
+    thread::spawn(move || {
+        for _ in signals.forever() {
+            interrupter.interrupt();
+        }
+    });
+
+    alg.attach_logger(cli.new_cli_logger());
+
+    Ok(alg)
+}
+
+fn setup_alg_cert<Alg>(
+    cli: &Cli,
+    inst: Instance,
+    opts: KernelOptions,
+    proof: pidgeons::Proof<Alg::ProofWriter>,
+) -> anyhow::Result<Alg>
+where
+    Alg: InitCertDefaultBlock + KernelFunctions,
+{
+    let mut alg = Alg::from_instance_default_blocking_cert(inst, opts, proof)?;
 
     // === Set up CLI interaction ===
     // Set up signal handling

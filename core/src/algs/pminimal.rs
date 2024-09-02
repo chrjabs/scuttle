@@ -23,7 +23,6 @@ use rustsat::{
         self,
         card::{self, DbTotalizer},
         pb::{self, DbGte},
-        EncodeStats,
     },
     instances::{Cnf, ManageVars},
     solvers::{
@@ -31,16 +30,16 @@ use rustsat::{
     },
     types::{Assignment, Clause, Lit, WLitIter},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
+use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
-    algs::ObjEncoding,
+    algs::{proofs, ObjEncoding},
     options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
     termination::ensure,
     types::{ParetoFront, VarManager},
     EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
     MaybeTerminatedError::{self, Done},
-    Phase, Solve,
+    Phase,
 };
 
 use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, Objective};
@@ -55,11 +54,7 @@ use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, Objective};
 /// - `ProofW`: the proof writer
 /// - `OInit`: the oracle initializer
 /// - `BCG`: the blocking clause generator
-#[derive(KernelFunctions, Solve)]
-#[solve(bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
-        CE: card::BoundUpperIncremental + EncodeStats,
-        BCG: Fn(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats")]
+#[derive(KernelFunctions)]
 pub struct PMinimal<
     O,
     PBE = DbGte,
@@ -74,6 +69,35 @@ pub struct PMinimal<
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
+}
+
+impl<'learn, 'term, PBE, CE, ProofW, OInit, BCG> super::Solve
+    for PMinimal<rustsat_cadical::CaDiCaL<'term, 'learn>, PBE, CE, ProofW, OInit, BCG>
+where
+    PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental + encodings::EncodeStats,
+    CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental + encodings::EncodeStats,
+    BCG: Fn(Assignment) -> Clause,
+    ProofW: io::Write + 'static,
+{
+    fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
+        self.kernel.start_solving(limits);
+        self.alg_main()
+    }
+
+    fn all_stats(
+        &self,
+    ) -> (
+        crate::Stats,
+        Option<SolverStats>,
+        Option<Vec<EncodingStats>>,
+    ) {
+        use crate::ExtendedSolveStats;
+        (
+            self.kernel.stats,
+            Some(self.oracle_stats()),
+            Some(self.encoding_stats()),
+        )
+    }
 }
 
 #[oracle_bounds]
@@ -211,16 +235,18 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, PBE, CE, ProofW, OInit, BCG> PMinimal<O, PBE, CE, ProofW, OInit, BCG>
+impl<'learn, 'term, PBE, CE, ProofW, OInit, BCG>
+    PMinimal<rustsat_cadical::CaDiCaL<'learn, 'term>, PBE, CE, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
+    PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
+    CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
     BCG: Fn(Assignment) -> Clause,
+    ProofW: io::Write + 'static,
 {
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> MaybeTerminatedError {
+        use rustsat::solvers::Solve;
+
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
         self.kernel.log_routine_start("p-minimal")?;
         loop {
@@ -245,7 +271,7 @@ where
             self.kernel.phase_solution(solution.clone())?;
             let (costs, solution, block_switch) =
                 self.kernel
-                    .p_minimization(costs, solution, &[], &mut self.obj_encs)?;
+                    .p_minimization_cert(costs, solution, &[], &mut self.obj_encs)?;
 
             let assumps: Vec<_> = self
                 .kernel
@@ -520,10 +546,22 @@ where
             if self.opts.enumeration == EnumOptions::NoEnum {
                 // Block permanently since no enumeration at Pareto point
                 let block_clause = self.dominated_block_clause_cert(&costs, obj_encs)?;
-                self.oracle.add_clause(block_clause)?;
+                if let Some(pt_handle) = &self.pt_handle {
+                    use rustsat::encodings::CollectCertClauses;
+
+                    let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    let id = proofs::certify_pmin_cut(&block_clause, &solution, proof)?;
+                    let mut collector = cadical_veripb_tracer::CadicalCertCollector::new(
+                        &mut self.oracle,
+                        pt_handle,
+                    );
+                    collector.add_cert_clause(block_clause, id)?;
+                } else {
+                    self.oracle.add_clause(block_clause)?;
+                }
                 // TODO: convince veripb
             } else {
-                // Permanently block last candidate
+                // Permanently block last cadidate
                 if let Some(block_lit) = block_switch {
                     self.oracle.add_unit(block_lit)?;
                     // TODO: convince veripb
@@ -626,6 +664,7 @@ where
         PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
         CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
     {
+        use pidgeons::VarLike;
         use rustsat::solvers::Solve;
 
         debug_assert_eq!(costs.len(), self.stats.n_objs);
@@ -635,11 +674,7 @@ where
         self.oracle.add_clause_ref(&clause).unwrap();
         if let Some(pt_handle) = &self.pt_handle {
             let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
-            proof.redundant(
-                &clause,
-                &[pidgeons::Substitution::new(&block_lit.var(), true.into())],
-                None,
-            )?;
+            proof.redundant(&clause, [block_lit.var().substitute_fixed(true)], None)?;
         }
         Ok(!block_lit)
     }

@@ -1,5 +1,6 @@
 //! # Proof Writing Functionality
 
+use core::fmt;
 use std::{
     io,
     marker::PhantomData,
@@ -10,12 +11,14 @@ use std::{
 use std::sync::Mutex;
 
 use cadical_veripb_tracer::{CadicalCertCollector, CadicalTracer};
-use itertools::Itertools;
-use pidgeons::{ConstraintId, Order};
+use pidgeons::{
+    AbsConstraintId, Axiom, ConstraintId, ConstraintLike, OperationSequence, Order, OrderVar,
+    Proof, ProofOnlyVar, VarLike,
+};
 use rustsat::{
     instances::{Cnf, ManageVars},
     solvers::Initialize,
-    types::{Assignment, Clause, WLitIter},
+    types::{Assignment, Clause, Lit, Var, WLitIter},
 };
 
 use crate::{
@@ -35,7 +38,7 @@ pub trait InitCert: super::Init {
         objs: Objs,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: pidgeons::Proof<Self::ProofWriter>,
+        proof: Proof<Self::ProofWriter>,
         block_clause_gen: <Self as super::Init>::BlockClauseGen,
     ) -> anyhow::Result<Self>
     where
@@ -47,7 +50,7 @@ pub trait InitCert: super::Init {
     fn from_instance_cert(
         inst: Instance,
         opts: KernelOptions,
-        proof: pidgeons::Proof<Self::ProofWriter>,
+        proof: Proof<Self::ProofWriter>,
         block_clause_gen: <Self as super::Init>::BlockClauseGen,
     ) -> anyhow::Result<Self> {
         Self::new_cert(inst.cnf, inst.objs, inst.vm, opts, proof, block_clause_gen)
@@ -61,7 +64,7 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
         objs: Objs,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: pidgeons::Proof<Self::ProofWriter>,
+        proof: Proof<Self::ProofWriter>,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
@@ -83,7 +86,7 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
     fn from_instance_default_blocking_cert(
         inst: Instance,
         opts: KernelOptions,
-        proof: pidgeons::Proof<Self::ProofWriter>,
+        proof: Proof<Self::ProofWriter>,
     ) -> anyhow::Result<Self> {
         Self::new_cert(
             inst.cnf,
@@ -96,34 +99,201 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
     }
 }
 
-fn objectives_as_order(objs: &[Objective]) -> Order {
-    let mut order = Order::new(String::from("pareto"));
+impl<Alg> InitCertDefaultBlock for Alg where Alg: InitCert<BlockClauseGen = fn(Assignment) -> Clause>
+{}
+
+fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<Var>>> {
+    let mut order = Order::<Var, LbConstraint<_>>::new(String::from("pareto"));
     for (idx, obj) in objs.iter().enumerate() {
-        let mult = obj.unit_weight();
-        let constr = format!(
-            "{} >= 0",
-            obj.iter().format_with(" ", |(l, w), f| {
-                let (u, v) = order.use_var(&l.var());
-                let neg = if l.is_neg() { "~" } else { "" };
-                f(&format_args!(
-                    "-{cf} {neg}{u} +{cf} {neg}{v}",
-                    cf = w * mult
-                ))
-            })
-        );
+        let mult = isize::try_from(obj.unit_weight())
+            .expect("can only handle unit weight up to `isize::MAX`");
+        let constr = LbConstraint {
+            lits: obj
+                .iter()
+                .map(|(l, w)| {
+                    let w = isize::try_from(w).expect("can only handle weights up to `isize::MAX`");
+                    let (u, v) = order.use_var(l.var());
+                    let (u, v) = if l.is_pos() {
+                        (u.pos_axiom(), v.pos_axiom())
+                    } else {
+                        (u.neg_axiom(), v.neg_axiom())
+                    };
+                    [(-w * mult, u), (w * mult, v)]
+                })
+                .flatten()
+                .collect(),
+            bound: 0,
+        };
         // For O_idx, this proof sums up the following constraints
         // - O_idx(u) <= O_idx(v)
         // - O_idx(v) <= O_idx(w)
         // - O_idx(u) > O_idx(w)
         // This will always lead to a contradiction, proving transitivity
         let trans_proof = vec![
-            ConstraintId::abs(idx + 1)
+            OperationSequence::<OrderVar<Var>>::from(ConstraintId::abs(idx + 1))
                 + ConstraintId::abs(objs.len() + idx + 1)
                 + ConstraintId::last(1),
         ];
-        order.add_definition_constraint(&constr, trans_proof, None)
+        order.add_definition_constraint(constr, trans_proof, None)
     }
     order
+}
+
+pub fn certify_pmin_cut<ProofW: io::Write>(
+    block_clause: &Clause,
+    witness: &Assignment,
+    proof: &mut Proof<ProofW>,
+) -> io::Result<AbsConstraintId> {
+    // FIXME: remove if acctualy not needed
+    // // introduce `not_better_i` for each objective
+    // let not_betters = Vec::with_capacity(objs.len());
+    // for (_idx, (obj, cost)) in objs.into_iter().zip(costs).enumerate() {
+    //     let not_better = proof.new_proof_var();
+    //     #[cfg(feature = "verbose-proofs")]
+    //     proof.comment(&format_args!(
+    //         "{not_better} = the current solution is not better than {cost} on objective {idx}"
+    //     ))?;
+    //     // O_i >= c_i -> not_better
+    //     let cost = isize::try_from(cost).expect("can only handle weights up to `isize::MAX`");
+    //     let mut weight_sum = 0;
+    //     let sum: Vec<_> = [(cost, not_worse.into())]
+    //         .into_iter()
+    //         .chain(obj.iter().map(|(l, w)| {
+    //             let w = isize::try_from(*w).expect("can only handle weights up to `isize::MAX`");
+    //             weight_sum += w;
+    //             ((!*l).into(), w)
+    //         }))
+    //         .collect();
+    //     proof.redundant(
+    //         &LbConstraint {
+    //             lits: sum,
+    //             bound: weight_sum - cost + 1,
+    //         },
+    //         [not_better.substitute_fixed(false)],
+    //         None,
+    //     )?;
+    //     // TODO: do we need the other reification direction here?
+    //     not_betters.push(not_better);
+    // }
+    // let dominated = proof.new_proof_var();
+    // #[cfg(feature = "verbose-proofs")]
+    // proof.comment(&format_args!(
+    //     "{dominated} = the current solution is (weakly) dominated by [{}]",
+    //     costs.into_iter().format(", ")
+    // ))?;
+    // proof.redundant(&LbConstraint{lits: [(1, dominated.into())].chain()}, subs, proof)
+
+    // TODO: figure out if this works with cuts shortened due to bounds
+
+    #[cfg(feature = "verbose-proofs")]
+    {
+        proof.comment("Introducing P-minimal cut based on the following witness:")?;
+        proof.comment(&format_args!("{witness}"))?;
+    }
+
+    // Introduce indicator variable for being at accactly the solution in question
+    let is_this = AnyVar::Proof(proof.new_proof_var());
+    #[cfg(feature = "verbose-proofs")]
+    proof.comment(&format_args!(
+        "{is_this} = a solution is _exactly_ the witnessing one"
+    ))?;
+    let bound = isize::try_from(witness.len()).unwrap();
+    let is_this_def = proof.redundant(
+        &LbConstraint {
+            lits: [(bound, is_this.neg_axiom())]
+                .into_iter()
+                .chain(witness.iter().map(|l| (1, axiom(l))))
+                .collect(),
+            bound,
+        },
+        [is_this.substitute_fixed(false)],
+        None,
+    )?;
+
+    // Map all weakly dominated solutions to the witness itself
+    let map_dom = proof.redundant(
+        &LbConstraint {
+            lits: [(1, is_this.pos_axiom())]
+                .into_iter()
+                .chain(block_clause.iter().map(|l| (1, axiom(*l))))
+                .collect(),
+            bound: 1,
+        },
+        witness
+            .iter()
+            .map(|l| AnyVar::Solver(l.var()).substitute_fixed(l.is_pos())),
+        None,
+    )?;
+
+    // Exclude witness
+    let exclude = proof.exclude_solution(witness.iter().map(|l| Axiom::from(l)))?;
+
+    // Add the actual P-minimal cut as a clause
+    // TODO: provide hints
+    let cut_id = proof.reverse_unit_prop(block_clause, Option::<[ConstraintId; 0]>::None)?;
+
+    // Remove auxiliary constraints
+    proof.delete_ids(
+        [is_this_def, map_dom, exclude]
+            .into_iter()
+            .map(|id| ConstraintId::from(id)),
+    )?;
+
+    Ok(cut_id)
+}
+
+struct LbConstraint<V: VarLike> {
+    lits: Vec<(isize, Axiom<V>)>,
+    bound: isize,
+}
+
+impl<V: VarLike> ConstraintLike<V> for LbConstraint<V> {
+    fn rhs(&self) -> isize {
+        self.bound
+    }
+
+    fn sum_iter(&self) -> impl Iterator<Item = (isize, Axiom<V>)> {
+        self.lits.iter().copied()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum AnyVar {
+    Proof(ProofOnlyVar),
+    Solver(Var),
+}
+
+impl From<ProofOnlyVar> for AnyVar {
+    fn from(value: ProofOnlyVar) -> Self {
+        AnyVar::Proof(value)
+    }
+}
+
+impl From<Var> for AnyVar {
+    fn from(value: Var) -> Self {
+        AnyVar::Solver(value)
+    }
+}
+
+impl VarLike for AnyVar {
+    type Formatter = Self;
+}
+
+fn axiom(lit: Lit) -> Axiom<AnyVar> {
+    if lit.is_pos() {
+        AnyVar::Solver(lit.var()).pos_axiom()
+    } else {
+        AnyVar::Solver(lit.var()).neg_axiom()
+    }
+}
+
+impl fmt::Display for AnyVar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AnyVar::Proof(v) => write!(f, "{}", <ProofOnlyVar as VarLike>::Formatter::from(*v)),
+            AnyVar::Solver(v) => write!(f, "{}", <Var as VarLike>::Formatter::from(*v)),
+        }
+    }
 }
 
 impl<'term, 'learn, ProofW, OInit, BCG>
@@ -138,7 +308,7 @@ where
         objs: Objs,
         var_manager: VarManager,
         bcg: BCG,
-        proof: pidgeons::Proof<ProofW>,
+        proof: Proof<ProofW>,
         opts: KernelOptions,
     ) -> anyhow::Result<Self>
     where
@@ -152,7 +322,7 @@ where
         // Proof logging: write out OPB file to use as VeriPB input
         // FIXME: This is temporary for getting something off the ground quickly. Long term, also
         // proof log encoding built before to ensure original files can be used
-        let mut writer = std::io::BufWriter::new(std::fs::File::open("veripb-input.opb")?);
+        let mut writer = std::io::BufWriter::new(std::fs::File::create("veripb-input.opb")?);
         let clauses: Cnf = clauses.into_iter().collect();
         let iter = clauses
             .iter()
@@ -185,7 +355,7 @@ where
             clauses
                 .into_iter()
                 .enumerate()
-                .map(|(idx, cl)| (cl, pidgeons::AbsConstraintId::new(idx + 1))),
+                .map(|(idx, cl)| (cl, AbsConstraintId::new(idx + 1))),
         )?;
 
         let objs: Vec<_> = objs

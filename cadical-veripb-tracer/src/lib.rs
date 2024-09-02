@@ -92,7 +92,7 @@ where
         let id = self.cmap.map(id);
         let proof = self.proof.as_mut().expect("expected proof");
         proof
-            .delete_ids(&[id.into()])
+            .delete_ids([id.into()])
             .expect("failed to write proof")
     }
 
@@ -122,7 +122,7 @@ where
             let Some(first) = antecedents.next() else {
                 panic!("need antecedents for derived clause")
             };
-            let derivation = antecedents.fold(OperationSequence::from(first), |der, id| {
+            let derivation = antecedents.fold(OperationSequence::<rustsat::types::Var>::from(first), |der, id| {
                 (der + id).saturate()
             });
             proof.operations(&derivation).expect("failed to write proof")
