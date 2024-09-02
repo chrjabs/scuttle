@@ -16,7 +16,9 @@ use types::NonDomPoint;
 pub mod prepro;
 
 pub mod algs;
-pub use algs::{CoreBoost, Init, InitDefaultBlock, KernelFunctions, Solve};
+pub use algs::{
+    CoreBoost, Init, InitCert, InitCertDefaultBlock, InitDefaultBlock, KernelFunctions, Solve,
+};
 
 // Reexport algorithms
 pub use algs::bioptsat::BiOptSat;

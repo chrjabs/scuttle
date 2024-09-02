@@ -50,7 +50,8 @@ use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective
 #[solve(bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
         CE: card::BoundUpperIncremental + EncodeStats,
         BCG: Fn(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats")]
+        O: SolveIncremental + SolveStats,
+        ProofW: std::io::Write")]
 pub struct LowerBounding<
     O,
     PBE = DbGte,
@@ -58,7 +59,9 @@ pub struct LowerBounding<
     ProofW = io::BufWriter<fs::File>,
     OInit = DefaultInitializer,
     BCG = fn(Assignment) -> Clause,
-> {
+> where
+    ProofW: io::Write,
+{
     /// The solver kernel
     kernel: Kernel<O, ProofW, OInit, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
@@ -73,6 +76,7 @@ pub struct LowerBounding<
 impl<O, PBE, CE, ProofW, OInit, BCG> super::Init for LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
     OInit: Initialize<O>,
@@ -103,6 +107,7 @@ where
 impl<'term, 'learn, PBE, CE, ProofW, OInit, BCG> super::InitCert
     for LowerBounding<rustsat_cadical::CaDiCaL<'term, 'learn>, PBE, CE, ProofW, OInit, BCG>
 where
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
     OInit: Initialize<rustsat_cadical::CaDiCaL<'term, 'learn>>,
@@ -135,6 +140,7 @@ impl<O, PBE, CE, ProofW, OInit, BCG> ExtendedSolveStats
     for LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveStats,
+    ProofW: io::Write,
     PBE: encodings::EncodeStats,
     CE: encodings::EncodeStats,
 {
@@ -175,6 +181,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
 {
@@ -226,6 +233,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
     BCG: Fn(Assignment) -> Clause,
@@ -279,6 +287,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> CoreBoost for LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
@@ -364,6 +373,7 @@ impl Fence {
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
 {
     pub fn update_fence<PBE, CE>(
         &mut self,
@@ -416,6 +426,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     BCG: Fn(Assignment) -> Clause,
 {
     /// Runs the P-Minimal algorithm within the fence to harvest solutions

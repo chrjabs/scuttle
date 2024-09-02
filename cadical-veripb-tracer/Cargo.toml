@@ -5,10 +5,12 @@ edition = "2021"
 
 [dependencies]
 cfg-if.workspace = true
+itertools = { workspace = true, optional = true }
 pidgeons.workspace = true
 rustsat.workspace = true
 rustsat-cadical.workspace = true
 
 [features]
-rup-with-hints = []
-verbose = []
+default = ["rup-hints"]
+rup-hints = []
+verbose = ["dep:itertools"]

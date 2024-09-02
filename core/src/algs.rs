@@ -1,6 +1,7 @@
 //! Core solver functionality shared between different algorithms
 
 use std::{
+    io,
     marker::PhantomData,
     ops::Not,
     sync::{
@@ -21,7 +22,7 @@ use rustsat::{
     solvers::{
         DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
     },
-    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, WLitIter},
+    types::{Assignment, Clause, Lit, TernaryVal, WLitIter},
 };
 use scuttle_proc::oracle_bounds;
 
@@ -30,7 +31,7 @@ use maxpre::PreproClauses;
 
 use crate::{
     options::{CoreBoostingOptions, EnumOptions},
-    types::{Instance, NonDomPoint, ObjEncoding, ObjLitData, Objective, ParetoFront, VarManager},
+    types::{Instance, NonDomPoint, ObjEncoding, Objective, ParetoFront, VarManager},
     EncodingStats, KernelOptions, Limits, MaybeTerminated,
     MaybeTerminatedError::{self, Done, Error, Terminated},
     Phase, Stats, Termination, WriteSolverLog,
@@ -160,14 +161,17 @@ impl Interrupter {
 /// - `ProofW`: the proof writer
 /// - `OInit`: the oracle initializer
 /// - `BCG`: the blocking clause generator
-struct Kernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) -> Clause> {
+struct Kernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) -> Clause>
+where
+    ProofW: io::Write,
+{
     /// The SAT solver backend
     oracle: O,
     /// The variable manager keeping track of variables
     var_manager: VarManager,
     #[cfg(feature = "sol-tightening")]
     /// Objective literal data
-    obj_lit_data: RsHashMap<Lit, ObjLitData>,
+    obj_lit_data: rustsat::types::RsHashMap<Lit, crate::types::ObjLitData>,
     /// The objectives
     objs: Vec<Objective>,
     /// The stored original clauses, if needed
@@ -199,6 +203,7 @@ struct Kernel<O, ProofW, OInit = DefaultInitializer, BCG = fn(Assignment) -> Cla
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
+    ProofW: io::Write,
     OInit: Initialize<O>,
     BCG: Fn(Assignment) -> Clause,
 {
@@ -249,6 +254,8 @@ where
         // Record objective literal occurrences
         #[cfg(feature = "sol-tightening")]
         let obj_lit_data = {
+            use crate::types::ObjLitData;
+            use rustsat::types::RsHashMap;
             let mut obj_lit_data: RsHashMap<_, ObjLitData> = RsHashMap::default();
             for (idx, obj) in objs.iter().enumerate() {
                 match obj {
@@ -308,7 +315,10 @@ where
     }
 }
 
-impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG> {
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+where
+    ProofW: io::Write,
+{
     fn start_solving(&mut self, limits: Limits) {
         self.stats.n_solve_calls += 1;
         self.lims = limits;
@@ -490,6 +500,7 @@ impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG> {
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: rustsat::solvers::Interrupt,
+    ProofW: io::Write,
 {
     fn interrupter(&mut self) -> Interrupter {
         Interrupter {
@@ -500,7 +511,10 @@ where
 }
 
 #[cfg(not(feature = "interrupt-oracle"))]
-impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG> {
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+where
+    ProofW: io::Write,
+{
     fn interrupter(&mut self) -> Interrupter {
         Interrupter {
             term_flag: self.term_flag.clone(),
@@ -512,6 +526,7 @@ impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG> {
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + rustsat::solvers::FlipLit,
+    ProofW: io::Write,
 {
     /// Performs heuristic solution improvement and computes the improved
     /// (internal) cost for one objective
@@ -566,9 +581,10 @@ where
 }
 
 #[cfg(not(feature = "sol-tightening"))]
-impl<O, ProofW, OInit, BCG, ProofW> Kernel<O, ProofW, OInit, BCG>
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
+    ProofW: io::Write,
 {
     /// Performs heuristic solution improvement and computes the improved
     /// (internal) cost for one objective
@@ -594,6 +610,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: rustsat::solvers::PhaseLit,
+    ProofW: io::Write,
 {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
@@ -639,6 +656,7 @@ impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG> {
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
+    ProofW: io::Write,
     BCG: Fn(Assignment) -> Clause,
 {
     /// Yields Pareto-optimal solutions. The given assumptions must only allow
@@ -729,6 +747,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     BCG: Fn(Assignment) -> Clause,
 {
     /// Performs linear sat-unsat search on a given objective and yields
@@ -775,6 +794,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
 {
     /// Gets the current objective costs without offset or multiplier. The phase
     /// parameter is needed to determine if the solution should be heuristically
@@ -881,6 +901,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
+    ProofW: io::Write,
 {
     /// Wrapper around the oracle with call logging and interrupt detection.
     /// Assumes that the oracle is unlimited.
@@ -909,6 +930,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
+    ProofW: io::Write,
     OInit: Initialize<O>,
 {
     /// Resets the oracle and returns an error when the original [`Cnf`] was not stored.

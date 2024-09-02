@@ -2,29 +2,31 @@
 
 use std::io;
 
-use pidgeons::{AbsConstraintId, OperationLike, OperationSequence, Proof};
+use pidgeons::{AbsConstraintId, Proof};
 use rustsat::{
     encodings::{CollectCertClauses, CollectClauses},
-    types::Clause,
+    types::{Clause, Lit},
 };
 use rustsat_cadical::{CaDiCaL, ClauseId, ProofTracerHandle, TraceProof};
 
 #[derive(Debug)]
-pub struct CadicalTracer<ProofW> {
+pub struct CadicalTracer<ProofW: io::Write> {
     /// The proof to be passed back and forth between the tracer and the kernel
     proof: Option<Proof<ProofW>>,
     /// The constraint ID mapper
     cmap: ConstraintMapper,
     /// The [`AbsConstraintId`] of the last found core
     core_id: Option<AbsConstraintId>,
+    assumptions: Vec<Lit>,
 }
 
-impl<ProofW> CadicalTracer<ProofW> {
+impl<ProofW: io::Write> CadicalTracer<ProofW> {
     pub fn new(proof: Proof<ProofW>) -> Self {
         CadicalTracer {
             proof: Some(proof),
             cmap: ConstraintMapper::default(),
             core_id: None,
+            assumptions: vec![],
         }
     }
 
@@ -48,7 +50,7 @@ impl<ProofW> CadicalTracer<ProofW> {
     }
 }
 
-impl<ProofW> CadicalTracer<ProofW>
+impl<ProofW: io::Write> CadicalTracer<ProofW>
 where
     ProofW: io::Write,
 {
@@ -58,7 +60,7 @@ where
         clause: &Clause,
         antecedents: &[ClauseId],
     ) -> AbsConstraintId {
-        debug_assert!(antecedents.len() > 1);
+        debug_assert!(!antecedents.is_empty());
         let proof = self.proof.as_mut().expect("expected proof");
         let veripb_id = write_derived(
             proof,
@@ -74,10 +76,27 @@ where
     }
 }
 
-impl<ProofW> TraceProof for CadicalTracer<ProofW>
+impl<ProofW: io::Write> TraceProof for CadicalTracer<ProofW>
 where
     ProofW: io::Write,
 {
+    fn add_original_clause(
+        &mut self,
+        id: ClauseId,
+        _redundant: bool,
+        _clause: &Clause,
+        _restored: bool,
+    ) {
+        debug_assert_eq!(usize::try_from(id.0).unwrap(), self.cmap.map.len());
+        #[cfg(feature = "verbose")]
+        {
+            let proof = self.proof.as_mut().expect("expected proof");
+            proof
+                .equals(_clause, Some(self.cmap.map(id).into()))
+                .expect("failed to write proof");
+        }
+    }
+
     fn add_derived_clause(
         &mut self,
         id: ClauseId,
@@ -96,7 +115,42 @@ where
             .expect("failed to write proof")
     }
 
+    fn solve_query(&mut self) {
+        #[cfg(feature = "verbose")]
+        {
+            use itertools::Itertools;
+            let proof = self.proof.as_mut().expect("expected proof");
+            proof
+                .comment(&"CaDiCaL: start solving with the following assumptions")
+                .expect("failed to write proof");
+            proof
+                .comment(&format_args!(
+                    "[{}]",
+                    self.assumptions
+                        .iter()
+                        .map(|l| pidgeons::Axiom::from(*l))
+                        .format(", ")
+                ))
+                .expect("failed to write proof");
+        }
+    }
+
+    fn add_assumption(&mut self, assumption: Lit) {
+        self.assumptions.push(assumption)
+    }
+
+    fn reset_assumptions(&mut self) {
+        self.assumptions.clear()
+    }
+
     fn add_assumption_clause(&mut self, id: ClauseId, clause: &Clause, antecedents: &[ClauseId]) {
+        #[cfg(feature = "verbose")]
+        {
+            let proof = self.proof.as_mut().expect("expected proof");
+            proof
+                .comment(&"the next constraint is a core found by CaDiCaL")
+                .expect("failed to write proof");
+        }
         let id = self.add_derived(id, clause, antecedents);
         self.core_id = Some(id);
     }
@@ -109,16 +163,16 @@ fn write_derived<ProofW, I>(
 ) -> AbsConstraintId
 where
     ProofW: io::Write,
-    I: IntoIterator<Item = AbsConstraintId>,
+    I: IntoIterator<Item = AbsConstraintId, IntoIter: DoubleEndedIterator>,
 {
     cfg_if::cfg_if! {
-        if #[cfg(feature = "rup-with-hints")] {
-            let antecedents = Vec::from_iter(antecedents);
-
-            proof.reverse_unit_prop(_clause, Some(&antecedents))
+        if #[cfg(feature = "rup-hints")] {
+            use pidgeons::ConstraintId;
+            proof.reverse_unit_prop(_clause, Some(antecedents.into_iter().map(ConstraintId::from)))
                 .expect("failed to write proof")
         } else {
-            let mut antecedents = antecedents.into_iter();
+            use pidgeons::{OperationLike, OperationSequence};
+            let mut antecedents = antecedents.into_iter().rev();
             let Some(first) = antecedents.next() else {
                 panic!("need antecedents for derived clause")
             };
@@ -146,16 +200,18 @@ impl ConstraintMapper {
     }
 
     pub fn map(&self, id: ClauseId) -> AbsConstraintId {
-        self.map[usize::try_from(id.0).expect("`ClauseId` does not fit in `usize`")]
+        self.map[usize::try_from(id.0 - 1).expect("`ClauseId` does not fit in `usize`")]
     }
 }
 
-pub struct CadicalCertCollector<'cadical, 'term, 'learn, ProofW> {
+pub struct CadicalCertCollector<'cadical, 'term, 'learn, ProofW: io::Write> {
     cadical: &'cadical mut CaDiCaL<'term, 'learn>,
     pt_handle: &'cadical ProofTracerHandle<CadicalTracer<ProofW>>,
 }
 
-impl<'cadical, 'term, 'learn, ProofW> CadicalCertCollector<'cadical, 'term, 'learn, ProofW> {
+impl<'cadical, 'term, 'learn, ProofW: io::Write>
+    CadicalCertCollector<'cadical, 'term, 'learn, ProofW>
+{
     pub fn new(
         cadical: &'cadical mut CaDiCaL<'term, 'learn>,
         pt_handle: &'cadical ProofTracerHandle<CadicalTracer<ProofW>>,
@@ -164,7 +220,7 @@ impl<'cadical, 'term, 'learn, ProofW> CadicalCertCollector<'cadical, 'term, 'lea
     }
 }
 
-impl<ProofW: 'static> CollectCertClauses for CadicalCertCollector<'_, '_, '_, ProofW>
+impl<ProofW: io::Write + 'static> CollectCertClauses for CadicalCertCollector<'_, '_, '_, ProofW>
 where
     ProofW: io::Write,
 {
@@ -192,7 +248,7 @@ where
 }
 
 // Passthrough
-impl<ProofW> CollectClauses for CadicalCertCollector<'_, '_, '_, ProofW> {
+impl<ProofW: io::Write> CollectClauses for CadicalCertCollector<'_, '_, '_, ProofW> {
     fn n_clauses(&self) -> usize {
         self.cadical.n_clauses()
     }

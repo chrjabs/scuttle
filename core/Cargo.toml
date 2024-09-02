@@ -19,7 +19,7 @@ thiserror.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["phasing", "sol-tightening", "interrupt-oracle", "limit-conflicts"]
+default = ["phasing", "interrupt-oracle", "limit-conflicts"]
 interrupt-oracle = ["scuttle-proc/interrupt-oracle"]
 phasing = ["scuttle-proc/phasing"]
 sol-tightening = ["scuttle-proc/sol-tightening"]

@@ -46,7 +46,8 @@ use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective
 #[solve(bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
         CE: card::BoundUpperIncremental + EncodeStats,
         BCG: Fn(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats")]
+        O: SolveIncremental + SolveStats,
+        ProofW: std::io::Write")]
 pub struct BiOptSat<
     O,
     PBE = DbGte,
@@ -54,7 +55,9 @@ pub struct BiOptSat<
     ProofW = io::BufWriter<fs::File>,
     OInit = DefaultInitializer,
     BCG = fn(Assignment) -> Clause,
-> {
+> where
+    ProofW: io::Write,
+{
     /// The solver kernel
     kernel: Kernel<O, ProofW, OInit, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
@@ -67,6 +70,7 @@ pub struct BiOptSat<
 impl<O, PBE, CE, ProofW, OInit, BCG> super::Init for BiOptSat<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
     OInit: Initialize<O>,
@@ -97,6 +101,7 @@ where
 impl<'term, 'learn, PBE, CE, ProofW, OInit, BCG> super::InitCert
     for BiOptSat<rustsat_cadical::CaDiCaL<'term, 'learn>, PBE, CE, ProofW, OInit, BCG>
 where
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
     OInit: Initialize<rustsat_cadical::CaDiCaL<'term, 'learn>>,
@@ -128,6 +133,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> ExtendedSolveStats for BiOptSat<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveStats,
+    ProofW: io::Write,
     PBE: encodings::EncodeStats,
     CE: encodings::EncodeStats,
 {
@@ -168,6 +174,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> BiOptSat<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
 {
@@ -213,6 +220,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> BiOptSat<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental,
     CE: card::BoundUpperIncremental,
     BCG: Fn(Assignment) -> Clause,
@@ -235,6 +243,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> CoreBoost for BiOptSat<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     OInit: Initialize<O>,
 {
@@ -287,6 +296,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     BCG: Fn(Assignment) -> Clause,
 {
     /// Runs the BiOptSat algorithm on two objectives. BiOptSat is run in the

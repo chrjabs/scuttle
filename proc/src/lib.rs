@@ -55,7 +55,10 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
     ast.generics.make_where_clause();
     let obounds = "where";
     #[cfg(feature = "interrupt-oracle")]
-    let obounds = format!("{} O: rustsat::solvers::Interrupt,", obounds);
+    let obounds = format!(
+        "{} O: rustsat::solvers::Interrupt, ProofW: std::io::Write,",
+        obounds
+    );
     let obounds: TokenStream = obounds.parse().unwrap();
     let obounds: syn::WhereClause = parse_macro_input!(obounds);
     ast.generics

@@ -1,5 +1,7 @@
 //! # Core Boosting as Preprocessing
 
+use std::io;
+
 use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     clause,
@@ -126,6 +128,7 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
 {
     /// Performs core boosting on the instance by executing single-objective OLL
     /// on each objective individually. Returns the OLL reformulations or
@@ -161,6 +164,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     OInit: Initialize<O>,
 {
     /// Performs inprocessing, i.e., preprocessing with MaxPre after core boosting.

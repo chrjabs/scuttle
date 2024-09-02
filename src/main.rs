@@ -9,12 +9,10 @@ use rustsat::{
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle_core::{
-    self,
-    algs::InitCertDefaultBlock,
-    prepro,
+    self, prepro,
     types::{Instance, Reindexer},
-    BiOptSat, CoreBoost, InitDefaultBlock, KernelFunctions, KernelOptions, LowerBounding,
-    MaybeTerminatedError, PMinimal, Solve,
+    BiOptSat, CoreBoost, InitCertDefaultBlock, InitDefaultBlock, KernelFunctions, KernelOptions,
+    LowerBounding, MaybeTerminatedError, PMinimal, Solve,
 };
 
 mod cli;

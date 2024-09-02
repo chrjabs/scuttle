@@ -141,6 +141,7 @@ name = "cadical-veripb-tracer"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
+ "itertools",
  "pidgeons",
  "rustsat",
  "rustsat-cadical",

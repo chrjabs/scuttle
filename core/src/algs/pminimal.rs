@@ -62,7 +62,9 @@ pub struct PMinimal<
     ProofW = io::BufWriter<fs::File>,
     OInit = DefaultInitializer,
     BCG = fn(Assignment) -> Clause,
-> {
+> where
+    ProofW: io::Write,
+{
     /// The solver kernel
     kernel: Kernel<O, ProofW, OInit, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
@@ -104,6 +106,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> super::Init for PMinimal<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
     OInit: Initialize<O>,
@@ -165,6 +168,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> ExtendedSolveStats for PMinimal<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveStats,
+    ProofW: io::Write,
     PBE: encodings::EncodeStats,
     CE: encodings::EncodeStats,
 {
@@ -204,6 +208,7 @@ where
 
 impl<O, PBE, CE, ProofW, OInit, BCG> PMinimal<O, PBE, CE, ProofW, OInit, BCG>
 where
+    ProofW: io::Write,
     PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
     CE: card::BoundUpperIncremental + FromIterator<Lit>,
 {
@@ -292,6 +297,7 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> CoreBoost for PMinimal<O, PBE, CE, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     OInit: Initialize<O>,
 {
@@ -338,6 +344,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
 {
     /// Executes P-minimization from a cost and solution starting point
     pub fn p_minimization<PBE, CE>(
@@ -536,12 +543,6 @@ where
                     c
                 })
                 .collect();
-            // Force next solution to dominate the current one
-            assumps.drain(base_assumps.len()..);
-            #[cfg(not(feature = "coarse-convergence"))]
-            assumps.extend(self.enforce_dominating(&costs, obj_encs)?);
-            #[cfg(feature = "coarse-convergence")]
-            assumps.extend(self.enforce_dominating(&bound_costs, obj_encs)?);
             // Block solutions dominated by the current one
             if self.opts.enumeration == EnumOptions::NoEnum {
                 // Block permanently since no enumeration at Pareto point
@@ -571,6 +572,12 @@ where
                 block_switch = Some(block_lit);
                 assumps.push(block_lit);
             }
+            // Force next solution to dominate the current one
+            assumps.drain(base_assumps.len()..);
+            #[cfg(not(feature = "coarse-convergence"))]
+            assumps.extend(self.enforce_dominating_cert(&costs, obj_encs)?);
+            #[cfg(feature = "coarse-convergence")]
+            assumps.extend(self.enforce_dominating_cert(&bound_costs, obj_encs)?);
 
             // Check if dominating solution exists
             let res = self.solve_assumps(&assumps)?;
@@ -600,6 +607,51 @@ where
         }
     }
 
+    /// Gets assumptions to enforce that the next solution dominates the given
+    /// cost point.
+    pub fn enforce_dominating_cert<'a, PBE, CE>(
+        &'a mut self,
+        costs: &'a [usize],
+        obj_encs: &'a mut [ObjEncoding<PBE, CE>],
+    ) -> anyhow::Result<impl Iterator<Item = Lit> + 'a>
+    where
+        PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
+        CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
+    {
+        debug_assert_eq!(costs.len(), self.stats.n_objs);
+        if let Some(pt_handle) = &self.pt_handle {
+            let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+            #[cfg(feature = "verbose-proofs")]
+            {
+                use itertools::Itertools;
+                let proof = unsafe { &mut *proof };
+                proof.comment(&format_args!(
+                    "building assumptions to dominate [{}]",
+                    costs.iter().format(", ")
+                ))?;
+            }
+            let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
+            for (idx, &cst) in costs.iter().enumerate() {
+                let enc = &mut obj_encs[idx];
+                enc.encode_ub_change_cert(
+                    cst..cst + 1,
+                    &mut collector,
+                    &mut self.var_manager,
+                    unsafe { &mut *proof },
+                )?;
+            }
+        } else {
+            for (idx, &cst) in costs.iter().enumerate() {
+                let enc = &mut obj_encs[idx];
+                enc.encode_ub_change(cst..cst + 1, &mut self.oracle, &mut self.var_manager)?;
+            }
+        }
+        Ok(costs.iter().enumerate().flat_map(|(idx, &cst)| {
+            let enc = &mut obj_encs[idx];
+            enc.enforce_ub(cst).unwrap().into_iter()
+        }))
+    }
+
     /// Gets a clause blocking solutions (weakly) dominated by the given cost point,
     /// given objective encodings.
     pub fn dominated_block_clause_cert<PBE, CE>(
@@ -626,15 +678,14 @@ where
             }
             // Encode and add to solver
             if let Some(pt_handle) = &self.pt_handle {
-                let mut proof = self.oracle.proof_tracer_mut(pt_handle).take_proof();
+                let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
                 let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
                 enc.encode_ub_change_cert(
                     cst - 1..cst,
                     &mut collector,
                     &mut self.var_manager,
-                    &mut proof,
+                    unsafe { &mut *proof },
                 )?;
-                self.oracle.proof_tracer_mut(pt_handle).replace_proof(proof);
             } else {
                 enc.encode_ub_change(cst - 1..cst, &mut self.oracle, &mut self.var_manager)?;
             }

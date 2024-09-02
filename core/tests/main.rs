@@ -20,7 +20,7 @@ macro_rules! test_instance {
             )
             .unwrap(),
         );
-        let mut solver = <$s>::from_instance_default_blocking(inst, $o, None).unwrap();
+        let mut solver = <$s>::from_instance_default_blocking(inst, $o).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver.pareto_front();
         assert_eq!(pf.len(), $t.len());
@@ -36,7 +36,7 @@ macro_rules! test_instance {
             )
             .unwrap(),
         );
-        let mut solver = <$s>::from_instance_default_blocking(inst, $o, None).unwrap();
+        let mut solver = <$s>::from_instance_default_blocking(inst, $o).unwrap();
         let cont = solver.core_boost($cbo).unwrap();
         if cont {
             solver.solve(scuttle_core::Limits::none()).unwrap();

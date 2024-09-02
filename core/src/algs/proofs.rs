@@ -30,7 +30,7 @@ use super::default_blocking_clause;
 
 /// Trait for initializing algorithms
 pub trait InitCert: super::Init {
-    type ProofWriter;
+    type ProofWriter: io::Write;
 
     /// Initialization of the algorithm providing all optional input
     fn new_cert<Cls, Objs, Obj>(
@@ -187,7 +187,7 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
 
     #[cfg(feature = "verbose-proofs")]
     {
-        proof.comment("Introducing P-minimal cut based on the following witness:")?;
+        proof.comment(&"Introducing P-minimal cut based on the following witness:")?;
         proof.comment(&format_args!("{witness}"))?;
     }
 
@@ -219,9 +219,11 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
                 .collect(),
             bound: 1,
         },
-        witness
-            .iter()
-            .map(|l| AnyVar::Solver(l.var()).substitute_fixed(l.is_pos())),
+        [is_this.substitute_fixed(true)].into_iter().chain(
+            witness
+                .iter()
+                .map(|l| AnyVar::Solver(l.var()).substitute_fixed(l.is_pos())),
+        ),
         None,
     )?;
 
@@ -340,6 +342,7 @@ where
             ..Default::default()
         };
         let mut oracle = OInit::init();
+        let pt_handle = oracle.connect_proof_tracer(CadicalTracer::new(proof), true);
         oracle.reserve(var_manager.max_var().unwrap())?;
         let orig_cnf = if opts.store_cnf {
             Some(clauses.clone())
@@ -349,7 +352,6 @@ where
         stats.n_orig_clauses = clauses.len();
 
         // Add clauses to solver
-        let pt_handle = oracle.connect_proof_tracer(CadicalTracer::new(proof), true);
         let mut collector = CadicalCertCollector::new(&mut oracle, &pt_handle);
         collector.extend_cert_clauses(
             clauses
@@ -513,18 +515,18 @@ mod tests {
         let formatted = format!("{order}");
         let expected = r#"def_order pareto
   vars
-    left u_x3 u_x5 u_x43 u_x4 u_x1 u_x2
-    right v_x3 v_x5 v_x43 v_x4 v_x1 v_x2
+    left u_x1 u_x2 u_x4 u_x43 u_x5 u_x3
+    right v_x1 v_x2 v_x4 v_x43 v_x5 v_x3
     aux
   end
   def
-    -2 u_x1 +2 v_x1 -2 ~u_x2 +2 ~v_x2 -2 u_x3 +2 v_x3 -2 u_x4 +2 v_x4 >= 0 ;
-    -4 u_x5 +4 v_x5 -2 u_x3 +2 v_x3 -42 u_x43 +42 v_x43 >= 0 ;
+    -2 u_x1 2 v_x1 -2 ~u_x2 2 ~v_x2 -2 u_x3 2 v_x3 -2 u_x4 2 v_x4 >= 0 ;
+    -4 u_x5 4 v_x5 -2 u_x3 2 v_x3 -42 u_x43 42 v_x43 >= 0 ;
      >= 0 ;
   end
   transitivity
     vars
-      fresh_right w_x3 w_x5 w_x43 w_x4 w_x1 w_x2
+      fresh_right w_x1 w_x2 w_x4 w_x43 w_x5 w_x3
     end
     proof
       proofgoal #1
@@ -538,8 +540,7 @@ mod tests {
       qed -1
     qed
   end
-end
-"#;
+end"#;
         debug_assert_eq!(&formatted, expected);
     }
 
@@ -566,13 +567,15 @@ end
         proof.load_order(order.name(), order.used_vars()).unwrap();
 
         let proof_file = proof
-            .conclude(pidgeons::OutputGuarantee::None, &pidgeons::Conclusion::None)
+            .conclude(
+                pidgeons::OutputGuarantee::None,
+                &pidgeons::Conclusion::<&str>::None,
+            )
             .unwrap();
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         verify_proof(
             format!("{manifest}/../rustsat/data/empty.opb"),
             proof_file.path(),
         );
-        panic!()
     }
 }

@@ -1,5 +1,7 @@
 //! # Core-Guided Search Functionality
 
+use std::io;
+
 use rustsat::{
     encodings::{
         nodedb::{NodeById, NodeCon, NodeId, NodeLike},
@@ -216,6 +218,7 @@ struct CoreData {
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     O: SolveIncremental + SolveStats,
+    ProofW: io::Write,
 {
     /// OLL core-guided search over an objective. The implementation includes the following
     /// refinements:
