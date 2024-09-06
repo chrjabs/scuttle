@@ -54,17 +54,6 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
 
     let parsed = prepro::parse(cli.inst_path.clone(), cli.file_format, cli.opb_options)?;
 
-    // FIXME: set correct number of original constraints
-    let proof = if let Some(path) = &cli.proof_path {
-        Some(pidgeons::Proof::new(
-            io::BufWriter::new(fs::File::create(path)?),
-            0,
-            false,
-        )?)
-    } else {
-        None
-    };
-
     // MaxPre Preprocessing
     let (prepro, inst) = if cli.preprocessing {
         let (prepro, inst) = prepro::max_pre(parsed, &cli.maxpre_techniques, cli.maxpre_reindexing);
@@ -79,6 +68,16 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
         (inst, Some(reind))
     } else {
         (inst, None)
+    };
+
+    let proof = if let Some(path) = &cli.proof_path {
+        Some(pidgeons::Proof::new(
+            io::BufWriter::new(fs::File::create(path)?),
+            inst.n_clauses(),
+            false,
+        )?)
+    } else {
+        None
     };
 
     // FIXME: this is terrible style, figure out how to make this neat

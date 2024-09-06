@@ -12,8 +12,8 @@ use std::sync::Mutex;
 
 use cadical_veripb_tracer::{CadicalCertCollector, CadicalTracer};
 use pidgeons::{
-    AbsConstraintId, Axiom, ConstraintId, ConstraintLike, OperationSequence, Order, OrderVar,
-    Proof, ProofOnlyVar, VarLike,
+    AbsConstraintId, Axiom, ConstraintId, ConstraintLike, Derivation, OperationSequence, Order,
+    OrderVar, Proof, ProofGoal, ProofGoalId, ProofOnlyVar, VarLike,
 };
 use rustsat::{
     instances::{Cnf, ManageVars},
@@ -22,7 +22,7 @@ use rustsat::{
 };
 
 use crate::{
-    types::{Instance, Objective, VarManager},
+    types::{Instance, ObjEncoding, Objective, VarManager},
     KernelOptions, Limits, Stats,
 };
 
@@ -110,7 +110,7 @@ fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<V
         let constr = LbConstraint {
             lits: obj
                 .iter()
-                .map(|(l, w)| {
+                .flat_map(|(l, w)| {
                     let w = isize::try_from(w).expect("can only handle weights up to `isize::MAX`");
                     let (u, v) = order.use_var(l.var());
                     let (u, v) = if l.is_pos() {
@@ -120,7 +120,6 @@ fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<V
                     };
                     [(-w * mult, u), (w * mult, v)]
                 })
-                .flatten()
                 .collect(),
             bound: 0,
         };
@@ -129,67 +128,58 @@ fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<V
         // - O_idx(v) <= O_idx(w)
         // - O_idx(u) > O_idx(w)
         // This will always lead to a contradiction, proving transitivity
-        let trans_proof = vec![
+        let trans_proof = vec![Derivation::from(
             OperationSequence::<OrderVar<Var>>::from(ConstraintId::abs(idx + 1))
                 + ConstraintId::abs(objs.len() + idx + 1)
                 + ConstraintId::last(1),
-        ];
+        )];
         order.add_definition_constraint(constr, trans_proof, None)
     }
     order
 }
 
 pub fn certify_pmin_cut<ProofW: io::Write>(
-    block_clause: &Clause,
+    obj_encs: &[ObjEncoding<
+        rustsat::encodings::pb::DbGte,
+        rustsat::encodings::card::DbTotalizer,
+    >],
+    objs: &[Objective],
+    costs: &[usize],
     witness: &Assignment,
     proof: &mut Proof<ProofW>,
 ) -> io::Result<AbsConstraintId> {
-    // FIXME: remove if acctualy not needed
-    // // introduce `not_better_i` for each objective
-    // let not_betters = Vec::with_capacity(objs.len());
-    // for (_idx, (obj, cost)) in objs.into_iter().zip(costs).enumerate() {
-    //     let not_better = proof.new_proof_var();
-    //     #[cfg(feature = "verbose-proofs")]
-    //     proof.comment(&format_args!(
-    //         "{not_better} = the current solution is not better than {cost} on objective {idx}"
-    //     ))?;
-    //     // O_i >= c_i -> not_better
-    //     let cost = isize::try_from(cost).expect("can only handle weights up to `isize::MAX`");
-    //     let mut weight_sum = 0;
-    //     let sum: Vec<_> = [(cost, not_worse.into())]
-    //         .into_iter()
-    //         .chain(obj.iter().map(|(l, w)| {
-    //             let w = isize::try_from(*w).expect("can only handle weights up to `isize::MAX`");
-    //             weight_sum += w;
-    //             ((!*l).into(), w)
-    //         }))
-    //         .collect();
-    //     proof.redundant(
-    //         &LbConstraint {
-    //             lits: sum,
-    //             bound: weight_sum - cost + 1,
-    //         },
-    //         [not_better.substitute_fixed(false)],
-    //         None,
-    //     )?;
-    //     // TODO: do we need the other reification direction here?
-    //     not_betters.push(not_better);
-    // }
-    // let dominated = proof.new_proof_var();
-    // #[cfg(feature = "verbose-proofs")]
-    // proof.comment(&format_args!(
-    //     "{dominated} = the current solution is (weakly) dominated by [{}]",
-    //     costs.into_iter().format(", ")
-    // ))?;
-    // proof.redundant(&LbConstraint{lits: [(1, dominated.into())].chain()}, subs, proof)
-
-    // TODO: figure out if this works with cuts shortened due to bounds
-
     #[cfg(feature = "verbose-proofs")]
     {
         proof.comment(&"Introducing P-minimal cut based on the following witness:")?;
         proof.comment(&format_args!("{witness}"))?;
     }
+
+    // buid the "ideal" cut. this is only valid with the strict proof semantics
+    let cut: Clause = obj_encs
+        .iter()
+        .zip(objs)
+        .zip(costs)
+        .flat_map(|((enc, obj), cst)| {
+            if *cst <= enc.offset() {
+                return None;
+            }
+            if obj.n_lits() == 1 {
+                return Some(!obj.iter().next().unwrap().0);
+            }
+            let (olit, _) = enc.output_proof_details(*cst);
+            Some(!olit)
+        })
+        .collect();
+
+    // Extend witness to encoding variables under strict semantics
+    let fixed_witness: Assignment = witness
+        .iter()
+        .chain(
+            obj_encs
+                .iter()
+                .flat_map(|enc| enc.extend_assignment(witness)),
+        )
+        .collect();
 
     // Introduce indicator variable for being at accactly the solution in question
     let is_this = AnyVar::Proof(proof.new_proof_var());
@@ -197,48 +187,102 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
     proof.comment(&format_args!(
         "{is_this} = a solution is _exactly_ the witnessing one"
     ))?;
-    let bound = isize::try_from(witness.len()).unwrap();
+    let bound = isize::try_from(fixed_witness.len()).unwrap();
+    // NOTE: need to use the fixed witness here to not have to include the totalizer in the RUP
+    // hints for the cut constraint
     let is_this_def = proof.redundant(
         &LbConstraint {
             lits: [(bound, is_this.neg_axiom())]
                 .into_iter()
-                .chain(witness.iter().map(|l| (1, axiom(l))))
+                .chain(fixed_witness.iter().map(|l| (1, axiom(l))))
                 .collect(),
             bound,
         },
         [is_this.substitute_fixed(false)],
-        None,
+        [],
     )?;
 
     // Map all weakly dominated solutions to the witness itself
-    let map_dom = proof.redundant(
+    let map_dom =
+        proof.redundant(
+            &LbConstraint {
+                lits: [(1, is_this.pos_axiom())]
+                    .into_iter()
+                    .chain(cut.iter().map(|l| (1, axiom(*l))))
+                    .collect(),
+                bound: 1,
+            },
+            [is_this.substitute_fixed(true)].into_iter().chain(
+                fixed_witness
+                    .iter()
+                    .map(|l| AnyVar::Solver(l.var()).substitute_fixed(l.is_pos())),
+            ),
+            obj_encs.iter().zip(objs).zip(costs).enumerate().filter_map(
+                |(idx, ((enc, obj), cst))| {
+                    if *cst <= enc.offset() || obj.n_lits() <= 1 {
+                        return None;
+                    }
+                    let (olit, sems) = enc.output_proof_details(*cst);
+                    Some(ProofGoal::new(
+                        ProofGoalId::specific(idx + 2),
+                        [
+                            Derivation::Rup(
+                                LbConstraint {
+                                    lits: vec![(1, axiom(olit))],
+                                    bound: 1,
+                                },
+                                vec![(is_this_def + 1).into()],
+                            ),
+                            Derivation::from(
+                                ((OperationSequence::from(ConstraintId::last(1)) * *cst)
+                                    + sems.only_if_def.unwrap())
+                                    * obj.unit_weight()
+                                    + ConstraintId::last(2),
+                            ),
+                        ],
+                    ))
+                },
+            ),
+        )?;
+
+    // Exclude witness
+    let exclude = proof.exclude_solution(witness.iter().map(Axiom::from))?;
+    #[cfg(feature = "verbose-proofs")]
+    proof.equals(
         &LbConstraint {
-            lits: [(1, is_this.pos_axiom())]
-                .into_iter()
-                .chain(block_clause.iter().map(|l| (1, axiom(*l))))
+            lits: fixed_witness
+                .iter()
+                .map(|l| (1, axiom(!l)))
+                .chain([(1, is_this.neg_axiom())])
                 .collect(),
             bound: 1,
         },
-        [is_this.substitute_fixed(true)].into_iter().chain(
-            witness
-                .iter()
-                .map(|l| AnyVar::Solver(l.var()).substitute_fixed(l.is_pos())),
-        ),
-        None,
+        Some(exclude.into()),
     )?;
 
-    // Exclude witness
-    let exclude = proof.exclude_solution(witness.iter().map(|l| Axiom::from(l)))?;
-
     // Add the actual P-minimal cut as a clause
-    // TODO: provide hints
-    let cut_id = proof.reverse_unit_prop(block_clause, Option::<[ConstraintId; 0]>::None)?;
-
-    // Remove auxiliary constraints
-    proof.delete_ids(
+    let cut_id = proof.reverse_unit_prop(
+        &cut,
         [is_this_def, map_dom, exclude]
             .into_iter()
-            .map(|id| ConstraintId::from(id)),
+            .map(ConstraintId::from),
+    )?;
+    // Need to move to core to be able to delete the derivation constraints
+    proof.move_ids_to_core([ConstraintId::from(cut_id)])?;
+
+    // Remove auxiliary constraints
+    //proof.delete_ids::<AnyVar, LbConstraint<AnyVar>, _, _>(
+    proof.delete_ids(
+        [exclude, map_dom, is_this_def]
+            .into_iter()
+            .map(ConstraintId::from),
+        [ProofGoal::new(
+            ProofGoalId::specific(1),
+            [Derivation::Rup(
+                Clause::default(),
+                vec![ConstraintId::last(1), cut_id.into()],
+            )],
+        )],
     )?;
 
     Ok(cut_id)

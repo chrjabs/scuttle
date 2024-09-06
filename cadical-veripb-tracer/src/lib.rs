@@ -5,7 +5,7 @@ use std::io;
 use pidgeons::{AbsConstraintId, Proof};
 use rustsat::{
     encodings::{CollectCertClauses, CollectClauses},
-    types::{Clause, Lit},
+    types::{Clause, Lit, RsHashSet, Var},
 };
 use rustsat_cadical::{CaDiCaL, ClauseId, ProofTracerHandle, TraceProof};
 
@@ -17,6 +17,8 @@ pub struct CadicalTracer<ProofW: io::Write> {
     cmap: ConstraintMapper,
     /// The [`AbsConstraintId`] of the last found core
     core_id: Option<AbsConstraintId>,
+    /// The set of weakened clauses
+    weakened_clauses: RsHashSet<ClauseId>,
     assumptions: Vec<Lit>,
 }
 
@@ -26,6 +28,7 @@ impl<ProofW: io::Write> CadicalTracer<ProofW> {
             proof: Some(proof),
             cmap: ConstraintMapper::default(),
             core_id: None,
+            weakened_clauses: RsHashSet::default(),
             assumptions: vec![],
         }
     }
@@ -57,6 +60,7 @@ where
     fn add_derived(
         &mut self,
         id: ClauseId,
+        redundant: bool,
         clause: &Clause,
         antecedents: &[ClauseId],
     ) -> AbsConstraintId {
@@ -72,6 +76,11 @@ where
         proof
             .equals(clause, Some(pidgeons::ConstraintId::last(1)))
             .expect("failed to write proof");
+        if !redundant {
+            proof
+                .move_ids_to_core([pidgeons::ConstraintId::from(veripb_id)])
+                .expect("failed to write proof");
+        }
         veripb_id
     }
 }
@@ -85,14 +94,23 @@ where
         id: ClauseId,
         _redundant: bool,
         _clause: &Clause,
-        _restored: bool,
+        restored: bool,
     ) {
+        if restored {
+            return;
+        }
         debug_assert_eq!(usize::try_from(id.0).unwrap(), self.cmap.map.len());
+        let proof = self.proof.as_mut().expect("expected proof");
         #[cfg(feature = "verbose")]
         {
-            let proof = self.proof.as_mut().expect("expected proof");
             proof
                 .equals(_clause, Some(self.cmap.map(id).into()))
+                .expect("failed to write proof");
+        }
+        let veripb_id = self.cmap.map(id);
+        if veripb_id >= proof.first_proof_id() {
+            proof
+                .move_ids_to_core([veripb_id.into()])
                 .expect("failed to write proof");
         }
     }
@@ -100,19 +118,35 @@ where
     fn add_derived_clause(
         &mut self,
         id: ClauseId,
-        _redundant: bool,
+        redundant: bool,
         clause: &Clause,
         antecedents: &[ClauseId],
     ) {
-        self.add_derived(id, clause, antecedents);
+        self.add_derived(id, redundant, clause, antecedents);
     }
 
-    fn delete_clause(&mut self, id: ClauseId, _redundant: bool, _clause: &Clause) {
+    fn delete_clause(&mut self, id: ClauseId, redundant: bool, _clause: &Clause) {
+        let marked = self.weakened_clauses.contains(&id);
+        if !redundant && marked {
+            return;
+        }
         let id = self.cmap.map(id);
         let proof = self.proof.as_mut().expect("expected proof");
         proof
-            .delete_ids([id.into()])
+            .delete_ids::<Var, Clause, _, _>([id.into()], None)
             .expect("failed to write proof")
+    }
+
+    fn strengthen(&mut self, id: ClauseId) {
+        self.proof
+            .as_mut()
+            .expect("expected proof")
+            .move_ids_to_core([self.cmap.map(id).into()])
+            .expect("failed to write proof");
+    }
+
+    fn weaken_minus(&mut self, id: ClauseId, _clause: &Clause) {
+        self.weakened_clauses.insert(id);
     }
 
     fn solve_query(&mut self) {
@@ -144,14 +178,14 @@ where
     }
 
     fn add_assumption_clause(&mut self, id: ClauseId, clause: &Clause, antecedents: &[ClauseId]) {
-        #[cfg(feature = "verbose")]
-        {
-            let proof = self.proof.as_mut().expect("expected proof");
-            proof
-                .comment(&"the next constraint is a core found by CaDiCaL")
-                .expect("failed to write proof");
-        }
-        let id = self.add_derived(id, clause, antecedents);
+        //#[cfg(feature = "verbose")]
+        //{
+        //    let proof = self.proof.as_mut().expect("expected proof");
+        //    proof
+        //        .comment(&"the next constraint is a core found by CaDiCaL")
+        //        .expect("failed to write proof");
+        //}
+        let id = self.add_derived(id, true, clause, antecedents);
         self.core_id = Some(id);
     }
 }
@@ -168,7 +202,7 @@ where
     cfg_if::cfg_if! {
         if #[cfg(feature = "rup-hints")] {
             use pidgeons::ConstraintId;
-            proof.reverse_unit_prop(_clause, Some(antecedents.into_iter().map(ConstraintId::from)))
+            proof.reverse_unit_prop(_clause, antecedents.into_iter().map(ConstraintId::from))
                 .expect("failed to write proof")
         } else {
             use pidgeons::{OperationLike, OperationSequence};
@@ -239,10 +273,8 @@ where
         cl: Clause,
         id: AbsConstraintId,
     ) -> Result<(), rustsat::OutOfMemory> {
-        self.cadical
-            .proof_tracer_mut(self.pt_handle)
-            .cmap
-            .add_clause(id);
+        let tracer = self.cadical.proof_tracer_mut(self.pt_handle);
+        tracer.cmap.add_clause(id);
         self.cadical.add_clause(cl)
     }
 }

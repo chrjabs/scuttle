@@ -58,6 +58,7 @@ thiserror.workspace = true
 [features]
 coarse-convergence = ["scuttle-core/coarse-convergence"]
 check-non-dominance = ["scuttle-core/check-non-dominance"]
+sol-tightening = ["scuttle-core/sol-tightening"]
 
 [profile.release]
 lto = true

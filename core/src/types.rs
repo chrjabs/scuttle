@@ -8,7 +8,7 @@ use std::{
 };
 
 use rustsat::{
-    encodings::{card, pb, CollectCertClauses, CollectClauses},
+    encodings::{card, pb, totdb, CollectCertClauses, CollectClauses},
     instances::{Cnf, ManageVars, ReindexVars},
     types::{Assignment, Lit, LitIter, RsHashMap, Var, WLitIter},
 };
@@ -289,6 +289,15 @@ impl Objective {
             Objective::Constant { .. } => ObjIter::Constant,
         }
     }
+
+    /// Gets the number of literals in the objective
+    pub fn n_lits(&self) -> usize {
+        match self {
+            Objective::Weighted { lits, .. } => lits.len(),
+            Objective::Unweighted { lits, .. } => lits.len(),
+            Objective::Constant { .. } => 0,
+        }
+    }
 }
 
 pub(crate) enum ObjIter<'a> {
@@ -508,6 +517,29 @@ where
             ObjEncoding::Constant => (),
         }
         Ok(())
+    }
+}
+
+impl ObjEncoding<pb::DbGte, card::DbTotalizer> {
+    pub fn output_proof_details(&self, value: usize) -> (Lit, totdb::cert::SemDefs) {
+        match self {
+            ObjEncoding::Weighted(enc, _) => enc.output_proof_details(value).unwrap(),
+            ObjEncoding::Unweighted(enc, _) => enc.output_proof_details(value).unwrap(),
+            ObjEncoding::Constant => {
+                panic!("cannot get output proof details for constant objective")
+            }
+        }
+    }
+
+    pub fn extend_assignment<'slf>(
+        &'slf self,
+        assign: &'slf Assignment,
+    ) -> std::iter::Flatten<std::option::IntoIter<totdb::AssignIter<'slf>>> {
+        match self {
+            ObjEncoding::Weighted(enc, _) => enc.strictly_extend_assignment(assign),
+            ObjEncoding::Unweighted(enc, _) => enc.strictly_extend_assignment(assign),
+            ObjEncoding::Constant => None.into_iter().flatten(),
+        }
     }
 }
 

@@ -60,6 +60,22 @@ macro_rules! medium {
     };
 }
 
+macro_rules! four {
+    ($s:ty, $o:expr) => {
+        test_instance!(
+            $s,
+            $o,
+            "./data/four.mcnf",
+            vec![
+                (vec![0, 0, 0, 1], 1),
+                (vec![0, 0, 1, 0], 1),
+                (vec![0, 1, 0, 0], 1),
+                (vec![1, 0, 0, 0], 1),
+            ]
+        )
+    };
+}
+
 fn new_proof(
     num_constraints: usize,
     optimization: bool,
@@ -91,6 +107,7 @@ fn print_file<P: AsRef<std::path::Path>>(path: P) {
 fn verify_proof<P1: AsRef<std::path::Path>, P2: AsRef<std::path::Path>>(instance: P1, proof: P2) {
     println!("start checking proof");
     let out = std::process::Command::new("veripb")
+        .arg("--forceCheckDeletion")
         .arg(instance.as_ref())
         .arg(proof.as_ref())
         .output()
@@ -113,6 +130,10 @@ mod pmin {
     #[test]
     fn pmin_medium_cert() {
         medium!(S, scuttle_core::KernelOptions::default());
-        panic!()
+    }
+
+    #[test]
+    fn pmin_four_cert() {
+        four!(S, scuttle_core::KernelOptions::default());
     }
 }

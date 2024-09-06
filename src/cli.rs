@@ -253,6 +253,7 @@ struct LogArgs {
     #[arg(long)]
     log_oracle_calls: bool,
     /// Log heuristic objective improvement
+    #[cfg(feature = "sol-tightening")]
     #[arg(long)]
     log_heuristic_obj_improvement: bool,
     /// Log extracted cores
@@ -282,6 +283,7 @@ impl From<&LogArgs> for LoggerConfig {
             log_solutions: value.log_solutions,
             log_non_dom: value.log_non_dom || value.verbosity >= 1,
             log_oracle_calls: value.log_oracle_calls || value.verbosity >= 3,
+            #[cfg(feature = "sol-tightening")]
             log_heuristic_obj_improvement: value.log_heuristic_obj_improvement
                 || value.verbosity >= 3,
             log_fence: false,
@@ -963,6 +965,7 @@ struct LoggerConfig {
     log_solutions: bool,
     log_non_dom: bool,
     log_oracle_calls: bool,
+    #[cfg(feature = "sol-tightening")]
     log_heuristic_obj_improvement: bool,
     log_fence: bool,
     log_routines: usize,
@@ -1047,6 +1050,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
+    #[cfg(feature = "sol-tightening")]
     fn log_heuristic_obj_improvement(
         &mut self,
         obj_idx: usize,

@@ -18,7 +18,9 @@
 use std::{fs, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;
+use pidgeons::{AbsConstraintId, ConstraintId};
 use rustsat::{
+    clause,
     encodings::{
         self,
         card::{self, DbTotalizer},
@@ -73,11 +75,9 @@ pub struct PMinimal<
     pareto_front: ParetoFront,
 }
 
-impl<'learn, 'term, PBE, CE, ProofW, OInit, BCG> super::Solve
-    for PMinimal<rustsat_cadical::CaDiCaL<'term, 'learn>, PBE, CE, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG> super::Solve
+    for PMinimal<rustsat_cadical::CaDiCaL<'term, 'learn>, DbGte, DbTotalizer, ProofW, OInit, BCG>
 where
-    PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental + encodings::EncodeStats,
-    CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental + encodings::EncodeStats,
     BCG: Fn(Assignment) -> Clause,
     ProofW: io::Write + 'static,
 {
@@ -240,11 +240,9 @@ where
     }
 }
 
-impl<'learn, 'term, PBE, CE, ProofW, OInit, BCG>
-    PMinimal<rustsat_cadical::CaDiCaL<'learn, 'term>, PBE, CE, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG>
+    PMinimal<rustsat_cadical::CaDiCaL<'learn, 'term>, DbGte, DbTotalizer, ProofW, OInit, BCG>
 where
-    PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
     BCG: Fn(Assignment) -> Clause,
     ProofW: io::Write + 'static,
 {
@@ -282,12 +280,45 @@ where
                 .kernel
                 .enforce_dominating(&costs, &mut self.obj_encs)?
                 .collect();
-            self.kernel
-                .yield_solutions(costs, &assumps, solution, &mut self.pareto_front)?;
+            self.kernel.yield_solutions(
+                costs.clone(),
+                &assumps,
+                solution.clone(),
+                &mut self.pareto_front,
+            )?;
 
             // Block last Pareto point, if temporarily blocked
-            if let Some(block_lit) = block_switch {
-                self.kernel.oracle.add_unit(block_lit)?;
+            if let Some((block_lit, ids)) = block_switch {
+                if let Some(pt_handle) = &self.kernel.pt_handle {
+                    use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
+
+                    let (reified_cut, reified_assump_ids) = ids.unwrap();
+                    // TODO: avoid clone
+                    let witness = solution
+                        .clone()
+                        .truncate(self.kernel.var_manager.max_enc_var());
+                    let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    let id = proofs::certify_pmin_cut(
+                        &self.obj_encs,
+                        &self.kernel.objs,
+                        &costs,
+                        &witness,
+                        proof,
+                    )?;
+                    let hints = [ConstraintId::last(2), ConstraintId::last(1), id.into()]
+                        .into_iter()
+                        .chain(reified_assump_ids.iter().map(|id| ConstraintId::from(*id)));
+                    proof.redundant(
+                        &clause![block_lit],
+                        [],
+                        [ProofGoal::new(
+                            ProofGoalId::from(ConstraintId::from(reified_cut)),
+                            [Derivation::Rup(clause![], hints.collect())],
+                        )],
+                    )?;
+                } else {
+                    self.kernel.oracle.add_unit(block_lit)?;
+                }
             }
         }
     }
@@ -512,22 +543,22 @@ where
     ProofW: io::Write + 'static,
 {
     /// Executes P-minimization from a cost and solution starting point
-    pub fn p_minimization_cert<PBE, CE>(
+    pub fn p_minimization_cert(
         &mut self,
         mut costs: Vec<usize>,
         mut solution: Assignment,
         base_assumps: &[Lit],
-        obj_encs: &mut [ObjEncoding<PBE, CE>],
-    ) -> MaybeTerminatedError<(Vec<usize>, Assignment, Option<Lit>)>
-    where
-        PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
-    {
+        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
+    ) -> MaybeTerminatedError<(
+        Vec<usize>,
+        Assignment,
+        Option<(Lit, Option<(AbsConstraintId, Vec<AbsConstraintId>)>)>,
+    )> {
         use rustsat::solvers::Solve;
 
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.log_routine_start("p minimization")?;
-        let mut block_switch = None;
+        let mut block_switch: Option<(Lit, Option<(AbsConstraintId, Vec<AbsConstraintId>)>)> = None;
         let mut assumps = Vec::from(base_assumps);
         #[cfg(feature = "coarse-convergence")]
         let mut coarse = true;
@@ -546,31 +577,68 @@ where
             // Block solutions dominated by the current one
             if self.opts.enumeration == EnumOptions::NoEnum {
                 // Block permanently since no enumeration at Pareto point
-                let block_clause = self.dominated_block_clause_cert(&costs, obj_encs)?;
+                let (block_clause, reification_ids) =
+                    self.dominated_block_clause_cert(&costs, obj_encs)?;
                 if let Some(pt_handle) = &self.pt_handle {
                     use rustsat::encodings::CollectCertClauses;
 
+                    // TODO: avoid clone
+                    let witness = solution.clone().truncate(self.var_manager.max_enc_var());
+
                     let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
-                    let id = proofs::certify_pmin_cut(&block_clause, &solution, proof)?;
+                    // this adds the "ideal cut"
+                    let cut_id =
+                        proofs::certify_pmin_cut(obj_encs, &self.objs, &costs, &witness, proof)?;
+                    // since there might be reifications of multiple assumptions per one encoding
+                    // involved, the actual clause might differ and is added as rup here
+                    let clause_id = proof.reverse_unit_prop(
+                        &block_clause,
+                        reification_ids
+                            .into_iter()
+                            .chain([cut_id])
+                            .map(ConstraintId::from),
+                    )?;
                     let mut collector = cadical_veripb_tracer::CadicalCertCollector::new(
                         &mut self.oracle,
                         pt_handle,
                     );
-                    collector.add_cert_clause(block_clause, id)?;
+                    collector.add_cert_clause(block_clause, clause_id)?;
                 } else {
                     self.oracle.add_clause(block_clause)?;
                 }
-                // TODO: convince veripb
             } else {
                 // Permanently block last cadidate
-                if let Some(block_lit) = block_switch {
-                    self.oracle.add_unit(block_lit)?;
-                    // TODO: convince veripb
+                if let Some((block_lit, ids)) = block_switch {
+                    if let Some(pt_handle) = &self.pt_handle {
+                        use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
+
+                        let (reified_cut, reified_assump_ids) = ids.unwrap();
+                        // TODO: avoid clone
+                        let witness = solution.clone().truncate(self.var_manager.max_enc_var());
+                        let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                        let id = proofs::certify_pmin_cut(
+                            obj_encs, &self.objs, &costs, &witness, proof,
+                        )?;
+                        let hints = [ConstraintId::last(2), ConstraintId::last(1), id.into()]
+                            .into_iter()
+                            .chain(reified_assump_ids.iter().map(|id| ConstraintId::from(*id)));
+                        proof.redundant(
+                            &clause![block_lit],
+                            [],
+                            [ProofGoal::new(
+                                ProofGoalId::from(ConstraintId::from(reified_cut)),
+                                [Derivation::Rup(clause![], hints.collect())],
+                            )],
+                        )?;
+                    } else {
+                        self.oracle.add_unit(block_lit)?;
+                    }
                 }
                 // Temporarily block to allow for enumeration at Pareto point
-                let block_lit = self.tmp_block_dominated_cert(&costs, obj_encs)?;
-                block_switch = Some(block_lit);
-                assumps.push(block_lit);
+                let block_info = self.tmp_block_dominated_cert(&costs, obj_encs)?;
+                let blit = block_info.0;
+                block_switch = Some(block_info);
+                assumps.push(blit);
             }
             // Force next solution to dominate the current one
             assumps.drain(base_assumps.len()..);
@@ -600,7 +668,6 @@ where
                     .solution_tightening
                     .wanted(Phase::Minimization),
             )?;
-            // TODO: log solution
             self.log_candidate(&costs, Phase::Minimization)?;
             self.check_termination()?;
             self.phase_solution(solution.clone())?;
@@ -609,15 +676,11 @@ where
 
     /// Gets assumptions to enforce that the next solution dominates the given
     /// cost point.
-    pub fn enforce_dominating_cert<'a, PBE, CE>(
+    pub fn enforce_dominating_cert<'a>(
         &'a mut self,
         costs: &'a [usize],
-        obj_encs: &'a mut [ObjEncoding<PBE, CE>],
-    ) -> anyhow::Result<impl Iterator<Item = Lit> + 'a>
-    where
-        PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
-    {
+        obj_encs: &'a mut [ObjEncoding<DbGte, DbTotalizer>],
+    ) -> anyhow::Result<impl Iterator<Item = Lit> + 'a> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         if let Some(pt_handle) = &self.pt_handle {
             let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
@@ -654,18 +717,15 @@ where
 
     /// Gets a clause blocking solutions (weakly) dominated by the given cost point,
     /// given objective encodings.
-    pub fn dominated_block_clause_cert<PBE, CE>(
+    pub fn dominated_block_clause_cert(
         &mut self,
         costs: &[usize],
-        obj_encs: &mut [ObjEncoding<PBE, CE>],
-    ) -> anyhow::Result<Clause>
-    where
-        PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
-    {
+        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
+    ) -> anyhow::Result<(Clause, Vec<AbsConstraintId>)> {
         use rustsat::solvers::Solve;
 
         debug_assert_eq!(costs.len(), obj_encs.len());
+        let mut reification_ids = Vec::new();
         let mut clause = Clause::default();
         for (idx, &cst) in costs.iter().enumerate() {
             // Don't block
@@ -673,7 +733,7 @@ where
                 continue;
             }
             let enc = &mut obj_encs[idx];
-            if let ObjEncoding::Constant = enc {
+            if matches!(enc, ObjEncoding::Constant) {
                 continue;
             }
             // Encode and add to solver
@@ -693,40 +753,60 @@ where
             if assumps.len() == 1 {
                 clause.add(assumps[0]);
             } else {
-                let mut and_impl = Cnf::new();
                 let and_lit = self.var_manager.new_var().pos_lit();
-                and_impl.add_lit_impl_cube(and_lit, &assumps);
-                self.oracle.add_cnf(and_impl).unwrap();
+                if let Some(pt_handle) = &self.pt_handle {
+                    use encodings::CollectCertClauses;
+                    use pidgeons::VarLike;
+                    #[cfg(feature = "verbose-proofs")]
+                    self.oracle
+                        .proof_tracer_mut(pt_handle)
+                        .proof_mut()
+                        .comment(
+                            &"reification of multiple assumptions for one objective encoding",
+                        )?;
+                    let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
+                    collector.extend_cert_clauses(assumps.iter().map(|&a| {
+                        let cl = clause![!and_lit, a];
+                        let id = unsafe { &mut *proof }
+                            .redundant(&cl, [and_lit.var().substitute_fixed(false)], None)
+                            .expect("failed to write proof");
+                        reification_ids.push(id);
+                        (cl, id)
+                    }))?;
+                } else {
+                    let mut and_impl = Cnf::new();
+                    and_impl.add_lit_impl_cube(and_lit, &assumps);
+                    self.oracle.add_cnf(and_impl).unwrap();
+                }
                 clause.add(and_lit)
             }
         }
-        Ok(clause)
+        Ok((clause, reification_ids))
     }
 
     /// Temporarily blocks solutions dominated by the given cost point. Returns
     /// and assumption that needs to be enforced in order for the blocking to be
     /// enforced.
-    pub fn tmp_block_dominated_cert<PBE, CE>(
+    pub fn tmp_block_dominated_cert(
         &mut self,
         costs: &[usize],
-        obj_encs: &mut [ObjEncoding<PBE, CE>],
-    ) -> anyhow::Result<Lit>
-    where
-        PBE: pb::BoundUpperIncremental + pb::cert::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental + card::cert::BoundUpperIncremental,
-    {
+        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
+    ) -> anyhow::Result<(Lit, Option<(AbsConstraintId, Vec<AbsConstraintId>)>)> {
         use pidgeons::VarLike;
         use rustsat::solvers::Solve;
 
         debug_assert_eq!(costs.len(), self.stats.n_objs);
-        let mut clause = self.dominated_block_clause_cert(costs, obj_encs)?;
+        let (mut clause, reification_ids) = self.dominated_block_clause_cert(costs, obj_encs)?;
         let block_lit = self.var_manager.new_var().pos_lit();
         clause.add(block_lit);
         self.oracle.add_clause_ref(&clause).unwrap();
         if let Some(pt_handle) = &self.pt_handle {
             let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
-            proof.redundant(&clause, [block_lit.var().substitute_fixed(true)], None)?;
+            let id = proof.redundant(&clause, [block_lit.var().substitute_fixed(true)], None)?;
+            Ok((!block_lit, Some((id, reification_ids))))
+        } else {
+            Ok((!block_lit, None))
         }
-        Ok(!block_lit)
     }
 }
