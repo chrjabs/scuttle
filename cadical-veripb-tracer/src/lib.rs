@@ -126,8 +126,11 @@ where
     }
 
     fn delete_clause(&mut self, id: ClauseId, redundant: bool, _clause: &Clause) {
-        let marked = self.weakened_clauses.contains(&id);
-        if !redundant && marked {
+        if !redundant {
+            // don't delete clauses that are not redundant
+            // NOTE: in cadicals proof tracer itself, this is `!redundant &&
+            // self.weakened_clauses.contains(&id)`, but that might delete clauses in the proof
+            // that scuttle thinks are still there
             return;
         }
         let id = self.cmap.map(id);

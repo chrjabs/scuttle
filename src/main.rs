@@ -3,7 +3,7 @@ use std::{fs, io, thread};
 use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::{card, pb},
-    instances::ReindexVars,
+    instances::{fio, ReindexVars},
     solvers::{DefaultInitializer, Initialize},
     types::Assignment,
 };
@@ -70,9 +70,18 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
         (inst, None)
     };
 
-    let proof = if let Some(path) = &cli.proof_path {
+    let proof = if let Some((proof_path, veripb_input_path)) = &cli.proof_paths {
+        // Write constraints out for VeriPB
+        // FIXME: When receiving an OPB input file, we should certify the translation to CNF and
+        // simply strip the objectives for the VeriPB input
+        let mut writer = io::BufWriter::new(fs::File::create(veripb_input_path)?);
+        let iter = inst
+            .iter_clauses()
+            .map(|cl| fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
+        fio::opb::write_opb_lines(&mut writer, iter, fio::opb::Options::default())?;
+        // Initialize proof
         Some(pidgeons::Proof::new(
-            io::BufWriter::new(fs::File::create(path)?),
+            io::BufWriter::new(fs::File::create(proof_path)?),
             inst.n_clauses(),
             false,
         )?)

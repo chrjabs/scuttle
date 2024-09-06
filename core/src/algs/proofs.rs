@@ -18,7 +18,7 @@ use pidgeons::{
 use rustsat::{
     instances::{Cnf, ManageVars},
     solvers::Initialize,
-    types::{Assignment, Clause, Lit, Var, WLitIter},
+    types::{Assignment, Clause, Lit, TernaryVal, Var, WLitIter},
 };
 
 use crate::{
@@ -146,6 +146,7 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
     objs: &[Objective],
     costs: &[usize],
     witness: &Assignment,
+    identity_map: &[(Lit, Lit)],
     proof: &mut Proof<ProofW>,
 ) -> io::Result<AbsConstraintId> {
     #[cfg(feature = "verbose-proofs")]
@@ -172,14 +173,27 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
         .collect();
 
     // Extend witness to encoding variables under strict semantics
-    let fixed_witness: Assignment = witness
-        .iter()
-        .chain(
-            obj_encs
-                .iter()
-                .flat_map(|enc| enc.extend_assignment(witness)),
-        )
-        .collect();
+    // TODO: avoid clone
+    let fixed_witness = {
+        let mut fixed_witness: Assignment = witness
+            .iter()
+            .chain(
+                obj_encs
+                    .iter()
+                    .flat_map(|enc| enc.extend_assignment(witness)),
+            )
+            .collect();
+        // NOTE: Need to do this in two steps since the identities depend on the encoding
+        // assignments
+        for &(this, that) in identity_map.iter() {
+            match fixed_witness.lit_value(this) {
+                TernaryVal::True => fixed_witness.assign_lit(that),
+                TernaryVal::False => fixed_witness.assign_lit(!that),
+                TernaryVal::DontCare => panic!("need assignment for left of identity"),
+            }
+        }
+        fixed_witness
+    };
 
     // Introduce indicator variable for being at accactly the solution in question
     let is_this = AnyVar::Proof(proof.new_proof_var());
@@ -188,8 +202,8 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
         "{is_this} = a solution is _exactly_ the witnessing one"
     ))?;
     let bound = isize::try_from(fixed_witness.len()).unwrap();
-    // NOTE: need to use the fixed witness here to not have to include the totalizer in the RUP
-    // hints for the cut constraint
+    // NOTE: need to use the fixed complete witness here to not have to include the totalizer in
+    // the RUP hints for the cut constraint
     let is_this_def = proof.redundant(
         &LbConstraint {
             lits: [(bound, is_this.neg_axiom())]
@@ -263,7 +277,7 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
     // Add the actual P-minimal cut as a clause
     let cut_id = proof.reverse_unit_prop(
         &cut,
-        [is_this_def, map_dom, exclude]
+        [map_dom, is_this_def, exclude]
             .into_iter()
             .map(ConstraintId::from),
     )?;
@@ -365,20 +379,6 @@ where
     {
         use rustsat::{encodings::CollectCertClauses, solvers::Solve};
 
-        // Proof logging: write out OPB file to use as VeriPB input
-        // FIXME: This is temporary for getting something off the ground quickly. Long term, also
-        // proof log encoding built before to ensure original files can be used
-        let mut writer = std::io::BufWriter::new(std::fs::File::create("veripb-input.opb")?);
-        let clauses: Cnf = clauses.into_iter().collect();
-        let iter = clauses
-            .iter()
-            .map(|cl| rustsat::instances::fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
-        rustsat::instances::fio::opb::write_opb_lines(
-            &mut writer,
-            iter,
-            rustsat::instances::fio::opb::Options::default(),
-        )?;
-
         let mut stats = Stats {
             n_objs: 0,
             n_real_objs: 0,
@@ -388,6 +388,7 @@ where
         let mut oracle = OInit::init();
         let pt_handle = oracle.connect_proof_tracer(CadicalTracer::new(proof), true);
         oracle.reserve(var_manager.max_var().unwrap())?;
+        let clauses: Cnf = clauses.into_iter().collect();
         let orig_cnf = if opts.store_cnf {
             Some(clauses.clone())
         } else {
@@ -490,7 +491,10 @@ where
             term_flag: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "interrupt-oracle")]
             oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
-            pt_handle: Some(pt_handle),
+            proof_stuff: Some(super::ProofStuff {
+                pt_handle,
+                identity_map: Vec::default(),
+            }),
             _factory: PhantomData,
         })
     }

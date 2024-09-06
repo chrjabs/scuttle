@@ -10,7 +10,7 @@ use std::{
 use rustsat::{
     encodings::{card, pb, totdb, CollectCertClauses, CollectClauses},
     instances::{Cnf, ManageVars, ReindexVars},
-    types::{Assignment, Lit, LitIter, RsHashMap, Var, WLitIter},
+    types::{Assignment, Clause, Lit, LitIter, RsHashMap, Var, WLitIter},
 };
 
 /// The Pareto front of an instance. This is the return type of the solver.
@@ -749,5 +749,9 @@ impl Instance {
 
     pub fn n_objs(&self) -> usize {
         self.objs.len()
+    }
+
+    pub fn iter_clauses(&self) -> std::slice::Iter<'_, Clause> {
+        self.cnf.iter()
     }
 }

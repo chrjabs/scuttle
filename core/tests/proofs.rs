@@ -20,6 +20,21 @@ macro_rules! test_instance {
             )
             .unwrap(),
         );
+        let vpb_input =
+            tempfile::NamedTempFile::new().expect("failed to create temporary proof file");
+        let (vpb_input, vpb_input_path) = vpb_input.into_parts();
+        let mut writer = std::io::BufWriter::new(vpb_input);
+        let iter = inst
+            .iter_clauses()
+            .map(|cl| rustsat::instances::fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
+        rustsat::instances::fio::opb::write_opb_lines(
+            &mut writer,
+            iter,
+            rustsat::instances::fio::opb::Options::default(),
+        )
+        .unwrap();
+        drop(writer);
+        crate::print_file(&vpb_input_path);
         let (proof, path) = crate::new_proof(inst.n_clauses(), false);
         let mut solver = <$s>::from_instance_default_blocking_cert(inst, $o, proof).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
@@ -27,7 +42,7 @@ macro_rules! test_instance {
         drop(solver); // ensure proof is concluded
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
-        crate::verify_proof("./veripb-input.opb", path);
+        crate::verify_proof(vpb_input_path, path);
     }};
 }
 
@@ -60,6 +75,34 @@ macro_rules! medium {
     };
 }
 
+macro_rules! medium_weighted {
+    ($s:ty, $o:expr) => {
+        test_instance!(
+            $s,
+            $o,
+            "./data/medium-weighted.mcnf",
+            vec![
+                (vec![0, 15], 1),
+                (vec![1, 14], 1),
+                (vec![2, 13], 1),
+                (vec![3, 12], 1),
+                (vec![4, 11], 1),
+                (vec![5, 10], 1),
+                (vec![6, 9], 1),
+                (vec![7, 8], 1),
+                (vec![8, 7], 1),
+                (vec![9, 6], 1),
+                (vec![10, 5], 1),
+                (vec![11, 4], 1),
+                (vec![12, 3], 1),
+                (vec![13, 2], 1),
+                (vec![14, 1], 1),
+                (vec![15, 0], 1),
+            ]
+        )
+    };
+}
+
 macro_rules! four {
     ($s:ty, $o:expr) => {
         test_instance!(
@@ -71,6 +114,31 @@ macro_rules! four {
                 (vec![0, 0, 1, 0], 1),
                 (vec![0, 1, 0, 0], 1),
                 (vec![1, 0, 0, 0], 1),
+            ]
+        )
+    };
+}
+
+macro_rules! set_cover_3 {
+    ($s:ty, $o:expr) => {
+        test_instance!(
+            $s,
+            $o,
+            "./data/set-cover-3.mcnf",
+            vec![
+                (vec![67, 221, 130], 1),
+                (vec![229, 54, 151], 1),
+                (vec![136, 169, 28], 1),
+                (vec![75, 214, 149], 1),
+                (vec![223, 64, 152], 1),
+                (vec![230, 160, 49], 1),
+                (vec![90, 139, 63], 1),
+                (vec![198, 72, 152], 1),
+                (vec![101, 255, 59], 1),
+                (vec![102, 135, 99], 1),
+                (vec![154, 77, 93], 1),
+                (vec![207, 114, 87], 1),
+                (vec![158, 109, 92], 1),
             ]
         )
     };
@@ -133,7 +201,17 @@ mod pmin {
     }
 
     #[test]
+    fn pmin_medium_weighted_cert() {
+        medium_weighted!(S, scuttle_core::KernelOptions::default());
+    }
+
+    #[test]
     fn pmin_four_cert() {
         four!(S, scuttle_core::KernelOptions::default());
+    }
+
+    #[test]
+    fn pmin_set_cover_3_cert() {
+        set_cover_3!(S, scuttle_core::KernelOptions::default());
     }
 }

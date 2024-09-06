@@ -194,9 +194,17 @@ where
     #[cfg(feature = "interrupt-oracle")]
     oracle_interrupter: Arc<Mutex<Box<dyn rustsat::solvers::InterruptSolver + Send>>>,
     /// The handle of the proof tracer, when proof logging
-    pt_handle: Option<rustsat_cadical::ProofTracerHandle<CadicalTracer<ProofW>>>,
+    proof_stuff: Option<ProofStuff<ProofW>>,
     /// Phantom marker for oracle factory
     _factory: PhantomData<OInit>,
+}
+
+/// Stuff to keep in the solver for proof logging
+struct ProofStuff<ProofW: io::Write> {
+    /// The handle of the proof tracer
+    pt_handle: rustsat_cadical::ProofTracerHandle<CadicalTracer<ProofW>>,
+    /// Literal mapping where we need to ensure that the second lit equals the first in the proof
+    identity_map: Vec<(Lit, Lit)>,
 }
 
 #[oracle_bounds]
@@ -309,7 +317,7 @@ where
             term_flag: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "interrupt-oracle")]
             oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
-            pt_handle: None,
+            proof_stuff: None,
             _factory: PhantomData,
         })
     }

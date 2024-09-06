@@ -272,8 +272,15 @@ struct LogArgs {
 
 #[derive(Args)]
 struct ProofArgs {
-    /// The path to write the VeriPB proof to
+    /// The path to write the VeriPB proof to. If not provided, will not write a proof.
     proof_path: Option<PathBuf>,
+    /// The path to output the VeriPB input to. If not provided, will write to
+    /// `scuttle-veripb-input.opb`.
+    ///
+    /// VeriPB does not natively understand multi-objective input files, so Scuttle will write only
+    /// the constraints to a separate OPB file for VeriPB to use as input, while the objectives are
+    /// written to the proof as an order.
+    veripb_input_path: Option<PathBuf>,
 }
 
 impl From<&LogArgs> for LoggerConfig {
@@ -435,7 +442,7 @@ pub struct Cli {
     color: concolor_clap::Color,
     logger_config: LoggerConfig,
     pub alg: Algorithm,
-    pub proof_path: Option<PathBuf>,
+    pub proof_paths: Option<(PathBuf, PathBuf)>,
 }
 
 pub enum Algorithm {
@@ -507,10 +514,22 @@ impl Cli {
             core_exhaustion: shared.core_exhaustion.into(),
             store_cnf,
         };
+        let proof_paths = |shared: &SharedArgs| {
+            shared.proof.proof_path.clone().map(|pp| {
+                (
+                    pp,
+                    shared
+                        .proof
+                        .veripb_input_path
+                        .clone()
+                        .unwrap_or(PathBuf::from("scuttle-veripb-input.opb")),
+                )
+            })
+        };
         match CliArgs::parse().command {
             AlgorithmCommand::PMinimal { shared, cb } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
-                let proof_path = shared.proof.proof_path.clone();
+                let proof_paths = proof_paths(&shared);
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -532,7 +551,7 @@ impl Cli {
                     color: shared.log.color,
                     logger_config: (&shared.log).into(),
                     alg: Algorithm::PMinimal(kernel_opts(shared, store_cnf), cb),
-                    proof_path,
+                    proof_paths,
                 }
             }
             AlgorithmCommand::Bioptsat {
@@ -541,7 +560,7 @@ impl Cli {
                 cb,
             } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
-                let proof_path = shared.proof.proof_path.clone();
+                let proof_paths = proof_paths(&shared);
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -568,7 +587,7 @@ impl Cli {
                         obj_encs.obj_card_encoding,
                         cb,
                     ),
-                    proof_path,
+                    proof_paths,
                 }
             }
             AlgorithmCommand::LowerBounding {
@@ -577,7 +596,7 @@ impl Cli {
                 cb,
             } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
-                let proof_path = shared.proof.proof_path.clone();
+                let proof_paths = proof_paths(&shared);
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -602,7 +621,7 @@ impl Cli {
                         ..(&shared.log).into()
                     },
                     alg: Algorithm::LowerBounding(kernel_opts(shared, store_cnf), cb),
-                    proof_path,
+                    proof_paths,
                 }
             }
         }
