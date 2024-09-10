@@ -144,6 +144,37 @@ macro_rules! set_cover_3 {
     };
 }
 
+macro_rules! generate_tests {
+    ($mod:ident, $s:ty, $o:expr) => {
+        mod $mod {
+            #[test]
+            fn small_cert() {
+                small!($s, $o);
+            }
+
+            #[test]
+            fn medium_cert() {
+                medium!($s, $o);
+            }
+
+            #[test]
+            fn medium_weighted_cert() {
+                medium_weighted!($s, $o);
+            }
+
+            #[test]
+            fn four_cert() {
+                four!($s, $o);
+            }
+
+            #[test]
+            fn set_cover_3_cert() {
+                set_cover_3!($s, $o);
+            }
+        }
+    };
+}
+
 fn new_proof(
     num_constraints: usize,
     optimization: bool,
@@ -154,8 +185,14 @@ fn new_proof(
     let file = tempfile::NamedTempFile::new().expect("failed to create temporary proof file");
     let (file, path) = file.into_parts();
     (
-        pidgeons::Proof::new(std::io::BufWriter::new(file), num_constraints, optimization)
-            .expect("failed to start proof"),
+        pidgeons::Proof::new_with_conclusion(
+            std::io::BufWriter::new(file),
+            num_constraints,
+            optimization,
+            pidgeons::OutputGuarantee::None,
+            &pidgeons::Conclusion::<&str>::Unsat(Some(pidgeons::ConstraintId::last(1))),
+        )
+        .expect("failed to start proof"),
         path,
     )
 }
@@ -189,29 +226,10 @@ fn verify_proof<P1: AsRef<std::path::Path>, P2: AsRef<std::path::Path>>(instance
 
 mod pmin {
     type S = scuttle_core::PMinimal<rustsat_cadical::CaDiCaL<'static, 'static>>;
+    generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
+}
 
-    #[test]
-    fn pmin_small_cert() {
-        small!(S, scuttle_core::KernelOptions::default());
-    }
-
-    #[test]
-    fn pmin_medium_cert() {
-        medium!(S, scuttle_core::KernelOptions::default());
-    }
-
-    #[test]
-    fn pmin_medium_weighted_cert() {
-        medium_weighted!(S, scuttle_core::KernelOptions::default());
-    }
-
-    #[test]
-    fn pmin_four_cert() {
-        four!(S, scuttle_core::KernelOptions::default());
-    }
-
-    #[test]
-    fn pmin_set_cover_3_cert() {
-        set_cover_3!(S, scuttle_core::KernelOptions::default());
-    }
+mod lb {
+    type S = scuttle_core::LowerBounding<rustsat_cadical::CaDiCaL<'static, 'static>>;
+    generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
 }

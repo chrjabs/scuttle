@@ -12,21 +12,23 @@ use std::sync::Mutex;
 
 use cadical_veripb_tracer::{CadicalCertCollector, CadicalTracer};
 use pidgeons::{
-    AbsConstraintId, Axiom, ConstraintId, ConstraintLike, Derivation, OperationSequence, Order,
-    OrderVar, Proof, ProofGoal, ProofGoalId, ProofOnlyVar, VarLike,
+    AbsConstraintId, Axiom, ConstraintId, ConstraintLike, Derivation, OperationLike,
+    OperationSequence, Order, OrderVar, Proof, ProofGoal, ProofGoalId, ProofOnlyVar, VarLike,
 };
 use rustsat::{
+    encodings::{atomics, card::DbTotalizer, pb::DbGte, CollectCertClauses},
     instances::{Cnf, ManageVars},
     solvers::Initialize,
     types::{Assignment, Clause, Lit, TernaryVal, Var, WLitIter},
 };
+use rustsat_cadical::CaDiCaL;
 
 use crate::{
     types::{Instance, ObjEncoding, Objective, VarManager},
     KernelOptions, Limits, Stats,
 };
 
-use super::default_blocking_clause;
+use super::{default_blocking_clause, ProofStuff};
 
 /// Trait for initializing algorithms
 pub trait InitCert: super::Init {
@@ -302,6 +304,71 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
     Ok(cut_id)
 }
 
+/// Certifies a reification of a cube of assumptions stemming from an encoding
+///
+/// The certification will make the first assumption equal to the reification literal, while all
+/// others are implied by the reification literal
+///
+/// Returns the ID stating that the first assumption implies the reification literal
+pub fn certify_assump_reification<ProofW>(
+    oracle: &mut CaDiCaL<'_, '_>,
+    proof_stuff: &mut ProofStuff<ProofW>,
+    enc: &ObjEncoding<DbGte, DbTotalizer>,
+    value: usize,
+    reif_lit: Lit,
+    assumps: &[Lit],
+) -> anyhow::Result<AbsConstraintId>
+where
+    ProofW: io::Write + 'static,
+{
+    let ProofStuff {
+        pt_handle,
+        identity_map,
+    } = proof_stuff;
+    #[cfg(feature = "verbose-proofs")]
+    self.oracle
+        .proof_tracer_mut(pt_handle)
+        .proof_mut()
+        .comment(&"reification of multiple assumptions for one objective encoding")?;
+    let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
+    // NOTE: this assumes that the assumptions are outputs in increasing order
+    let mut assumps = assumps.iter();
+    let a = *assumps.next().unwrap();
+    // in the proof, the reification literal is going to be _equal_ to the lowest
+    // output
+    let clause = atomics::lit_impl_lit(reif_lit, a);
+    let if_def = proof.redundant(&clause, [reif_lit.var().substitute_fixed(false)], None)?;
+    let only_if_def = proof.redundant(
+        &atomics::lit_impl_lit(a, reif_lit),
+        [reif_lit.var().substitute_fixed(true)],
+        None,
+    )?;
+    identity_map.push((a, reif_lit));
+    CadicalCertCollector::new(oracle, pt_handle).add_cert_clause(clause, if_def)?;
+    let (first_olit, first_sems) = enc.output_proof_details(value);
+    debug_assert_eq!(!first_olit, a);
+    // all remaining assumptions are implied by the reification literal
+    let mut val = value;
+    for &a in assumps {
+        let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
+        val = enc.next_higher(val);
+        // first convince veripb that `olit -> first_olit`
+        let (olit, sems) = enc.output_proof_details(val);
+        debug_assert_eq!(!olit, a);
+        let implication = proof.operations::<Var>(
+            &((OperationSequence::from(first_sems.if_def.unwrap()) + sems.only_if_def.unwrap())
+                / (val - value + 1))
+                .saturate(),
+        )?;
+        #[cfg(feature = "verbose-proofs")]
+        proof.equals(&clause![!olit, first_olit], Some(ConstraintId::last(1)))?;
+        let clause = atomics::lit_impl_lit(reif_lit, a);
+        let id = proof.reverse_unit_prop(&clause, [implication.into(), if_def.into()])?;
+        CadicalCertCollector::new(oracle, pt_handle).add_cert_clause(clause, id)?;
+    }
+    Ok(only_if_def)
+}
+
 struct LbConstraint<V: VarLike> {
     lits: Vec<(isize, Axiom<V>)>,
     bound: isize,
@@ -509,6 +576,7 @@ mod tests {
         process::Command,
     };
 
+    use pidgeons::{Conclusion, ConstraintId, OutputGuarantee};
     use rustsat::lit;
 
     use crate::types::Objective;
@@ -540,7 +608,14 @@ mod tests {
         optimization: bool,
     ) -> pidgeons::Proof<tempfile::NamedTempFile> {
         let file = tempfile::NamedTempFile::new().expect("failed to create temporary proof file");
-        pidgeons::Proof::new(file, num_constraints, optimization).expect("failed to start proof")
+        pidgeons::Proof::new_with_conclusion(
+            file,
+            num_constraints,
+            optimization,
+            OutputGuarantee::None,
+            &Conclusion::<&str>::Unsat(Some(ConstraintId::last(1))),
+        )
+        .expect("failed to start proof")
     }
 
     #[test]

@@ -10,20 +10,21 @@
 
 use std::{fs, io};
 
+use cadical_veripb_tracer::CadicalCertCollector;
 use rustsat::{
+    clause,
     encodings::{
         self,
         card::{self, DbTotalizer},
         pb::{self, DbGte},
-        EncodeStats,
     },
-    instances::{Cnf, ManageVars},
     solvers::{
-        DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
+        DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
+        SolverStats,
     },
     types::{Assignment, Clause, Lit, WLitIter},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
+use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
     options::{AfterCbOptions, CoreBoostingOptions},
@@ -31,10 +32,12 @@ use crate::{
     types::{NonDomPoint, ParetoFront, VarManager},
     EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
     MaybeTerminatedError::{self, Done},
-    Phase, Solve,
+    Phase,
 };
 
-use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective};
+use super::{
+    coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, Objective, ProofStuff,
+};
 
 /// The lower-bounding algorithm type
 ///
@@ -46,12 +49,7 @@ use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective
 /// - `ProofW`: the proof writer
 /// - `OInit`: the oracle initializer
 /// - `BCG`: the blocking clause generator
-#[derive(KernelFunctions, Solve)]
-#[solve(bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
-        CE: card::BoundUpperIncremental + EncodeStats,
-        BCG: Fn(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats,
-        ProofW: std::io::Write")]
+#[derive(KernelFunctions)]
 pub struct LowerBounding<
     O,
     PBE = DbGte,
@@ -72,17 +70,55 @@ pub struct LowerBounding<
     pareto_front: ParetoFront,
 }
 
-#[oracle_bounds]
-impl<O, PBE, CE, ProofW, OInit, BCG> super::Init for LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG> super::Solve
+    for LowerBounding<
+        rustsat_cadical::CaDiCaL<'term, 'learn>,
+        DbGte,
+        DbTotalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
-    OInit: Initialize<O>,
+    BCG: Fn(Assignment) -> Clause,
+    ProofW: io::Write + 'static,
+{
+    fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
+        self.kernel.start_solving(limits);
+        self.alg_main()
+    }
+
+    fn all_stats(
+        &self,
+    ) -> (
+        crate::Stats,
+        Option<SolverStats>,
+        Option<Vec<EncodingStats>>,
+    ) {
+        use crate::ExtendedSolveStats;
+        (
+            self.kernel.stats,
+            Some(self.oracle_stats()),
+            Some(self.encoding_stats()),
+        )
+    }
+}
+
+impl<'learn, 'term, ProofW, OInit, BCG> super::Init
+    for LowerBounding<
+        rustsat_cadical::CaDiCaL<'learn, 'term>,
+        DbGte,
+        DbTotalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
+where
+    ProofW: io::Write + 'static,
+    OInit: Initialize<rustsat_cadical::CaDiCaL<'learn, 'term>>,
     BCG: Fn(Assignment) -> Clause,
 {
-    type Oracle = O;
+    type Oracle = rustsat_cadical::CaDiCaL<'learn, 'term>;
     type BlockClauseGen = BCG;
 
     /// Initializes a default solver with a configured oracle and options. The
@@ -100,16 +136,20 @@ where
         Obj: WLitIter,
     {
         let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, opts)?;
-        Ok(Self::init(kernel)?)
+        Self::init(kernel)
     }
 }
 
-impl<'term, 'learn, PBE, CE, ProofW, OInit, BCG> super::InitCert
-    for LowerBounding<rustsat_cadical::CaDiCaL<'term, 'learn>, PBE, CE, ProofW, OInit, BCG>
+impl<'term, 'learn, ProofW, OInit, BCG> super::InitCert
+    for LowerBounding<
+        rustsat_cadical::CaDiCaL<'term, 'learn>,
+        DbGte,
+        DbTotalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
 where
-    ProofW: io::Write,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
     OInit: Initialize<rustsat_cadical::CaDiCaL<'term, 'learn>>,
     ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
@@ -132,7 +172,7 @@ where
         Obj: WLitIter,
     {
         let kernel = Kernel::new_cert(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
-        Ok(Self::init(kernel)?)
+        Self::init(kernel)
     }
 }
 
@@ -178,47 +218,48 @@ where
     }
 }
 
-impl<O, PBE, CE, ProofW, OInit, BCG> LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
+impl<'term, 'learn, ProofW, OInit, BCG>
+    LowerBounding<rustsat_cadical::CaDiCaL<'term, 'learn>, DbGte, DbTotalizer, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
+    ProofW: io::Write + 'static,
 {
     /// Initializes the solver
-    fn init(mut kernel: Kernel<O, ProofW, OInit, BCG>) -> Result<Self, rustsat::OutOfMemory> {
+    fn init(
+        mut kernel: Kernel<rustsat_cadical::CaDiCaL<'term, 'learn>, ProofW, OInit, BCG>,
+    ) -> anyhow::Result<Self> {
         // Initialize objective encodings
         let mut obj_encs = Vec::with_capacity(kernel.objs.len());
         let mut fence_data = Vec::with_capacity(kernel.objs.len());
         for obj in &kernel.objs {
             let mut enc = match obj {
-                Objective::Weighted { lits, .. } => ObjEncoding::<PBE, CE>::new_weighted(
-                    lits.iter().map(|(&l, &w)| (l, w)),
-                    kernel.opts.reserve_enc_vars,
-                    &mut kernel.var_manager,
-                ),
-                Objective::Unweighted { lits, .. } => ObjEncoding::<PBE, CE>::new_unweighted(
-                    lits.iter().copied(),
-                    kernel.opts.reserve_enc_vars,
-                    &mut kernel.var_manager,
-                ),
+                Objective::Weighted { lits, .. } => {
+                    ObjEncoding::<DbGte, DbTotalizer>::new_weighted(
+                        lits.iter().map(|(&l, &w)| (l, w)),
+                        kernel.opts.reserve_enc_vars,
+                        &mut kernel.var_manager,
+                    )
+                }
+                Objective::Unweighted { lits, .. } => {
+                    ObjEncoding::<DbGte, DbTotalizer>::new_unweighted(
+                        lits.iter().copied(),
+                        kernel.opts.reserve_enc_vars,
+                        &mut kernel.var_manager,
+                    )
+                }
                 Objective::Constant { .. } => ObjEncoding::Constant,
             };
-            enc.encode_ub_change(0..1, &mut kernel.oracle, &mut kernel.var_manager)?;
-            let assumps = enc.enforce_ub(0).unwrap();
-            let assump = if assumps.is_empty() {
-                None
-            } else if 1 == assumps.len() {
-                Some(assumps[0])
+            if let Some(ProofStuff { pt_handle, .. }) = &kernel.proof_stuff {
+                let proof: *mut _ = kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                let mut collector = CadicalCertCollector::new(&mut kernel.oracle, pt_handle);
+                enc.encode_ub_change_cert(0..1, &mut collector, &mut kernel.var_manager, unsafe {
+                    &mut *proof
+                })?;
             } else {
-                let mut and_impl = Cnf::new();
-                let and_lit = kernel.var_manager.new_var().pos_lit();
-                and_impl.add_lit_impl_cube(and_lit, &assumps);
-                kernel.oracle.add_cnf(and_impl).unwrap();
-                Some(and_lit)
+                enc.encode_ub_change(0..1, &mut kernel.oracle, &mut kernel.var_manager)?;
             };
+            let assumps = enc.enforce_ub(0).unwrap();
             obj_encs.push(enc);
-            fence_data.push((0, assump));
+            fence_data.push((0, assumps));
         }
         Ok(Self {
             kernel,
@@ -229,13 +270,10 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, PBE, CE, ProofW, OInit, BCG> LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG>
+    LowerBounding<rustsat_cadical::CaDiCaL<'learn, 'term>, DbGte, DbTotalizer, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
+    ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
 {
     /// The solving algorithm main routine.
@@ -336,18 +374,7 @@ where
                 &mut self.kernel.var_manager,
             )?;
             let assumps = enc.enforce_ub(enc.offset()).unwrap();
-            let assump = if assumps.is_empty() {
-                None
-            } else if 1 == assumps.len() {
-                Some(assumps[0])
-            } else {
-                let mut and_impl = Cnf::new();
-                let and_lit = self.kernel.var_manager.new_var().pos_lit();
-                and_impl.add_lit_impl_cube(and_lit, &assumps);
-                self.kernel.oracle.add_cnf(and_impl).unwrap();
-                Some(and_lit)
-            };
-            self.fence.data[idx] = (enc.offset(), assump);
+            self.fence.data[idx] = (enc.offset(), assumps);
         }
         Done(true)
     }
@@ -356,12 +383,14 @@ where
 /// Data related to the current fence
 pub(crate) struct Fence {
     /// The current bounds and enforcing literals
-    pub data: Vec<(usize, Option<Lit>)>,
+    pub data: Vec<(usize, Vec<Lit>)>,
 }
 
 impl Fence {
     pub fn assumps(&self) -> impl Iterator<Item = Lit> + '_ {
-        self.data.iter().filter_map(|(_, ol)| ol.to_owned())
+        self.data
+            .iter()
+            .flat_map(|(_, assumps)| assumps.iter().copied())
     }
 
     pub fn bounds(&self) -> Vec<usize> {
@@ -369,51 +398,56 @@ impl Fence {
     }
 }
 
-#[oracle_bounds]
-impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG>
+    Kernel<rustsat_cadical::CaDiCaL<'learn, 'term>, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
 {
-    pub fn update_fence<PBE, CE>(
+    pub fn update_fence(
         &mut self,
         fence: &mut Fence,
         core: Vec<Lit>,
-        obj_encs: &mut [ObjEncoding<PBE, CE>],
-    ) -> MaybeTerminatedError
-    where
-        PBE: pb::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental,
-    {
+        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
+    ) -> MaybeTerminatedError {
+        let mut found = vec![false; fence.data.len()];
         'core: for clit in core {
-            for (obj_idx, (bound, olit)) in fence.data.iter_mut().enumerate() {
-                if let Some(alit) = &olit {
+            for (obj_idx, (bound, assumps)) in fence.data.iter_mut().enumerate() {
+                if found[obj_idx] {
+                    // the bound for this objective has already been increased
+                    continue;
+                }
+                let mut matches = false;
+                for alit in assumps.iter() {
                     if !*alit == clit {
-                        // update bound
-                        let enc = &mut obj_encs[obj_idx];
-                        *bound = enc.next_higher(*bound);
+                        matches = true;
+                        break;
+                    }
+                }
+                if matches {
+                    found[obj_idx] = true;
+                    // update bound
+                    let enc = &mut obj_encs[obj_idx];
+                    *bound = enc.next_higher(*bound);
+                    if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                        let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                        let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
+                        enc.encode_ub_change_cert(
+                            *bound..*bound + 1,
+                            &mut collector,
+                            &mut self.var_manager,
+                            unsafe { &mut *proof },
+                        )?;
+                    } else {
                         enc.encode_ub_change(
                             *bound..*bound + 1,
                             &mut self.oracle,
                             &mut self.var_manager,
                         )?;
-                        let assumps = enc.enforce_ub(*bound).unwrap();
-                        *olit = if assumps.is_empty() {
-                            None
-                        } else if 1 == assumps.len() {
-                            Some(assumps[0])
-                        } else {
-                            let mut and_impl = Cnf::new();
-                            let and_lit = self.var_manager.new_var().pos_lit();
-                            and_impl.add_lit_impl_cube(and_lit, &assumps);
-                            self.oracle.add_cnf(and_impl).unwrap();
-                            Some(and_lit)
-                        };
-                        continue 'core;
-                    }
+                    };
+                    *assumps = enc.enforce_ub(*bound).unwrap();
+                    continue 'core;
                 }
             }
-            panic!("should never encounter clit that is not in fence");
         }
         if let Some(logger) = &mut self.logger {
             logger.log_fence(&fence.bounds())?
@@ -422,24 +456,21 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+impl<'term, 'learn, ProofW, OInit, BCG>
+    Kernel<rustsat_cadical::CaDiCaL<'term, 'learn>, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
 {
     /// Runs the P-Minimal algorithm within the fence to harvest solutions
-    pub fn harvest<PBE, CE, Col>(
+    pub fn harvest<Col>(
         &mut self,
         fence: &Fence,
-        obj_encs: &mut [ObjEncoding<PBE, CE>],
+        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
         base_assumps: &[Lit],
         collector: &mut Col,
     ) -> MaybeTerminatedError
     where
-        PBE: pb::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental,
         Col: Extend<NonDomPoint>,
     {
         debug_assert_eq!(obj_encs.len(), self.stats.n_objs);
@@ -470,11 +501,42 @@ where
                 self.p_minimization(costs, solution, base_assumps, obj_encs)?;
 
             let assumps: Vec<_> = self.enforce_dominating(&costs, obj_encs)?.collect();
-            self.yield_solutions(costs, &assumps, solution, collector)?;
+            self.yield_solutions(costs.clone(), &assumps, solution.clone(), collector)?;
 
             // Block last Pareto point, if temporarily blocked
-            if let Some(block_lit) = block_switch {
-                self.oracle.add_unit(block_lit)?;
+            if let Some((block_lit, ids)) = block_switch {
+                if let Some(ProofStuff {
+                    pt_handle,
+                    identity_map,
+                }) = &self.proof_stuff
+                {
+                    use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
+
+                    let (reified_cut, reified_assump_ids) = ids.unwrap();
+                    let witness = solution.clone().truncate(self.var_manager.max_enc_var());
+                    let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    let id = proofs::certify_pmin_cut(
+                        obj_encs,
+                        &self.objs,
+                        &costs,
+                        &witness,
+                        identity_map,
+                        proof,
+                    )?;
+                    let hints = [ConstraintId::last(2), ConstraintId::last(1), id.into()]
+                        .into_iter()
+                        .chain(reified_assump_ids.iter().map(|id| ConstraintId::from(*id)));
+                    proof.redundant(
+                        &clause![block_lit],
+                        [],
+                        [ProofGoal::new(
+                            ProofGoalId::from(ConstraintId::from(reified_cut)),
+                            [Derivation::Rup(clause![], hints.collect())],
+                        )],
+                    )?;
+                } else {
+                    self.oracle.add_unit(block_lit)?;
+                }
             }
         }
     }

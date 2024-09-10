@@ -80,10 +80,12 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
             .map(|cl| fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
         fio::opb::write_opb_lines(&mut writer, iter, fio::opb::Options::default())?;
         // Initialize proof
-        Some(pidgeons::Proof::new(
+        Some(pidgeons::Proof::new_with_conclusion(
             io::BufWriter::new(fs::File::create(proof_path)?),
             inst.n_clauses(),
             false,
+            pidgeons::OutputGuarantee::None,
+            &pidgeons::Conclusion::<&str>::Unsat(Some(pidgeons::ConstraintId::last(1))),
         )?)
     } else {
         None
@@ -94,8 +96,9 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
     match cli.alg {
         Algorithm::PMinimal(opts, ref cb_opts) => match cli.cadical_config {
             CadicalConfig::Default => {
+                type Slv = PMin;
                 if let Some(proof) = proof {
-                    let mut alg = setup_alg_cert::<PMin>(cli, inst, opts, proof)?;
+                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
                     let cont = if let Some(opts) = cb_opts {
                         alg.core_boost(opts.clone())?
                     } else {
@@ -106,7 +109,7 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                     };
                     post_solve(alg, cli, prepro, reindexer)
                 } else {
-                    let mut alg = setup_alg::<PMin>(cli, inst, opts)?;
+                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
                     let cont = if let Some(opts) = cb_opts {
                         alg.core_boost(opts.clone())?
                     } else {
@@ -119,40 +122,82 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                 }
             }
             CadicalConfig::Plain => {
-                let mut alg = setup_alg::<PMin<CaDiCaLPlainInit>>(cli, inst, opts)?;
-                let cont = if let Some(opts) = cb_opts {
-                    alg.core_boost(opts.clone())?
+                type Slv = PMin<CaDiCaLPlainInit>;
+                if let Some(proof) = proof {
+                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
                 } else {
-                    true
-                };
-                if cont {
-                    alg.solve(cli.limits)?;
-                };
-                post_solve(alg, cli, prepro, reindexer)
+                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
+                }
             }
             CadicalConfig::Sat => {
-                let mut alg = setup_alg::<PMin<CaDiCaLSatInit>>(cli, inst, opts)?;
-                let cont = if let Some(opts) = cb_opts {
-                    alg.core_boost(opts.clone())?
+                type Slv = PMin<CaDiCaLSatInit>;
+                if let Some(proof) = proof {
+                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
                 } else {
-                    true
-                };
-                if cont {
-                    alg.solve(cli.limits)?;
-                };
-                post_solve(alg, cli, prepro, reindexer)
+                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
+                }
             }
             CadicalConfig::Unsat => {
-                let mut alg = setup_alg::<PMin<CaDiCaLUnsatInit>>(cli, inst, opts)?;
-                let cont = if let Some(opts) = cb_opts {
-                    alg.core_boost(opts.clone())?
+                type Slv = PMin<CaDiCaLUnsatInit>;
+                if let Some(proof) = proof {
+                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
                 } else {
-                    true
-                };
-                if cont {
-                    alg.solve(cli.limits)?;
-                };
-                post_solve(alg, cli, prepro, reindexer)
+                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
+                }
             }
         },
         Algorithm::BiOptSat(opts, pb_enc, card_enc, ref cb_opts) => {
@@ -257,52 +302,108 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
         }
         Algorithm::LowerBounding(opts, ref cb_opts) => match cli.cadical_config {
             CadicalConfig::Default => {
-                let mut alg = setup_alg::<Lb>(cli, inst, opts)?;
-                let cont = if let Some(opts) = cb_opts {
-                    alg.core_boost(opts.clone())?
+                type Slv = Lb;
+                if let Some(proof) = proof {
+                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
                 } else {
-                    true
-                };
-                if cont {
-                    alg.solve(cli.limits)?;
-                };
-                post_solve(alg, cli, prepro, reindexer)
+                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
+                }
             }
             CadicalConfig::Plain => {
-                let mut alg = setup_alg::<Lb<CaDiCaLPlainInit>>(cli, inst, opts)?;
-                let cont = if let Some(opts) = cb_opts {
-                    alg.core_boost(opts.clone())?
+                type Slv = Lb<CaDiCaLPlainInit>;
+                if let Some(proof) = proof {
+                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
                 } else {
-                    true
-                };
-                if cont {
-                    alg.solve(cli.limits)?;
-                };
-                post_solve(alg, cli, prepro, reindexer)
+                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
+                }
             }
             CadicalConfig::Sat => {
-                let mut alg = setup_alg::<Lb<CaDiCaLSatInit>>(cli, inst, opts)?;
-                let cont = if let Some(opts) = cb_opts {
-                    alg.core_boost(opts.clone())?
+                type Slv = Lb<CaDiCaLSatInit>;
+                if let Some(proof) = proof {
+                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
                 } else {
-                    true
-                };
-                if cont {
-                    alg.solve(cli.limits)?;
-                };
-                post_solve(alg, cli, prepro, reindexer)
+                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
+                }
             }
             CadicalConfig::Unsat => {
-                let mut alg = setup_alg::<Lb<CaDiCaLUnsatInit>>(cli, inst, opts)?;
-                let cont = if let Some(opts) = cb_opts {
-                    alg.core_boost(opts.clone())?
+                type Slv = Lb<CaDiCaLUnsatInit>;
+                if let Some(proof) = proof {
+                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
                 } else {
-                    true
-                };
-                if cont {
-                    alg.solve(cli.limits)?;
-                };
-                post_solve(alg, cli, prepro, reindexer)
+                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                    let cont = if let Some(opts) = cb_opts {
+                        alg.core_boost(opts.clone())?
+                    } else {
+                        true
+                    };
+                    if cont {
+                        alg.solve(cli.limits)?;
+                    };
+                    post_solve(alg, cli, prepro, reindexer)
+                }
             }
         },
     }
