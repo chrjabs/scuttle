@@ -12,14 +12,14 @@ use rustsat::{
         self,
         card::{self, DbTotalizer},
         pb::{self, DbGte},
-        EncodeStats,
     },
     solvers::{
-        DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
+        DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
+        SolverStats,
     },
     types::{Assignment, Clause, Lit, WLitIter},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
+use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
     options::{AfterCbOptions, CoreBoostingOptions},
@@ -27,10 +27,9 @@ use crate::{
     types::{NonDomPoint, ParetoFront, VarManager},
     EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
     MaybeTerminatedError::{self, Done},
-    Solve,
 };
 
-use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective};
+use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective, ProofStuff};
 
 /// The BiOptSat algorithm type
 ///
@@ -42,12 +41,7 @@ use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective
 /// - `ProofW`: the proof writer
 /// - `OInit`: the oracle initializer
 /// - `BCG`: the blocking clause generator
-#[derive(KernelFunctions, Solve)]
-#[solve(bounds = "where PBE: pb::BoundUpperIncremental + EncodeStats,
-        CE: card::BoundUpperIncremental + EncodeStats,
-        BCG: Fn(Assignment) -> Clause,
-        O: SolveIncremental + SolveStats,
-        ProofW: std::io::Write")]
+#[derive(KernelFunctions)]
 pub struct BiOptSat<
     O,
     PBE = DbGte,
@@ -64,6 +58,33 @@ pub struct BiOptSat<
     obj_encs: (ObjEncoding<PBE, CE>, ObjEncoding<PBE, CE>),
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
+}
+
+impl<'learn, 'term, ProofW, OInit, BCG> super::Solve
+    for BiOptSat<rustsat_cadical::CaDiCaL<'term, 'learn>, DbGte, DbTotalizer, ProofW, OInit, BCG>
+where
+    BCG: Fn(Assignment) -> Clause,
+    ProofW: io::Write + 'static,
+{
+    fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
+        self.kernel.start_solving(limits);
+        self.alg_main()
+    }
+
+    fn all_stats(
+        &self,
+    ) -> (
+        crate::Stats,
+        Option<SolverStats>,
+        Option<Vec<EncodingStats>>,
+    ) {
+        use crate::ExtendedSolveStats;
+        (
+            self.kernel.stats,
+            Some(self.oracle_stats()),
+            Some(self.encoding_stats()),
+        )
+    }
 }
 
 #[oracle_bounds]
@@ -216,13 +237,10 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, PBE, CE, ProofW, OInit, BCG> BiOptSat<O, PBE, CE, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG>
+    BiOptSat<rustsat_cadical::CaDiCaL<'learn, 'term>, DbGte, DbTotalizer, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
     ProofW: io::Write,
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
     BCG: Fn(Assignment) -> Clause,
 {
     /// The solving algorithm main routine.
@@ -292,10 +310,9 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG>
+    Kernel<rustsat_cadical::CaDiCaL<'learn, 'term>, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
     ProofW: io::Write,
     BCG: Fn(Assignment) -> Clause,
 {
@@ -308,10 +325,13 @@ where
     /// `lookup`: for a value of the increasing objective, checks if the
     /// non-dominated point has already been discovered and returns the
     /// corresponding value of the decreasing objective
-    pub fn bioptsat<PBE, CE, Lookup, Col>(
+    pub fn bioptsat<Lookup, Col>(
         &mut self,
         (inc_obj, dec_obj): (usize, usize),
-        (inc_encoding, dec_encoding): (&mut ObjEncoding<PBE, CE>, &mut ObjEncoding<PBE, CE>),
+        (inc_encoding, dec_encoding): (
+            &mut ObjEncoding<DbGte, DbTotalizer>,
+            &mut ObjEncoding<DbGte, DbTotalizer>,
+        ),
         base_assumps: &[Lit],
         starting_point: Option<(usize, Assignment)>,
         (inc_lb, dec_lb): (Option<usize>, Option<usize>),
@@ -319,8 +339,6 @@ where
         collector: &mut Col,
     ) -> MaybeTerminatedError
     where
-        PBE: pb::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental,
         Lookup: Fn(usize) -> Option<usize>,
         Col: Extend<NonDomPoint>,
     {
@@ -344,19 +362,29 @@ where
         let mut dec_cost;
         loop {
             // minimize inc_obj
-            (inc_cost, sol) = if let Some(res) = self.linsu(
+            let Some((new_inc_cost, new_sol, lb_id)) = self.linsu(
                 inc_obj,
                 inc_encoding,
                 &assumps,
                 Some((inc_cost, Some(sol))),
                 Some(inc_lb),
-            )? {
-                res
-            } else {
+            )?
+            else {
                 // no solutions
                 self.log_routine_end()?;
                 return Done(());
             };
+            (inc_cost, sol) = (new_inc_cost, new_sol);
+
+            // Derive global lower bound on increasing objective in proof
+            if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                if inc_cost == inc_lb {
+                    // TODO: potentially have to convice veripb of lower bound here
+                } else {
+                    let lb_id = lb_id.unwrap();
+                }
+            }
+
             inc_lb = inc_cost + 1;
             dec_cost = self.get_cost_with_heuristic_improvements(dec_obj, &mut sol, false)?;
             if let Some(found) = lookup(inc_cost) {
@@ -392,7 +420,10 @@ where
                 &mut self.oracle,
                 &mut self.var_manager,
             )?;
-            assumps.extend(dec_encoding.enforce_ub(dec_cost - 1).unwrap());
+            if base_assumps.is_empty() {
+            } else {
+                assumps.extend(dec_encoding.enforce_ub(dec_cost - 1).unwrap());
+            }
             (sol, inc_cost) = match self.solve_assumps(&assumps)? {
                 SolverResult::Sat => {
                     let mut sol = self.oracle.solution(self.var_manager.max_orig_var())?;

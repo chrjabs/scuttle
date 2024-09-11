@@ -16,6 +16,7 @@ use pidgeons::{
     OperationSequence, Order, OrderVar, Proof, ProofGoal, ProofGoalId, ProofOnlyVar, VarLike,
 };
 use rustsat::{
+    clause,
     encodings::{atomics, card::DbTotalizer, pb::DbGte, CollectCertClauses},
     instances::{Cnf, ManageVars},
     solvers::Initialize,
@@ -367,6 +368,68 @@ where
         CadicalCertCollector::new(oracle, pt_handle).add_cert_clause(clause, id)?;
     }
     Ok(only_if_def)
+}
+
+pub fn linsu_certify_lower_bound<ProofW>(
+    cost: usize,
+    core: &[Lit],
+    encoding: &ObjEncoding<DbGte, DbTotalizer>,
+    proof_tracer: &mut CadicalTracer<ProofW>,
+) -> io::Result<AbsConstraintId>
+where
+    ProofW: io::Write + 'static,
+{
+    // derive lower bound on objective in proof
+    let core_id = proof_tracer.core_id().expect("expected core id in proof");
+    let proof = proof_tracer.proof_mut();
+    let (first_olit, first_sems) = encoding.output_proof_details(cost);
+    let core_id = if core.len() == 1 {
+        // unit core explicitly implies bound
+        debug_assert_eq!(core[0], first_olit);
+        core_id
+    } else {
+        // convince veripb that `core_lit -> first_olit` and therefore
+        // rewrite core as `first_olit` unit
+        // NOTE: this assumes that the outputs are in the core in order of increasing value
+        let mut val = encoding.next_higher(cost);
+        let (mut olit, mut sems) = encoding.output_proof_details(val);
+        let start = if core[0] == first_olit { 1 } else { 0 };
+        let mut implications = Vec::with_capacity(core.len());
+        for &clit in &core[start..] {
+            loop {
+                if clit == olit {
+                    break;
+                }
+                val = encoding.next_higher(val);
+                (olit, sems) = encoding.output_proof_details(val);
+            }
+            let implication = proof.operations::<Var>(
+                &((OperationSequence::from(first_sems.if_def.unwrap())
+                    + sems.only_if_def.unwrap())
+                    / (val - cost + 1))
+                    .saturate(),
+            )?;
+            #[cfg(feature = "verbose-proofs")]
+            proof.equals(&clause![!olit, first_olit], Some(ConstraintId::last(1)))?;
+            implications.push(implication);
+            val = encoding.next_higher(val);
+        }
+        // rewrite the core
+        proof.reverse_unit_prop(
+            &clause![first_olit],
+            implications
+                .into_iter()
+                .chain([core_id])
+                .map(ConstraintId::from),
+        )?
+    };
+    #[cfg(feature = "verbose-proofs")]
+    proof.comment(&"next constraint is a lower bound constraint derived from linsu")?;
+    let bound_id = proof.operations::<Var>(
+        &(OperationSequence::from(core_id) * cost
+            + first_sems.only_if_def.expect("expected only if definition")),
+    )?;
+    Ok(bound_id)
 }
 
 struct LbConstraint<V: VarLike> {

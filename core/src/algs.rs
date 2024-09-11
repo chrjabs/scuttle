@@ -17,7 +17,10 @@ use anyhow::Context;
 use cadical_veripb_tracer::CadicalTracer;
 use maxpre::MaxPre;
 use rustsat::{
-    encodings::{card, pb},
+    encodings::{
+        card::{self, DbTotalizer},
+        pb::{self, DbGte},
+    },
     instances::{Cnf, ManageVars},
     solvers::{
         DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
@@ -751,11 +754,10 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG>
+    Kernel<rustsat_cadical::CaDiCaL<'learn, 'term>, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
 {
     /// Performs linear sat-unsat search on a given objective and yields
@@ -763,22 +765,18 @@ where
     fn linsu_yield<PBE, CE, Col>(
         &mut self,
         obj_idx: usize,
-        encoding: &mut ObjEncoding<PBE, CE>,
+        encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
         base_assumps: &[Lit],
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
         collector: &mut Col,
     ) -> MaybeTerminatedError<Option<usize>>
     where
-        PBE: pb::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental,
         Col: Extend<NonDomPoint>,
     {
-        let (cost, mut sol) = if let Some(res) =
+        let Some((cost, mut sol, _)) =
             self.linsu(obj_idx, encoding, base_assumps, upper_bound, lower_bound)?
-        {
-            res
-        } else {
+        else {
             // nothing to yield
             return Done(None);
         };
@@ -818,21 +816,27 @@ where
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         Ok((costs, sol))
     }
+}
 
+impl<'learn, 'term, ProofW, OInit, BCG>
+    Kernel<rustsat_cadical::CaDiCaL<'learn, 'term>, ProofW, OInit, BCG>
+where
+    ProofW: io::Write + 'static,
+{
     /// Performs linear sat-unsat search on a given objective.
-    fn linsu<PBE, CE>(
+    fn linsu(
         &mut self,
         obj_idx: usize,
-        encoding: &mut ObjEncoding<PBE, CE>,
+        encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
         base_assumps: &[Lit],
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
-    ) -> MaybeTerminatedError<Option<(usize, Assignment)>>
-    where
-        PBE: pb::BoundUpperIncremental,
-        CE: card::BoundUpperIncremental,
-    {
+    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pidgeons::AbsConstraintId>)>> {
+        use rustsat::solvers::Solve;
+
         self.log_routine_start("linsu")?;
+
+        let mut lb_id = None;
 
         let lower_bound = lower_bound.unwrap_or(0);
 
@@ -877,9 +881,10 @@ where
                     self.log_candidate(&costs, Phase::Linsu)?;
                     sol = Some(thissol);
                     cost = new_cost;
-                    if cost == lower_bound {
+                    if cost <= lower_bound {
                         self.log_routine_end()?;
-                        return Done(Some((cost, sol.unwrap())));
+                        // TODO: derive lower bound in proof
+                        return Done(Some((cost, sol.unwrap(), None)));
                     }
                 }
                 SolverResult::Unsat => {
@@ -888,11 +893,25 @@ where
                         coarse = false;
                         continue;
                     }
+
+                    if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                        if base_assumps.is_empty() {
+                            // for now, can only derive lower bound without base assumptions
+                            lb_id = Some(proofs::linsu_certify_lower_bound(
+                                cost,
+                                &(self.oracle.core()?),
+                                encoding,
+                                self.oracle.proof_tracer_mut(pt_handle),
+                            )?);
+                        }
+                    }
+
                     break;
                 }
                 _ => unreachable!(),
             }
         }
+
         // make sure to have a solution
         if sol.is_none() {
             encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager)?;
@@ -902,7 +921,7 @@ where
             sol = Some(self.oracle.solution(self.var_manager.max_orig_var())?);
         }
         self.log_routine_end()?;
-        Done(Some((cost, sol.unwrap())))
+        Done(Some((cost, sol.unwrap(), lb_id)))
     }
 }
 
