@@ -511,6 +511,7 @@ where
                 }) = &self.proof_stuff
                 {
                     use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
+                    use rustsat::encodings::CollectCertClauses;
 
                     let (reified_cut, reified_assump_ids) = ids.unwrap();
                     let witness = solution.clone().truncate(self.var_manager.max_enc_var());
@@ -526,14 +527,17 @@ where
                     let hints = [ConstraintId::last(2), ConstraintId::last(1), id.into()]
                         .into_iter()
                         .chain(reified_assump_ids.iter().map(|id| ConstraintId::from(*id)));
-                    proof.redundant(
-                        &clause![block_lit],
+                    let unit = clause![block_lit];
+                    let unit_id = proof.redundant(
+                        &unit,
                         [],
                         [ProofGoal::new(
                             ProofGoalId::from(ConstraintId::from(reified_cut)),
                             [Derivation::Rup(clause![], hints.collect())],
                         )],
                     )?;
+                    cadical_veripb_tracer::CadicalCertCollector::new(&mut self.oracle, pt_handle)
+                        .add_cert_clause(unit, unit_id)?;
                 } else {
                     self.oracle.add_unit(block_lit)?;
                 }

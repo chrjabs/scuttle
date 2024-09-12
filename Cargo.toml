@@ -60,3 +60,7 @@ sol-tightening = ["scuttle-core/sol-tightening"]
 
 [profile.release]
 lto = true
+
+[profile.profiling]
+inherits = "release"
+debug = 1
