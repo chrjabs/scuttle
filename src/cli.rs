@@ -307,15 +307,15 @@ pub enum PbEncoding {
     /// Generalized totalizer encoding - Joshi et al. CP'15
     #[default]
     Gte,
-    /// Dynamic polynomial watchdog encoding - Paxian et al. SAT'18
-    Dpw,
+    // /// Dynamic polynomial watchdog encoding - Paxian et al. SAT'18
+    // Dpw,
 }
 
 impl fmt::Display for PbEncoding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PbEncoding::Gte => write!(f, "gte"),
-            PbEncoding::Dpw => write!(f, "dpw"),
+            // PbEncoding::Dpw => write!(f, "dpw"),
         }
     }
 }

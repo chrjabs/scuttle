@@ -240,7 +240,7 @@ where
 impl<'learn, 'term, ProofW, OInit, BCG>
     BiOptSat<rustsat_cadical::CaDiCaL<'learn, 'term>, DbGte, DbTotalizer, ProofW, OInit, BCG>
 where
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
 {
     /// The solving algorithm main routine.
@@ -313,7 +313,7 @@ where
 impl<'learn, 'term, ProofW, OInit, BCG>
     Kernel<rustsat_cadical::CaDiCaL<'learn, 'term>, ProofW, OInit, BCG>
 where
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
 {
     /// Runs the BiOptSat algorithm on two objectives. BiOptSat is run in the

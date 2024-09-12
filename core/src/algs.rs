@@ -17,10 +17,7 @@ use anyhow::Context;
 use cadical_veripb_tracer::CadicalTracer;
 use maxpre::MaxPre;
 use rustsat::{
-    encodings::{
-        card::{self, DbTotalizer},
-        pb::{self, DbGte},
-    },
+    encodings::{card::DbTotalizer, pb::DbGte},
     instances::{Cnf, ManageVars},
     solvers::{
         DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
@@ -762,7 +759,7 @@ where
 {
     /// Performs linear sat-unsat search on a given objective and yields
     /// solutions found at the optimum.
-    fn linsu_yield<PBE, CE, Col>(
+    fn linsu_yield<Col>(
         &mut self,
         obj_idx: usize,
         encoding: &mut ObjEncoding<DbGte, DbTotalizer>,

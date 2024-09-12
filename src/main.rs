@@ -268,36 +268,36 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                         }
                     }
                 },
-                PbEncoding::Dpw => match card_enc {
-                    CardEncoding::Tot => {
-                        type BosEnc<OInit = DefaultInitializer> =
-                            Bos<pb::DynamicPolyWatchdog, card::DbTotalizer, OInit>;
-                        match cli.cadical_config {
-                            CadicalConfig::Default => {
-                                let mut alg = setup_alg::<BosEnc>(cli, inst, opts)?;
-                                alg.solve(cli.limits)?;
-                                post_solve(alg, cli, prepro, reindexer)
-                            }
-                            CadicalConfig::Plain => {
-                                let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLPlainInit>>(cli, inst, opts)?;
-                                alg.solve(cli.limits)?;
-                                post_solve(alg, cli, prepro, reindexer)
-                            }
-                            CadicalConfig::Sat => {
-                                let mut alg = setup_alg::<BosEnc<CaDiCaLSatInit>>(cli, inst, opts)?;
-                                alg.solve(cli.limits)?;
-                                post_solve(alg, cli, prepro, reindexer)
-                            }
-                            CadicalConfig::Unsat => {
-                                let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLUnsatInit>>(cli, inst, opts)?;
-                                alg.solve(cli.limits)?;
-                                post_solve(alg, cli, prepro, reindexer)
-                            }
-                        }
-                    }
-                },
+                // PbEncoding::Dpw => match card_enc {
+                //     CardEncoding::Tot => {
+                //         type BosEnc<OInit = DefaultInitializer> =
+                //             Bos<pb::DynamicPolyWatchdog, card::DbTotalizer, OInit>;
+                //         match cli.cadical_config {
+                //             CadicalConfig::Default => {
+                //                 let mut alg = setup_alg::<BosEnc>(cli, inst, opts)?;
+                //                 alg.solve(cli.limits)?;
+                //                 post_solve(alg, cli, prepro, reindexer)
+                //             }
+                //             CadicalConfig::Plain => {
+                //                 let mut alg =
+                //                     setup_alg::<BosEnc<CaDiCaLPlainInit>>(cli, inst, opts)?;
+                //                 alg.solve(cli.limits)?;
+                //                 post_solve(alg, cli, prepro, reindexer)
+                //             }
+                //             CadicalConfig::Sat => {
+                //                 let mut alg = setup_alg::<BosEnc<CaDiCaLSatInit>>(cli, inst, opts)?;
+                //                 alg.solve(cli.limits)?;
+                //                 post_solve(alg, cli, prepro, reindexer)
+                //             }
+                //             CadicalConfig::Unsat => {
+                //                 let mut alg =
+                //                     setup_alg::<BosEnc<CaDiCaLUnsatInit>>(cli, inst, opts)?;
+                //                 alg.solve(cli.limits)?;
+                //                 post_solve(alg, cli, prepro, reindexer)
+                //             }
+                //         }
+                //     }
+                // },
             }
         }
         Algorithm::LowerBounding(opts, ref cb_opts) => match cli.cadical_config {
