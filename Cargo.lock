@@ -749,6 +749,7 @@ dependencies = [
  "cpu-time",
  "git2",
  "glob",
+ "pidgeons",
  "rustsat",
  "thiserror",
 ]

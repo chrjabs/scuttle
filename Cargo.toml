@@ -21,6 +21,7 @@ rustsat = { version = "0.5.0", path = "./rustsat", features = [
 ] }
 rustsat-cadical = { version = "0.3", path = "./rustsat/cadical", features = [
   "v2-0-0",
+  "pidgeons",
 ] }
 signal-hook = "0.3.17"
 scuttle-core = { version = "0.4.0", path = "./core" }

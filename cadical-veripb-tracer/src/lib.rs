@@ -5,9 +5,10 @@ use std::io;
 use pidgeons::{AbsConstraintId, Proof};
 use rustsat::{
     encodings::{CollectCertClauses, CollectClauses},
+    solvers::SolverResult,
     types::{Clause, Lit, RsHashSet, Var},
 };
-use rustsat_cadical::{CaDiCaL, ClauseId, ProofTracerHandle, TraceProof};
+use rustsat_cadical::{CaDiCaL, CaDiCaLClause, ClauseId, ProofTracerHandle, TraceProof};
 
 #[derive(Debug)]
 pub struct CadicalTracer<ProofW: io::Write> {
@@ -61,7 +62,7 @@ where
         &mut self,
         id: ClauseId,
         redundant: bool,
-        clause: &Clause,
+        clause: &CaDiCaLClause,
         antecedents: &[ClauseId],
     ) -> AbsConstraintId {
         debug_assert!(!antecedents.is_empty());
@@ -93,7 +94,7 @@ where
         &mut self,
         id: ClauseId,
         _redundant: bool,
-        _clause: &Clause,
+        _clause: &CaDiCaLClause,
         restored: bool,
     ) {
         if restored {
@@ -119,13 +120,13 @@ where
         &mut self,
         id: ClauseId,
         redundant: bool,
-        clause: &Clause,
+        clause: &CaDiCaLClause,
         antecedents: &[ClauseId],
     ) {
         self.add_derived(id, redundant, clause, antecedents);
     }
 
-    fn delete_clause(&mut self, id: ClauseId, redundant: bool, _clause: &Clause) {
+    fn delete_clause(&mut self, id: ClauseId, redundant: bool, _clause: &CaDiCaLClause) {
         if !redundant {
             // don't delete clauses that are not redundant
             // NOTE: in cadicals proof tracer itself, this is `!redundant &&
@@ -136,7 +137,7 @@ where
         let id = self.cmap.map(id);
         let proof = self.proof.as_mut().expect("expected proof");
         proof
-            .delete_ids::<Var, Clause, _, _>([id.into()], None)
+            .delete_ids::<Var, CaDiCaLClause, _, _>([id.into()], None)
             .expect("failed to write proof")
     }
 
@@ -148,8 +149,20 @@ where
             .expect("failed to write proof");
     }
 
-    fn weaken_minus(&mut self, id: ClauseId, _clause: &Clause) {
+    fn weaken_minus(&mut self, id: ClauseId, _clause: &CaDiCaLClause) {
         self.weakened_clauses.insert(id);
+    }
+
+    fn report_status(&mut self, _status: SolverResult, _id: ClauseId) {
+        #[cfg(feature = "verbose")]
+        self.proof
+            .as_mut()
+            .expect("expected proof")
+            .comment(
+                &"CaDiCaL: finished solving: {_status}, id: {}",
+                self.cmap.map(_id),
+            )
+            .expect("failed to write proof");
     }
 
     fn solve_query(&mut self) {
@@ -180,7 +193,12 @@ where
         self.assumptions.clear()
     }
 
-    fn add_assumption_clause(&mut self, id: ClauseId, clause: &Clause, antecedents: &[ClauseId]) {
+    fn add_assumption_clause(
+        &mut self,
+        id: ClauseId,
+        clause: &CaDiCaLClause,
+        antecedents: &[ClauseId],
+    ) {
         //#[cfg(feature = "verbose")]
         //{
         //    let proof = self.proof.as_mut().expect("expected proof");
@@ -195,7 +213,7 @@ where
 
 fn write_derived<ProofW, I>(
     proof: &mut Proof<ProofW>,
-    _clause: &Clause,
+    _clause: &CaDiCaLClause,
     antecedents: I,
 ) -> AbsConstraintId
 where
