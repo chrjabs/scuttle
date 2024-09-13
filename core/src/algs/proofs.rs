@@ -327,7 +327,7 @@ where
         identity_map,
     } = proof_stuff;
     #[cfg(feature = "verbose-proofs")]
-    self.oracle
+    oracle
         .proof_tracer_mut(pt_handle)
         .proof_mut()
         .comment(&"reification of multiple assumptions for one objective encoding")?;

@@ -483,6 +483,8 @@ where
     {
         match self {
             ObjEncoding::Weighted(enc, offset) => {
+                #[cfg(feature = "verbose-proofs")]
+                proof.comment(&"extend generalized totalizer")?;
                 enc.encode_ub_change_cert(
                     if range.start >= *offset {
                         range.start - *offset
@@ -499,6 +501,8 @@ where
                 )?;
             }
             ObjEncoding::Unweighted(enc, offset) => {
+                #[cfg(feature = "verbose-proofs")]
+                proof.comment(&"extend totalizer")?;
                 enc.encode_ub_change_cert(
                     if range.start >= *offset {
                         range.start - *offset
