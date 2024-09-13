@@ -600,19 +600,8 @@ where
                 continue;
             }
             // Encode and add to solver
-            if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
-                let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
-                let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
-                enc.encode_ub_change_cert(
-                    cst - 1..cst,
-                    &mut collector,
-                    &mut self.var_manager,
-                    unsafe { &mut *proof },
-                )?;
-            } else {
-                enc.encode_ub_change(cst - 1..cst, &mut self.oracle, &mut self.var_manager)?;
-            }
-            let assumps = enc.enforce_ub(cst - 1).unwrap();
+            self.extend_encoding(enc, cst - 1..cst)?;
+            let assumps = enc.enforce_ub(cst - 1)?;
             if assumps.len() == 1 {
                 clause.add(assumps[0]);
             } else {

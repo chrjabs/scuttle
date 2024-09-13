@@ -155,14 +155,20 @@ where
 
     fn report_status(&mut self, _status: SolverResult, _id: ClauseId) {
         #[cfg(feature = "verbose")]
-        self.proof
-            .as_mut()
-            .expect("expected proof")
-            .comment(
-                &"CaDiCaL: finished solving: {_status}, id: {}",
-                self.cmap.map(_id),
-            )
-            .expect("failed to write proof");
+        {
+            let id = if _id.0 > 0 {
+                Some(self.cmap.map(_id))
+            } else {
+                None
+            };
+            self.proof
+                .as_mut()
+                .expect("expected proof")
+                .comment(&format_args!(
+                    "CaDiCaL: finished solving: {_status}, id: {id:?}",
+                ))
+                .expect("failed to write proof");
+        }
     }
 
     fn solve_query(&mut self) {

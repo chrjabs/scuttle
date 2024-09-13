@@ -327,7 +327,7 @@ where
                     let mut core = self.oracle.core()?;
                     if !base_assumps.is_empty() {
                         // filter out base assumptions
-                        // !!! Note: this relies on the fact that the core is in the same order as the
+                        // NOTE: this relies on the fact that the core is in the same order as the
                         // assumptions going into the solver
                         let mut base_assumps_idx = 0;
                         core.retain(|&lit| {

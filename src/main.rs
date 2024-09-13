@@ -216,54 +216,108 @@ fn sub_main(cli: &Cli) -> MaybeTerminatedError {
                             Bos<pb::DbGte, card::DbTotalizer, OInit>;
                         match cli.cadical_config {
                             CadicalConfig::Default => {
-                                let mut alg = setup_alg::<BosEnc>(cli, inst, opts)?;
-                                let cont = if let Some(opts) = cb_opts {
-                                    alg.core_boost(opts.clone())?
+                                type Slv = BosEnc;
+                                if let Some(proof) = proof {
+                                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                                    let cont = if let Some(opts) = cb_opts {
+                                        alg.core_boost(opts.clone())?
+                                    } else {
+                                        true
+                                    };
+                                    if cont {
+                                        alg.solve(cli.limits)?;
+                                    };
+                                    post_solve(alg, cli, prepro, reindexer)
                                 } else {
-                                    true
-                                };
-                                if cont {
-                                    alg.solve(cli.limits)?;
-                                };
-                                post_solve(alg, cli, prepro, reindexer)
+                                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                                    let cont = if let Some(opts) = cb_opts {
+                                        alg.core_boost(opts.clone())?
+                                    } else {
+                                        true
+                                    };
+                                    if cont {
+                                        alg.solve(cli.limits)?;
+                                    };
+                                    post_solve(alg, cli, prepro, reindexer)
+                                }
                             }
                             CadicalConfig::Plain => {
-                                let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLPlainInit>>(cli, inst, opts)?;
-                                let cont = if let Some(opts) = cb_opts {
-                                    alg.core_boost(opts.clone())?
+                                type Slv = BosEnc<CaDiCaLPlainInit>;
+                                if let Some(proof) = proof {
+                                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                                    let cont = if let Some(opts) = cb_opts {
+                                        alg.core_boost(opts.clone())?
+                                    } else {
+                                        true
+                                    };
+                                    if cont {
+                                        alg.solve(cli.limits)?;
+                                    };
+                                    post_solve(alg, cli, prepro, reindexer)
                                 } else {
-                                    true
-                                };
-                                if cont {
-                                    alg.solve(cli.limits)?;
-                                };
-                                post_solve(alg, cli, prepro, reindexer)
+                                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                                    let cont = if let Some(opts) = cb_opts {
+                                        alg.core_boost(opts.clone())?
+                                    } else {
+                                        true
+                                    };
+                                    if cont {
+                                        alg.solve(cli.limits)?;
+                                    };
+                                    post_solve(alg, cli, prepro, reindexer)
+                                }
                             }
                             CadicalConfig::Sat => {
-                                let mut alg = setup_alg::<BosEnc<CaDiCaLSatInit>>(cli, inst, opts)?;
-                                let cont = if let Some(opts) = cb_opts {
-                                    alg.core_boost(opts.clone())?
+                                type Slv = BosEnc<CaDiCaLSatInit>;
+                                if let Some(proof) = proof {
+                                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                                    let cont = if let Some(opts) = cb_opts {
+                                        alg.core_boost(opts.clone())?
+                                    } else {
+                                        true
+                                    };
+                                    if cont {
+                                        alg.solve(cli.limits)?;
+                                    };
+                                    post_solve(alg, cli, prepro, reindexer)
                                 } else {
-                                    true
-                                };
-                                if cont {
-                                    alg.solve(cli.limits)?;
-                                };
-                                post_solve(alg, cli, prepro, reindexer)
+                                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                                    let cont = if let Some(opts) = cb_opts {
+                                        alg.core_boost(opts.clone())?
+                                    } else {
+                                        true
+                                    };
+                                    if cont {
+                                        alg.solve(cli.limits)?;
+                                    };
+                                    post_solve(alg, cli, prepro, reindexer)
+                                }
                             }
                             CadicalConfig::Unsat => {
-                                let mut alg =
-                                    setup_alg::<BosEnc<CaDiCaLUnsatInit>>(cli, inst, opts)?;
-                                let cont = if let Some(opts) = cb_opts {
-                                    alg.core_boost(opts.clone())?
+                                type Slv = BosEnc<CaDiCaLUnsatInit>;
+                                if let Some(proof) = proof {
+                                    let mut alg = setup_alg_cert::<Slv>(cli, inst, opts, proof)?;
+                                    let cont = if let Some(opts) = cb_opts {
+                                        alg.core_boost(opts.clone())?
+                                    } else {
+                                        true
+                                    };
+                                    if cont {
+                                        alg.solve(cli.limits)?;
+                                    };
+                                    post_solve(alg, cli, prepro, reindexer)
                                 } else {
-                                    true
-                                };
-                                if cont {
-                                    alg.solve(cli.limits)?;
-                                };
-                                post_solve(alg, cli, prepro, reindexer)
+                                    let mut alg = setup_alg::<Slv>(cli, inst, opts)?;
+                                    let cont = if let Some(opts) = cb_opts {
+                                        alg.core_boost(opts.clone())?
+                                    } else {
+                                        true
+                                    };
+                                    if cont {
+                                        alg.solve(cli.limits)?;
+                                    };
+                                    post_solve(alg, cli, prepro, reindexer)
+                                }
                             }
                         }
                     }

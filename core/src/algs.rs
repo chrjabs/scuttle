@@ -3,7 +3,7 @@
 use std::{
     io,
     marker::PhantomData,
-    ops::Not,
+    ops::{Not, Range},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -14,7 +14,7 @@ use std::{
 use std::sync::Mutex;
 
 use anyhow::Context;
-use cadical_veripb_tracer::CadicalTracer;
+use cadical_veripb_tracer::{CadicalCertCollector, CadicalTracer};
 use maxpre::MaxPre;
 use rustsat::{
     encodings::{card::DbTotalizer, pb::DbGte},
@@ -767,11 +767,11 @@ where
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
         collector: &mut Col,
-    ) -> MaybeTerminatedError<Option<usize>>
+    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pidgeons::AbsConstraintId>)>>
     where
         Col: Extend<NonDomPoint>,
     {
-        let Some((cost, mut sol, _)) =
+        let Some((cost, mut sol, lb_id)) =
             self.linsu(obj_idx, encoding, base_assumps, upper_bound, lower_bound)?
         else {
             // nothing to yield
@@ -786,10 +786,10 @@ where
         debug_assert_eq!(costs[obj_idx], cost);
         // bound obj
         let mut assumps = Vec::from(base_assumps);
-        encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager)?;
+        self.extend_encoding(encoding, cost..cost + 1)?;
         assumps.extend(encoding.enforce_ub(cost).unwrap());
-        self.yield_solutions(costs, &assumps, sol, collector)?;
-        Done(Some(cost))
+        self.yield_solutions(costs, &assumps, sol.clone(), collector)?;
+        Done(Some((cost, sol, lb_id)))
     }
 }
 
@@ -837,11 +837,10 @@ where
 
         let lower_bound = lower_bound.unwrap_or(0);
 
-        let mut assumps = Vec::from(base_assumps);
         let (mut cost, mut sol) = if let Some(bound) = upper_bound {
             bound
         } else {
-            let res = self.solve_assumps(&assumps)?;
+            let res = self.solve_assumps(base_assumps)?;
             if res == SolverResult::Unsat {
                 self.log_routine_end()?;
                 return Done(None);
@@ -850,6 +849,7 @@ where
             let cost = self.get_cost_with_heuristic_improvements(obj_idx, &mut sol, true)?;
             (cost, Some(sol))
         };
+        let mut assumps = Vec::from(base_assumps);
         #[cfg(feature = "coarse-convergence")]
         let mut coarse = true;
         while cost > lower_bound {
@@ -861,7 +861,7 @@ where
                 cost - 1
             };
             assumps.drain(base_assumps.len()..);
-            encoding.encode_ub_change(bound..bound + 1, &mut self.oracle, &mut self.var_manager)?;
+            self.extend_encoding(encoding, bound..bound + 1)?;
             assumps.extend(encoding.enforce_ub(bound).unwrap());
             match self.solve_assumps(&assumps)? {
                 SolverResult::Sat => {
@@ -880,7 +880,6 @@ where
                     cost = new_cost;
                     if cost <= lower_bound {
                         self.log_routine_end()?;
-                        // TODO: derive lower bound in proof
                         return Done(Some((cost, sol.unwrap(), None)));
                     }
                 }
@@ -892,15 +891,14 @@ where
                     }
 
                     if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
-                        if base_assumps.is_empty() {
-                            // for now, can only derive lower bound without base assumptions
-                            lb_id = Some(proofs::linsu_certify_lower_bound(
-                                cost,
-                                &(self.oracle.core()?),
-                                encoding,
-                                self.oracle.proof_tracer_mut(pt_handle),
-                            )?);
-                        }
+                        // for now, can only derive lower bound without base assumptions
+                        lb_id = Some(proofs::linsu_certify_lower_bound(
+                            base_assumps,
+                            cost,
+                            &(self.oracle.core()?),
+                            encoding,
+                            self.oracle.proof_tracer_mut(pt_handle),
+                        )?);
                     }
 
                     break;
@@ -911,7 +909,8 @@ where
 
         // make sure to have a solution
         if sol.is_none() {
-            encoding.encode_ub_change(cost..cost + 1, &mut self.oracle, &mut self.var_manager)?;
+            self.extend_encoding(encoding, cost..cost + 1)?;
+            assumps.drain(base_assumps.len()..);
             assumps.extend(encoding.enforce_ub(cost).unwrap());
             let res = self.solve_assumps(&assumps)?;
             debug_assert_eq!(res, SolverResult::Sat);
@@ -919,6 +918,33 @@ where
         }
         self.log_routine_end()?;
         Done(Some((cost, sol.unwrap(), lb_id)))
+    }
+
+    fn extend_encoding(
+        &mut self,
+        encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
+        range: Range<usize>,
+    ) -> anyhow::Result<()> {
+        if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+            let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+            #[cfg(feature = "verbose-proofs")]
+            {
+                unsafe { &mut *proof }.comment(&format_args!(
+                    "extending encoding to {}..{}",
+                    range.start, range.end,
+                ))?;
+            }
+            let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
+            encoding.encode_ub_change_cert(
+                range,
+                &mut collector,
+                &mut self.var_manager,
+                unsafe { &mut *proof },
+            )?;
+        } else {
+            encoding.encode_ub_change(range, &mut self.oracle, &mut self.var_manager)?;
+        }
+        Ok(())
     }
 }
 

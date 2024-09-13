@@ -7,17 +7,21 @@
 
 use std::{fs, io};
 
+use cadical_veripb_tracer::CadicalCertCollector;
+use pidgeons::{OperationLike, OperationSequence};
 use rustsat::{
+    clause,
     encodings::{
-        self,
+        self, atomics,
         card::{self, DbTotalizer},
         pb::{self, DbGte},
+        CollectCertClauses,
     },
     solvers::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Clause, Lit, WLitIter},
+    types::{Assignment, Clause, Lit, Var, WLitIter},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
@@ -29,7 +33,9 @@ use crate::{
     MaybeTerminatedError::{self, Done},
 };
 
-use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, ObjEncoding, Objective, ProofStuff};
+use super::{
+    coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, Objective, ProofStuff,
+};
 
 /// The BiOptSat algorithm type
 ///
@@ -55,7 +61,7 @@ pub struct BiOptSat<
     /// The solver kernel
     kernel: Kernel<O, ProofW, OInit, BCG>,
     /// A cardinality or pseudo-boolean encoding for each objective
-    obj_encs: (ObjEncoding<PBE, CE>, ObjEncoding<PBE, CE>),
+    obj_encs: [ObjEncoding<PBE, CE>; 2],
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
 }
@@ -166,7 +172,7 @@ where
         self.kernel
             .objs
             .iter()
-            .zip([&self.obj_encs.0, &self.obj_encs.1])
+            .zip(&self.obj_encs)
             .map(|(obj, enc)| {
                 let mut s = EncodingStats {
                     offset: obj.offset(),
@@ -231,7 +237,7 @@ where
         };
         Self {
             kernel,
-            obj_encs: (inc_enc, dec_enc),
+            obj_encs: [inc_enc, dec_enc],
             pareto_front: Default::default(),
         }
     }
@@ -247,7 +253,7 @@ where
     fn alg_main(&mut self) -> MaybeTerminatedError {
         self.kernel.bioptsat(
             (0, 1),
-            (&mut self.obj_encs.0, &mut self.obj_encs.1),
+            &mut self.obj_encs,
             &[],
             None,
             (None, None),
@@ -285,8 +291,8 @@ where
             }
             AfterCbOptions::Inpro(techs) => {
                 let mut encs = self.kernel.inprocess(techs, cb_res)?;
-                self.obj_encs.1 = encs.pop().unwrap();
-                self.obj_encs.0 = encs.pop().unwrap();
+                self.obj_encs[1] = encs.pop().unwrap();
+                self.obj_encs[0] = encs.pop().unwrap();
                 self.kernel.check_termination()?;
                 return Done(true);
             }
@@ -298,9 +304,9 @@ where
             }
             if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
                 if oidx == 0 {
-                    self.obj_encs.0 = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
+                    self.obj_encs[0] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
                 } else {
-                    self.obj_encs.1 = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
+                    self.obj_encs[1] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
                 }
             }
             self.kernel.check_termination()?;
@@ -328,10 +334,7 @@ where
     pub fn bioptsat<Lookup, Col>(
         &mut self,
         (inc_obj, dec_obj): (usize, usize),
-        (inc_encoding, dec_encoding): (
-            &mut ObjEncoding<DbGte, DbTotalizer>,
-            &mut ObjEncoding<DbGte, DbTotalizer>,
-        ),
+        encodings: &mut [ObjEncoding<DbGte, DbTotalizer>],
         base_assumps: &[Lit],
         starting_point: Option<(usize, Assignment)>,
         (inc_lb, dec_lb): (Option<usize>, Option<usize>),
@@ -344,8 +347,10 @@ where
     {
         self.log_routine_start("bioptsat")?;
 
-        let mut inc_lb = inc_lb.unwrap_or(inc_encoding.offset());
-        let dec_lb = dec_lb.unwrap_or(dec_encoding.offset());
+        debug_assert_eq!(encodings.len(), 2);
+
+        let mut inc_lb = inc_lb.unwrap_or(encodings[0].offset());
+        let dec_lb = dec_lb.unwrap_or(encodings[1].offset());
 
         let mut assumps = Vec::from(base_assumps);
         let (mut inc_cost, mut sol) = if let Some(bound) = starting_point {
@@ -360,12 +365,14 @@ where
             (cost, sol)
         };
         let mut dec_cost;
+        let mut last_dec_lb_id = None;
+        let mut last_cut_id = None;
         loop {
             // minimize inc_obj
-            let Some((new_inc_cost, new_sol, lb_id)) = self.linsu(
+            let Some((new_inc_cost, new_sol, inc_lb_id)) = self.linsu(
                 inc_obj,
-                inc_encoding,
-                &assumps,
+                &mut encodings[0],
+                base_assumps,
                 Some((inc_cost, Some(sol))),
                 Some(inc_lb),
             )?
@@ -376,32 +383,22 @@ where
             };
             (inc_cost, sol) = (new_inc_cost, new_sol);
 
-            // Derive global lower bound on increasing objective in proof
-            if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
-                if inc_cost == inc_lb {
-                    // TODO: potentially have to convice veripb of lower bound here
-                } else {
-                    let lb_id = lb_id.unwrap();
-                }
-            }
-
-            inc_lb = inc_cost + 1;
             dec_cost = self.get_cost_with_heuristic_improvements(dec_obj, &mut sol, false)?;
+            let mut dec_lb_id = None;
             if let Some(found) = lookup(inc_cost) {
+                // lookup not supported with proofs
+                debug_assert!(self.proof_stuff.is_none());
                 dec_cost = found;
             } else {
                 // bound inc_obj
-                inc_encoding.encode_ub_change(
-                    inc_cost..inc_cost + 1,
-                    &mut self.oracle,
-                    &mut self.var_manager,
-                )?;
-                assumps.extend(inc_encoding.enforce_ub(inc_cost).unwrap());
+                self.extend_encoding(&mut encodings[0], inc_cost..inc_cost + 1)?;
+                assumps.drain(base_assumps.len()..);
+                assumps.extend(encodings[0].enforce_ub(inc_cost).unwrap());
                 // minimize dec_obj
-                dec_cost = self
+                (dec_cost, sol, dec_lb_id) = self
                     .linsu_yield(
                         dec_obj,
-                        dec_encoding,
+                        &mut encodings[1],
                         &assumps,
                         Some((dec_cost, Some(sol))),
                         Some(dec_lb),
@@ -411,20 +408,161 @@ where
             };
             // termination condition: can't decrease decreasing objective further
             if dec_cost <= dec_lb {
+                if let Some(ProofStuff {
+                    pt_handle,
+                    identity_map,
+                }) = &self.proof_stuff
+                {
+                    // don't support base assumptions for proof logging for now
+                    debug_assert!(base_assumps.is_empty());
+                    let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    // get p-min cut for current solution in proof
+                    let witness = sol.truncate(self.var_manager.max_enc_var());
+                    let pmin_cut_id = proofs::certify_pmin_cut(
+                        encodings,
+                        &self.objs,
+                        &[inc_cost, dec_cost],
+                        &witness,
+                        identity_map,
+                        proof,
+                    )?;
+                    // derive cut that will be added
+                    let _cut_id = if inc_cost <= encodings[0].offset() {
+                        pmin_cut_id
+                    } else {
+                        // global lower bound on increasing objective in proof
+                        let inc_lb_id = if inc_cost == inc_lb {
+                            // manually derive lower bound from last cut
+                            // TODO: with GTE, need to derive shortened version of last_dec_lb_id
+                            // in order for this to work
+                            let lb_id = proof.operations::<Var>(
+                                &(OperationSequence::from(last_cut_id.unwrap())
+                                    + last_dec_lb_id.unwrap()),
+                            )?;
+                            #[cfg(feature = "verbose-proofs")]
+                            {
+                                let (olit, _) = encodings[0].output_proof_details(inc_cost);
+                                proof.equals(
+                                    &pidgeons::Axiom::from(olit),
+                                    Some(pidgeons::ConstraintId::from(lb_id)),
+                                )?;
+                            }
+                            lb_id
+                        } else {
+                            inc_lb_id.unwrap()
+                        };
+                        proof.operations::<Var>(
+                            &(OperationSequence::from(inc_lb_id) + pmin_cut_id),
+                        )?
+                    };
+                    #[cfg(feature = "verbose-proofs")]
+                    {
+                        proof.equals(
+                            &rustsat::clause![],
+                            Some(pidgeons::ConstraintId::from(_cut_id)),
+                        )?;
+                    }
+                }
                 break;
             }
             // skip to next non-dom
-            assumps.drain(base_assumps.len()..);
-            dec_encoding.encode_ub_change(
-                dec_cost - 1..dec_cost,
-                &mut self.oracle,
-                &mut self.var_manager,
-            )?;
-            if base_assumps.is_empty() {
+            self.extend_encoding(&mut encodings[1], dec_cost - 1..dec_cost)?;
+
+            if let Some(ProofStuff {
+                pt_handle,
+                identity_map,
+            }) = &self.proof_stuff
+            {
+                // don't support base assumptions for proof logging for now
+                debug_assert!(base_assumps.is_empty());
+                let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                // get p-min cut for current solution in proof
+                let witness = sol.truncate(self.var_manager.max_enc_var());
+                let pmin_cut_id = proofs::certify_pmin_cut(
+                    encodings,
+                    &self.objs,
+                    &[inc_cost, dec_cost],
+                    &witness,
+                    identity_map,
+                    proof,
+                )?;
+                // derive cut that will be added
+                let cut_id = if inc_cost <= encodings[0].offset() {
+                    pmin_cut_id
+                } else {
+                    // global lower bound on increasing objective in proof
+                    let inc_lb_id = if inc_cost == inc_lb {
+                        // manually derive lower bound from last cut
+                        let lb_id = proof.operations::<Var>(
+                            &(OperationSequence::from(last_cut_id.unwrap())
+                                + last_dec_lb_id.unwrap()),
+                        )?;
+                        #[cfg(feature = "verbose-proofs")]
+                        {
+                            let (olit, _) = encodings[0].output_proof_details(inc_cost);
+                            proof.equals(
+                                &pidgeons::Axiom::from(olit),
+                                Some(pidgeons::ConstraintId::from(lb_id)),
+                            )?;
+                        }
+                        lb_id
+                    } else {
+                        inc_lb_id.unwrap()
+                    };
+                    proof.operations::<Var>(&(OperationSequence::from(inc_lb_id) + pmin_cut_id))?
+                };
+                #[cfg(feature = "verbose-proofs")]
+                {
+                    let (olit, _) = encodings[1].output_proof_details(dec_cost);
+                    proof.equals(
+                        &pidgeons::Axiom::from(!olit),
+                        Some(pidgeons::ConstraintId::from(cut_id)),
+                    )?;
+                }
+                last_cut_id = Some(cut_id);
+
+                // add cut
+                let assumps = encodings[1].enforce_ub(dec_cost - 1)?;
+                CadicalCertCollector::new(&mut self.oracle, pt_handle)
+                    .add_cert_clause(clause![assumps[0]], cut_id)?;
+                let (first_olit, first_sems) = encodings[1].output_proof_details(dec_cost);
+                debug_assert_eq!(!first_olit, assumps[0]);
+
+                let mut val = dec_cost;
+                for &a in &assumps[1..] {
+                    val = encodings[1].next_higher(val);
+                    // first convince veripb that `olit -> first_olit`
+                    let (olit, sems) = encodings[1].output_proof_details(val);
+                    debug_assert_eq!(!olit, a);
+                    let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    let implication = proof.operations::<Var>(
+                        &((OperationSequence::from(first_sems.if_def.unwrap())
+                            + sems.only_if_def.unwrap())
+                            / (val - dec_cost + 1))
+                            .saturate(),
+                    )?;
+                    #[cfg(feature = "verbose-proofs")]
+                    proof.equals(
+                        &clause![!olit, first_olit],
+                        Some(pidgeons::ConstraintId::from(implication)),
+                    )?;
+                    let id = proof
+                        .operations::<Var>(&(OperationSequence::from(cut_id) + implication))?;
+                    CadicalCertCollector::new(&mut self.oracle, pt_handle)
+                        .add_cert_clause(clause![a], id)?;
+                }
             } else {
-                assumps.extend(dec_encoding.enforce_ub(dec_cost - 1).unwrap());
+                for cl in
+                    atomics::cube_impl_cube(base_assumps, &encodings[1].enforce_ub(dec_cost - 1)?)
+                {
+                    self.oracle.add_clause(cl)?;
+                }
             }
-            (sol, inc_cost) = match self.solve_assumps(&assumps)? {
+            inc_lb = inc_cost + 1;
+            dbg!(dec_lb_id);
+            last_dec_lb_id = dec_lb_id;
+
+            (sol, inc_cost) = match self.solve_assumps(base_assumps)? {
                 SolverResult::Sat => {
                     let mut sol = self.oracle.solution(self.var_manager.max_orig_var())?;
                     let cost =

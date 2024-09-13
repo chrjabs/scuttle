@@ -428,22 +428,7 @@ where
                     // update bound
                     let enc = &mut obj_encs[obj_idx];
                     *bound = enc.next_higher(*bound);
-                    if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
-                        let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
-                        let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
-                        enc.encode_ub_change_cert(
-                            *bound..*bound + 1,
-                            &mut collector,
-                            &mut self.var_manager,
-                            unsafe { &mut *proof },
-                        )?;
-                    } else {
-                        enc.encode_ub_change(
-                            *bound..*bound + 1,
-                            &mut self.oracle,
-                            &mut self.var_manager,
-                        )?;
-                    };
+                    self.extend_encoding(enc, *bound..*bound + 1)?;
                     *assumps = enc.enforce_ub(*bound).unwrap();
                     continue 'core;
                 }

@@ -175,6 +175,27 @@ macro_rules! generate_tests {
     };
 }
 
+macro_rules! generate_biobj_tests {
+    ($mod:ident, $s:ty, $o:expr) => {
+        mod $mod {
+            #[test]
+            fn small_cert() {
+                small!($s, $o);
+            }
+
+            #[test]
+            fn medium_cert() {
+                medium!($s, $o);
+            }
+
+            #[test]
+            fn medium_weighted_cert() {
+                medium_weighted!($s, $o);
+            }
+        }
+    };
+}
+
 fn new_proof(
     num_constraints: usize,
     optimization: bool,
@@ -232,4 +253,9 @@ mod pmin {
 mod lb {
     type S = scuttle_core::LowerBounding<rustsat_cadical::CaDiCaL<'static, 'static>>;
     generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
+}
+
+mod bos {
+    type S = scuttle_core::BiOptSat<rustsat_cadical::CaDiCaL<'static, 'static>>;
+    generate_biobj_tests!(default, super::S, scuttle_core::KernelOptions::default());
 }
