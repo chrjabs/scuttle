@@ -1,0 +1,2 @@
+[env]
+CADICAL_PATCHES = { value = "patches/0001-perf-disable-finalize.patch", relative = true }
