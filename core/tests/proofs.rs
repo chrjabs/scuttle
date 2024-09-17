@@ -103,6 +103,34 @@ macro_rules! medium_weighted {
     };
 }
 
+macro_rules! medium_weighted_2 {
+    ($s:ty, $o:expr) => {
+        test_instance!(
+            $s,
+            $o,
+            "./data/medium-weighted-2.mcnf",
+            vec![
+                (vec![0, 15], 1),
+                (vec![1, 14], 1),
+                (vec![2, 13], 1),
+                (vec![3, 12], 1),
+                (vec![4, 11], 1),
+                (vec![5, 10], 1),
+                (vec![6, 9], 1),
+                (vec![7, 8], 1),
+                (vec![8, 7], 1),
+                (vec![9, 6], 1),
+                (vec![10, 5], 1),
+                (vec![11, 4], 1),
+                (vec![12, 3], 1),
+                (vec![13, 2], 1),
+                (vec![14, 1], 1),
+                (vec![15, 0], 1),
+            ]
+        )
+    };
+}
+
 macro_rules! four {
     ($s:ty, $o:expr) => {
         test_instance!(
@@ -163,6 +191,11 @@ macro_rules! generate_tests {
             }
 
             #[test]
+            fn medium_weighted_2_cert() {
+                medium_weighted_2!($s, $o);
+            }
+
+            #[test]
             fn four_cert() {
                 four!($s, $o);
             }
@@ -191,6 +224,11 @@ macro_rules! generate_biobj_tests {
             #[test]
             fn medium_weighted_cert() {
                 medium_weighted!($s, $o);
+            }
+
+            #[test]
+            fn medium_weighted_2_cert() {
+                medium_weighted_2!($s, $o);
             }
         }
     };

@@ -13,13 +13,14 @@ use std::sync::Mutex;
 use cadical_veripb_tracer::{CadicalCertCollector, CadicalTracer};
 use pidgeons::{
     AbsConstraintId, Axiom, ConstraintId, ConstraintLike, Derivation, OperationLike,
-    OperationSequence, Order, OrderVar, Proof, ProofGoal, ProofGoalId, ProofOnlyVar, VarLike,
+    OperationSequence, Order, OrderVar, Proof, ProofGoal, ProofGoalId, ProofOnlyVar, Substitution,
+    VarLike,
 };
 use rustsat::{
     encodings::{atomics, card::DbTotalizer, pb::DbGte, CollectCertClauses},
     instances::{Cnf, ManageVars},
     solvers::Initialize,
-    types::{Assignment, Clause, Lit, TernaryVal, Var, WLitIter},
+    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var, WLitIter},
 };
 use rustsat_cadical::CaDiCaL;
 
@@ -28,7 +29,7 @@ use crate::{
     KernelOptions, Limits, Stats,
 };
 
-use super::{default_blocking_clause, ProofStuff};
+use super::default_blocking_clause;
 
 /// Trait for initializing algorithms
 pub trait InitCert: super::Init {
@@ -104,6 +105,22 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
 impl<Alg> InitCertDefaultBlock for Alg where Alg: InitCert<BlockClauseGen = fn(Assignment) -> Clause>
 {}
 
+/// Stuff to keep in the solver for proof logging
+pub struct ProofStuff<ProofW: io::Write> {
+    /// The handle of the proof tracer
+    pub pt_handle: rustsat_cadical::ProofTracerHandle<CadicalTracer<ProofW>>,
+    /// Mapping literal values to other literal values or other expressions
+    value_map: Vec<(Axiom<AnyVar>, Value)>,
+    /// Reified objective constraints
+    obj_bound_constrs: RsHashMap<(usize, usize), (Axiom<AnyVar>, AbsConstraintId, AbsConstraintId)>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Value {
+    Identical(Lit),
+    ObjAtLeast(usize, usize),
+}
+
 fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<Var>>> {
     let mut order = Order::<Var, LbConstraint<_>>::new(String::from("pareto"));
     for (idx, obj) in objs.iter().enumerate() {
@@ -115,12 +132,10 @@ fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<V
                 .flat_map(|(l, w)| {
                     let w = isize::try_from(w).expect("can only handle weights up to `isize::MAX`");
                     let (u, v) = order.use_var(l.var());
-                    let (u, v) = if l.is_pos() {
-                        (u.pos_axiom(), v.pos_axiom())
-                    } else {
-                        (u.neg_axiom(), v.neg_axiom())
-                    };
-                    [(-w * mult, u), (w * mult, v)]
+                    [
+                        (-w * mult, u.axiom(l.is_neg())),
+                        (w * mult, v.axiom(l.is_neg())),
+                    ]
                 })
                 .collect(),
             bound: 0,
@@ -140,7 +155,7 @@ fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<V
     order
 }
 
-pub fn certify_pmin_cut<ProofW: io::Write>(
+pub fn certify_pmin_cut<ProofW>(
     obj_encs: &[ObjEncoding<
         rustsat::encodings::pb::DbGte,
         rustsat::encodings::card::DbTotalizer,
@@ -148,36 +163,75 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
     objs: &[Objective],
     costs: &[usize],
     witness: &Assignment,
-    identity_map: &[(Lit, Lit)],
-    proof: &mut Proof<ProofW>,
-) -> io::Result<AbsConstraintId> {
+    proof_stuff: &mut ProofStuff<ProofW>,
+    oracle: &mut rustsat_cadical::CaDiCaL<'_, '_>,
+) -> io::Result<AbsConstraintId>
+where
+    ProofW: io::Write + 'static,
+{
+    let ProofStuff {
+        pt_handle,
+        value_map,
+        obj_bound_constrs,
+    } = proof_stuff;
+
+    let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
+
     #[cfg(feature = "verbose-proofs")]
     {
-        proof.comment(&"Introducing P-minimal cut based on the following witness:")?;
+        use itertools::Itertools;
+        proof.comment(&format_args!(
+            "Introducing P-minimal cut for costs [{}] based on the following witness:",
+            costs.iter().format(", "),
+        ))?;
         proof.comment(&format_args!("{witness}"))?;
     }
 
     // buid the "ideal" cut. this is only valid with the strict proof semantics
-    let cut: Clause = obj_encs
+    let cut_data: Vec<_> = obj_encs
         .iter()
         .zip(objs)
         .zip(costs)
-        .flat_map(|((enc, obj), cst)| {
+        .enumerate()
+        .map(|(idx, ((enc, obj), cst))| {
             if *cst <= enc.offset() {
-                return None;
+                return (None, None);
             }
             if obj.n_lits() == 1 {
-                return Some(!obj.iter().next().unwrap().0);
+                let lit = !obj.iter().next().unwrap().0;
+                return (Some(AnyVar::Solver(lit.var()).axiom(lit.is_neg())), None);
             }
-            let (olit, _) = enc.output_proof_details(*cst);
-            Some(!olit)
+            let (lit, def) = if enc.is_buffer_empty() {
+                // totalizer output semantics are identical with the required semantics, can
+                // therefore reuse totalizer output
+                let (olit, defs) = enc.output_proof_details(*cst);
+                (
+                    AnyVar::Solver(olit.var()).axiom(olit.is_neg()),
+                    defs.only_if_def,
+                )
+            } else {
+                // totalizer output semantics do _not_ include the entire objective and can
+                // therefore not be used
+                let (lit, _, def) =
+                    get_obj_bound_constraint(idx, *cst, obj, value_map, obj_bound_constrs, proof)
+                        .expect("failed to write proof");
+                (lit, Some(def))
+            };
+            (Some(!lit), def)
         })
         .collect();
+    let cut = LbConstraint {
+        lits: cut_data
+            .iter()
+            .flat_map(|&(l, _)| l.map(|l| (1, l)))
+            .collect(),
+        bound: 1,
+    };
 
     // Extend witness to encoding variables under strict semantics
     // TODO: avoid clone
-    let fixed_witness = {
-        let mut fixed_witness: Assignment = witness
+    let fixed_witness: Vec<Axiom<AnyVar>> = {
+        let fixed_witness: Assignment = witness
             .iter()
             .chain(
                 obj_encs
@@ -187,14 +241,30 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
             .collect();
         // NOTE: Need to do this in two steps since the identities depend on the encoding
         // assignments
-        for &(this, that) in identity_map.iter() {
-            match fixed_witness.lit_value(this) {
-                TernaryVal::True => fixed_witness.assign_lit(that),
-                TernaryVal::False => fixed_witness.assign_lit(!that),
-                TernaryVal::DontCare => panic!("need assignment for left of identity"),
+        let mut additional = Vec::new();
+        for &(this, that) in value_map.iter() {
+            match that {
+                Value::Identical(that) => match fixed_witness.lit_value(that) {
+                    TernaryVal::True => additional.push(this),
+                    TernaryVal::False => additional.push(!this),
+                    TernaryVal::DontCare => {
+                        panic!("need assignment for left of identity ({this:?}, {that})")
+                    }
+                },
+                Value::ObjAtLeast(obj_idx, value) => {
+                    if costs[obj_idx] >= value {
+                        additional.push(this);
+                    } else {
+                        additional.push(!this);
+                    }
+                }
             }
         }
         fixed_witness
+            .into_iter()
+            .map(axiom)
+            .chain(additional)
+            .collect()
     };
 
     // Introduce indicator variable for being at accactly the solution in question
@@ -210,7 +280,7 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
         &LbConstraint {
             lits: [(bound, is_this.neg_axiom())]
                 .into_iter()
-                .chain(fixed_witness.iter().map(|l| (1, axiom(l))))
+                .chain(fixed_witness.iter().map(|l| (1, *l)))
                 .collect(),
             bound,
         },
@@ -219,47 +289,46 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
     )?;
 
     // Map all weakly dominated solutions to the witness itself
-    let map_dom =
-        proof.redundant(
-            &LbConstraint {
-                lits: [(1, is_this.pos_axiom())]
-                    .into_iter()
-                    .chain(cut.iter().map(|l| (1, axiom(*l))))
-                    .collect(),
-                bound: 1,
-            },
-            [is_this.substitute_fixed(true)].into_iter().chain(
-                fixed_witness
-                    .iter()
-                    .map(|l| AnyVar::Solver(l.var()).substitute_fixed(l.is_pos())),
-            ),
-            obj_encs.iter().zip(objs).zip(costs).enumerate().filter_map(
-                |(idx, ((enc, obj), cst))| {
-                    if *cst <= enc.offset() || obj.n_lits() <= 1 {
-                        return None;
-                    }
-                    let (olit, sems) = enc.output_proof_details(*cst);
-                    Some(ProofGoal::new(
-                        ProofGoalId::specific(idx + 2),
-                        [
-                            Derivation::Rup(
-                                LbConstraint {
-                                    lits: vec![(1, axiom(olit))],
-                                    bound: 1,
-                                },
-                                vec![(is_this_def + 1).into()],
-                            ),
-                            Derivation::from(
-                                ((OperationSequence::from(ConstraintId::last(1)) * *cst)
-                                    + sems.only_if_def.unwrap())
-                                    * obj.unit_weight()
-                                    + ConstraintId::last(2),
-                            ),
-                        ],
-                    ))
-                },
-            ),
-        )?;
+    let map_dom = proof.redundant(
+        &LbConstraint {
+            lits: [(1, is_this.pos_axiom())]
+                .into_iter()
+                .chain(cut.lits.iter().copied())
+                .collect(),
+            bound: 1,
+        },
+        [is_this.substitute_fixed(true)]
+            .into_iter()
+            .chain(fixed_witness.iter().map(|l| Substitution::from(*l))),
+        //obj_encs.iter().zip(objs).zip(costs).enumerate().filter_map(
+        cut_data
+            .into_iter()
+            .zip(objs)
+            .zip(costs)
+            .enumerate()
+            .filter_map(|(idx, ((dat, obj), cst))| {
+                let (Some(lit), Some(def)) = dat else {
+                    return None;
+                };
+                Some(ProofGoal::new(
+                    ProofGoalId::specific(idx + 2),
+                    [
+                        Derivation::Rup(
+                            LbConstraint {
+                                lits: vec![(1, !lit)],
+                                bound: 1,
+                            },
+                            vec![(is_this_def + 1).into()],
+                        ),
+                        Derivation::from(
+                            ((OperationSequence::from(ConstraintId::last(1)) * *cst) + def)
+                                * obj.unit_weight()
+                                + ConstraintId::last(2),
+                        ),
+                    ],
+                ))
+            }),
+    )?;
 
     // Exclude witness
     let exclude = proof.exclude_solution(witness.iter().map(Axiom::from))?;
@@ -268,7 +337,7 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
         &LbConstraint {
             lits: fixed_witness
                 .iter()
-                .map(|l| (1, axiom(!l)))
+                .map(|l| (1, !*l))
                 .chain([(1, is_this.neg_axiom())])
                 .collect(),
             bound: 1,
@@ -313,7 +382,9 @@ pub fn certify_pmin_cut<ProofW: io::Write>(
 pub fn certify_assump_reification<ProofW>(
     oracle: &mut CaDiCaL<'_, '_>,
     proof_stuff: &mut ProofStuff<ProofW>,
+    obj: &Objective,
     enc: &ObjEncoding<DbGte, DbTotalizer>,
+    obj_idx: usize,
     value: usize,
     reif_lit: Lit,
     assumps: &[Lit],
@@ -323,7 +394,8 @@ where
 {
     let ProofStuff {
         pt_handle,
-        identity_map,
+        value_map,
+        obj_bound_constrs,
     } = proof_stuff;
     #[cfg(feature = "verbose-proofs")]
     oracle
@@ -331,45 +403,104 @@ where
         .proof_mut()
         .comment(&"reification of multiple assumptions for one objective encoding")?;
     let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
-    // NOTE: this assumes that the assumptions are outputs in increasing order
-    let mut assumps = assumps.iter();
-    let a = *assumps.next().unwrap();
-    // in the proof, the reification literal is going to be _equal_ to the lowest
-    // output
-    let clause = atomics::lit_impl_lit(reif_lit, a);
-    let if_def = proof.redundant(&clause, [reif_lit.var().substitute_fixed(false)], None)?;
-    let only_if_def = proof.redundant(
-        &atomics::lit_impl_lit(a, reif_lit),
-        [reif_lit.var().substitute_fixed(true)],
-        None,
-    )?;
-    identity_map.push((a, reif_lit));
-    CadicalCertCollector::new(oracle, pt_handle).add_cert_clause(clause, if_def)?;
-    let (first_olit, first_sems) = enc.output_proof_details(value);
-    debug_assert_eq!(!first_olit, a);
-    // all remaining assumptions are implied by the reification literal
-    let mut val = value;
-    for &a in assumps {
-        let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
-        val = enc.next_higher(val);
-        // first convince veripb that `olit -> first_olit`
-        let (olit, sems) = enc.output_proof_details(val);
-        debug_assert_eq!(!olit, a);
-        let implication = proof.operations::<Var>(
-            &((OperationSequence::from(first_sems.if_def.unwrap()) + sems.only_if_def.unwrap())
-                / (val - value + 1))
-                .saturate(),
-        )?;
-        #[cfg(feature = "verbose-proofs")]
-        proof.equals(
-            &rustsat::clause![!olit, first_olit],
-            Some(ConstraintId::last(1)),
-        )?;
+    Ok(if enc.is_buffer_empty() {
+        // NOTE: this assumes that the assumptions are outputs in increasing order
+        let mut assumps = assumps.iter();
+        let a = *assumps.next().unwrap();
+        // in the proof, the reification literal is going to be _equal_ to the lowest
+        // output
         let clause = atomics::lit_impl_lit(reif_lit, a);
-        let id = proof.reverse_unit_prop(&clause, [implication.into(), if_def.into()])?;
-        CadicalCertCollector::new(oracle, pt_handle).add_cert_clause(clause, id)?;
-    }
-    Ok(only_if_def)
+        let if_def = proof.redundant(&clause, [reif_lit.var().substitute_fixed(false)], None)?;
+        let only_if_def = proof.redundant(
+            &atomics::lit_impl_lit(a, reif_lit),
+            [reif_lit.var().substitute_fixed(true)],
+            None,
+        )?;
+        value_map.push((axiom(reif_lit), Value::Identical(a)));
+        CadicalCertCollector::new(oracle, pt_handle).add_cert_clause(clause, if_def)?;
+        let (first_olit, first_sems) = enc.output_proof_details(value);
+        debug_assert_eq!(!first_olit, a);
+        // all remaining assumptions are implied by the reification literal
+        let mut val = value;
+        for &a in assumps {
+            let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
+            val = enc.next_higher(val);
+            // first convince veripb that `olit -> first_olit`
+            let (olit, sems) = enc.output_proof_details(val);
+            debug_assert_eq!(!olit, a);
+            let implication = proof.operations::<Var>(
+                &((OperationSequence::from(first_sems.if_def.unwrap())
+                    + sems.only_if_def.unwrap())
+                    / (val - value + 1))
+                    .saturate(),
+            )?;
+            #[cfg(feature = "verbose-proofs")]
+            proof.equals(
+                &rustsat::clause![!olit, first_olit],
+                Some(ConstraintId::last(1)),
+            )?;
+            let clause = atomics::lit_impl_lit(reif_lit, a);
+            let id = proof.reverse_unit_prop(&clause, [implication.into(), if_def.into()])?;
+            CadicalCertCollector::new(oracle, pt_handle).add_cert_clause(clause, id)?;
+        }
+        only_if_def
+    } else {
+        // cannot reuse first totalizer output as semantics of the reification literal, need to
+        // introduce new proof variable for needed semantics
+        let (ideal_lit, def_1, _) =
+            get_obj_bound_constraint(obj_idx, value, obj, value_map, obj_bound_constrs, proof)?;
+        // the reification variable is implied by the objective bound
+        let if_def = proof.redundant(
+            &LbConstraint {
+                lits: vec![(1, axiom(!reif_lit)), (1, !ideal_lit)],
+                bound: 1,
+            },
+            [AnyVar::Solver(reif_lit.var()).substitute_fixed(false)],
+            None,
+        )?;
+        let only_if_def = proof.redundant(
+            &LbConstraint {
+                lits: vec![(1, axiom(reif_lit)), (1, ideal_lit)],
+                bound: 1,
+            },
+            [AnyVar::Solver(reif_lit.var()).substitute_fixed(true)],
+            None,
+        )?;
+        value_map.push((axiom(!reif_lit), Value::ObjAtLeast(obj_idx, value)));
+        let mut val = value;
+        for &a in assumps {
+            let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
+            let clause = atomics::lit_impl_lit(reif_lit, a);
+            let (olit, sems) = enc.output_proof_details(val);
+            // NOTE: this assumes that objective encoding variables are higher than GTE variables
+            // and that the buffered input variables are first in the assumptions
+            let id = if a.var() < olit.var() {
+                // this is an input literal with weight higher than the bound
+                proof.reverse_unit_prop(
+                    &clause,
+                    [if_def, def_1].into_iter().map(ConstraintId::from),
+                )?
+            } else {
+                // this is an output literal of a subtree
+                debug_assert_eq!(!olit, a);
+                let tmp = proof.operations::<AnyVar>(
+                    &(OperationSequence::from(def_1) + sems.only_if_def.unwrap()),
+                )?;
+                let id = proof.reverse_unit_prop(
+                    &clause,
+                    [if_def, tmp].into_iter().map(ConstraintId::from),
+                )?;
+                proof.delete_ids::<AnyVar, LbConstraint<AnyVar>, _, _>(
+                    [ConstraintId::from(tmp)],
+                    None,
+                )?;
+                val = enc.next_higher(val);
+                id
+            };
+            CadicalCertCollector::new(oracle, pt_handle).add_cert_clause(clause, id)?;
+        }
+        only_if_def
+    })
 }
 
 pub fn linsu_certify_lower_bound<ProofW>(
@@ -460,6 +591,67 @@ where
     Ok(core_id)
 }
 
+fn get_obj_bound_constraint<ProofW>(
+    obj_idx: usize,
+    value: usize,
+    obj: &Objective,
+    value_map: &mut Vec<(Axiom<AnyVar>, Value)>,
+    obj_bound_constrs: &mut RsHashMap<
+        (usize, usize),
+        (Axiom<AnyVar>, AbsConstraintId, AbsConstraintId),
+    >,
+    proof: &mut Proof<ProofW>,
+) -> io::Result<(Axiom<AnyVar>, AbsConstraintId, AbsConstraintId)>
+where
+    ProofW: io::Write,
+{
+    if let Some((lit, def_1, def_2)) = obj_bound_constrs.get(&(obj_idx, value)) {
+        return Ok((*lit, *def_1, *def_2));
+    }
+    // introduce a new objective bound reification
+    let obj_reif_var = AnyVar::Proof(proof.new_proof_var());
+    value_map.push((obj_reif_var.pos_axiom(), Value::ObjAtLeast(obj_idx, value)));
+    #[cfg(feature = "verbose-proofs")]
+    proof.comment(&format_args!(
+        "{obj_reif_var} = objective {obj_idx} is >= {value}",
+    ))?;
+    let bound = isize::try_from(obj.iter().fold(0, |sum, (_, w)| sum + w)).unwrap() + 1
+        - isize::try_from(value).unwrap();
+    let def_1 = proof.redundant(
+        &LbConstraint {
+            lits: obj
+                .iter()
+                .map(|(l, w)| {
+                    let w = isize::try_from(w).expect("can only handle weights up to `isize::MAX`");
+                    (w, AnyVar::Solver(l.var()).axiom(l.is_pos()))
+                })
+                .chain([(bound, obj_reif_var.pos_axiom())])
+                .collect(),
+            bound,
+        },
+        [obj_reif_var.substitute_fixed(true)],
+        [],
+    )?;
+    let bound = isize::try_from(value).unwrap();
+    let def_2 = proof.redundant(
+        &LbConstraint {
+            lits: obj
+                .iter()
+                .map(|(l, w)| {
+                    let w = isize::try_from(w).expect("can only handle weights up to `isize::MAX`");
+                    (w, AnyVar::Solver(l.var()).axiom(l.is_neg()))
+                })
+                .chain([(bound, obj_reif_var.neg_axiom())])
+                .collect(),
+            bound,
+        },
+        [obj_reif_var.substitute_fixed(false)],
+        [],
+    )?;
+    obj_bound_constrs.insert((obj_idx, value), (obj_reif_var.pos_axiom(), def_1, def_2));
+    Ok((obj_reif_var.pos_axiom(), def_1, def_2))
+}
+
 struct LbConstraint<V: VarLike> {
     lits: Vec<(isize, Axiom<V>)>,
     bound: isize,
@@ -498,11 +690,7 @@ impl VarLike for AnyVar {
 }
 
 fn axiom(lit: Lit) -> Axiom<AnyVar> {
-    if lit.is_pos() {
-        AnyVar::Solver(lit.var()).pos_axiom()
-    } else {
-        AnyVar::Solver(lit.var()).neg_axiom()
-    }
+    AnyVar::Solver(lit.var()).axiom(lit.is_neg())
 }
 
 impl fmt::Display for AnyVar {
@@ -649,9 +837,10 @@ where
             term_flag: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "interrupt-oracle")]
             oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
-            proof_stuff: Some(super::ProofStuff {
+            proof_stuff: Some(ProofStuff {
                 pt_handle,
-                identity_map: Vec::default(),
+                value_map: Vec::default(),
+                obj_bound_constrs: RsHashMap::default(),
             }),
             _factory: PhantomData,
         })

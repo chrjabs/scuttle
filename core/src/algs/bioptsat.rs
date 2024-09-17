@@ -33,9 +33,7 @@ use crate::{
     MaybeTerminatedError::{self, Done},
 };
 
-use super::{
-    coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, Objective, ProofStuff,
-};
+use super::{coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, Objective};
 
 /// The BiOptSat algorithm type
 ///
@@ -408,14 +406,9 @@ where
             };
             // termination condition: can't decrease decreasing objective further
             if dec_cost <= dec_lb {
-                if let Some(ProofStuff {
-                    pt_handle,
-                    identity_map,
-                }) = &self.proof_stuff
-                {
+                if let Some(proof_stuff) = &mut self.proof_stuff {
                     // don't support base assumptions for proof logging for now
                     debug_assert!(base_assumps.is_empty());
-                    let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
                     // get p-min cut for current solution in proof
                     let witness = sol.truncate(self.var_manager.max_enc_var());
                     let pmin_cut_id = proofs::certify_pmin_cut(
@@ -423,9 +416,13 @@ where
                         &self.objs,
                         &[inc_cost, dec_cost],
                         &witness,
-                        identity_map,
-                        proof,
+                        proof_stuff,
+                        &mut self.oracle,
                     )?;
+                    let proof = self
+                        .oracle
+                        .proof_tracer_mut(&proof_stuff.pt_handle)
+                        .proof_mut();
                     // derive cut that will be added
                     let _cut_id = if inc_cost <= encodings[0].offset() {
                         pmin_cut_id
@@ -468,14 +465,9 @@ where
             // skip to next non-dom
             self.extend_encoding(&mut encodings[1], dec_cost - 1..dec_cost)?;
 
-            if let Some(ProofStuff {
-                pt_handle,
-                identity_map,
-            }) = &self.proof_stuff
-            {
+            if let Some(proof_stuff) = &mut self.proof_stuff {
                 // don't support base assumptions for proof logging for now
                 debug_assert!(base_assumps.is_empty());
-                let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
                 // get p-min cut for current solution in proof
                 let witness = sol.truncate(self.var_manager.max_enc_var());
                 let pmin_cut_id = proofs::certify_pmin_cut(
@@ -483,9 +475,13 @@ where
                     &self.objs,
                     &[inc_cost, dec_cost],
                     &witness,
-                    identity_map,
-                    proof,
+                    proof_stuff,
+                    &mut self.oracle,
                 )?;
+                let proof = self
+                    .oracle
+                    .proof_tracer_mut(&proof_stuff.pt_handle)
+                    .proof_mut();
                 // derive cut that will be added
                 let cut_id = if inc_cost <= encodings[0].offset() {
                     pmin_cut_id
@@ -523,7 +519,7 @@ where
 
                 // add cut
                 let assumps = encodings[1].enforce_ub(dec_cost - 1)?;
-                CadicalCertCollector::new(&mut self.oracle, pt_handle)
+                CadicalCertCollector::new(&mut self.oracle, &proof_stuff.pt_handle)
                     .add_cert_clause(clause![assumps[0]], cut_id)?;
                 let (first_olit, first_sems) = encodings[1].output_proof_details(dec_cost);
                 debug_assert_eq!(!first_olit, assumps[0]);
@@ -534,7 +530,10 @@ where
                     // first convince veripb that `olit -> first_olit`
                     let (olit, sems) = encodings[1].output_proof_details(val);
                     debug_assert_eq!(!olit, a);
-                    let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    let proof = self
+                        .oracle
+                        .proof_tracer_mut(&proof_stuff.pt_handle)
+                        .proof_mut();
                     let implication = proof.operations::<Var>(
                         &((OperationSequence::from(first_sems.if_def.unwrap())
                             + sems.only_if_def.unwrap())
@@ -548,7 +547,7 @@ where
                     )?;
                     let id = proof
                         .operations::<Var>(&(OperationSequence::from(cut_id) + implication))?;
-                    CadicalCertCollector::new(&mut self.oracle, pt_handle)
+                    CadicalCertCollector::new(&mut self.oracle, &proof_stuff.pt_handle)
                         .add_cert_clause(clause![a], id)?;
                 }
             } else {

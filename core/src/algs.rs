@@ -14,7 +14,7 @@ use std::{
 use std::sync::Mutex;
 
 use anyhow::Context;
-use cadical_veripb_tracer::{CadicalCertCollector, CadicalTracer};
+use cadical_veripb_tracer::CadicalCertCollector;
 use maxpre::MaxPre;
 use rustsat::{
     encodings::{card::DbTotalizer, pb::DbGte},
@@ -194,17 +194,9 @@ where
     #[cfg(feature = "interrupt-oracle")]
     oracle_interrupter: Arc<Mutex<Box<dyn rustsat::solvers::InterruptSolver + Send>>>,
     /// The handle of the proof tracer, when proof logging
-    proof_stuff: Option<ProofStuff<ProofW>>,
+    proof_stuff: Option<proofs::ProofStuff<ProofW>>,
     /// Phantom marker for oracle factory
     _factory: PhantomData<OInit>,
-}
-
-/// Stuff to keep in the solver for proof logging
-struct ProofStuff<ProofW: io::Write> {
-    /// The handle of the proof tracer
-    pt_handle: rustsat_cadical::ProofTracerHandle<CadicalTracer<ProofW>>,
-    /// Literal mapping where we need to ensure that the second lit equals the first in the proof
-    identity_map: Vec<(Lit, Lit)>,
 }
 
 #[oracle_bounds]
@@ -890,7 +882,7 @@ where
                         continue;
                     }
 
-                    if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                    if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
                         // for now, can only derive lower bound without base assumptions
                         lb_id = Some(proofs::linsu_certify_lower_bound(
                             base_assumps,
@@ -925,7 +917,7 @@ where
         encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
         range: Range<usize>,
     ) -> anyhow::Result<()> {
-        if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+        if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
             let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
             #[cfg(feature = "verbose-proofs")]
             {

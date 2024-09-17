@@ -545,6 +545,13 @@ impl ObjEncoding<pb::DbGte, card::DbTotalizer> {
             ObjEncoding::Constant => None.into_iter().flatten(),
         }
     }
+
+    pub fn is_buffer_empty(&self) -> bool {
+        match self {
+            ObjEncoding::Weighted(enc, _) => enc.is_buffer_empty(),
+            ObjEncoding::Unweighted(_, _) | ObjEncoding::Constant => true,
+        }
+    }
 }
 
 #[cfg(feature = "sol-tightening")]

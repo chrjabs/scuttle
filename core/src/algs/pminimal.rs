@@ -36,7 +36,7 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
-    algs::{proofs, ObjEncoding, ProofStuff},
+    algs::{proofs, ObjEncoding},
     options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
     termination::ensure,
     types::{ParetoFront, VarManager},
@@ -288,11 +288,7 @@ where
 
             // Block last Pareto point, if temporarily blocked
             if let Some((block_lit, ids)) = block_switch {
-                if let Some(ProofStuff {
-                    pt_handle,
-                    identity_map,
-                }) = &self.kernel.proof_stuff
-                {
+                if let Some(proof_stuff) = &mut self.kernel.proof_stuff {
                     use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
                     use rustsat::encodings::CollectCertClauses;
 
@@ -300,15 +296,19 @@ where
                     let witness = solution
                         .clone()
                         .truncate(self.kernel.var_manager.max_enc_var());
-                    let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
                     let id = proofs::certify_pmin_cut(
                         &self.obj_encs,
                         &self.kernel.objs,
                         &costs,
                         &witness,
-                        identity_map,
-                        proof,
+                        proof_stuff,
+                        &mut self.kernel.oracle,
                     )?;
+                    let proof = self
+                        .kernel
+                        .oracle
+                        .proof_tracer_mut(&proof_stuff.pt_handle)
+                        .proof_mut();
                     let hints = [ConstraintId::last(2), ConstraintId::last(1), id.into()]
                         .into_iter()
                         .chain(reified_assump_ids.iter().map(|id| ConstraintId::from(*id)));
@@ -323,7 +323,7 @@ where
                     )?;
                     cadical_veripb_tracer::CadicalCertCollector::new(
                         &mut self.kernel.oracle,
-                        pt_handle,
+                        &proof_stuff.pt_handle,
                     )
                     .add_cert_clause(unit, unit_id)?;
                 } else {
@@ -422,24 +422,23 @@ where
                 // Block permanently since no enumeration at Pareto point
                 let (block_clause, reification_ids) =
                     self.dominated_block_clause(&costs, obj_encs)?;
-                if let Some(ProofStuff {
-                    pt_handle,
-                    identity_map,
-                }) = &self.proof_stuff
-                {
+                if let Some(proof_stuff) = &mut self.proof_stuff {
                     use rustsat::encodings::CollectCertClauses;
 
                     let witness = solution.clone().truncate(self.var_manager.max_enc_var());
-                    let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
                     // this adds the "ideal cut"
                     let cut_id = proofs::certify_pmin_cut(
                         obj_encs,
                         &self.objs,
                         &costs,
                         &witness,
-                        identity_map,
-                        proof,
+                        proof_stuff,
+                        &mut self.oracle,
                     )?;
+                    let proof = self
+                        .oracle
+                        .proof_tracer_mut(&proof_stuff.pt_handle)
+                        .proof_mut();
                     // since there might be reifications of multiple assumptions per one encoding
                     // involved, the actual clause might differ and is added as rup here
                     let clause_id = proof.reverse_unit_prop(
@@ -451,7 +450,7 @@ where
                     )?;
                     let mut collector = cadical_veripb_tracer::CadicalCertCollector::new(
                         &mut self.oracle,
-                        pt_handle,
+                        &proof_stuff.pt_handle,
                     );
                     collector.add_cert_clause(block_clause, clause_id)?;
                 } else {
@@ -460,25 +459,24 @@ where
             } else {
                 // Permanently block last cadidate
                 if let Some((block_lit, ids)) = block_switch {
-                    if let Some(ProofStuff {
-                        pt_handle,
-                        identity_map,
-                    }) = &self.proof_stuff
-                    {
+                    if let Some(proof_stuff) = &mut self.proof_stuff {
                         use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
                         use rustsat::encodings::CollectCertClauses;
 
                         let (reified_cut, reified_assump_ids) = ids.unwrap();
                         let witness = solution.clone().truncate(self.var_manager.max_enc_var());
-                        let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
                         let id = proofs::certify_pmin_cut(
                             obj_encs,
                             &self.objs,
                             &costs,
                             &witness,
-                            identity_map,
-                            proof,
+                            proof_stuff,
+                            &mut self.oracle,
                         )?;
+                        let proof = self
+                            .oracle
+                            .proof_tracer_mut(&proof_stuff.pt_handle)
+                            .proof_mut();
                         let hints = [ConstraintId::last(2), ConstraintId::last(1), id.into()]
                             .into_iter()
                             .chain(reified_assump_ids.into_iter().map(ConstraintId::from));
@@ -493,7 +491,7 @@ where
                         )?;
                         cadical_veripb_tracer::CadicalCertCollector::new(
                             &mut self.oracle,
-                            pt_handle,
+                            &proof_stuff.pt_handle,
                         )
                         .add_cert_clause(unit, unit_id)?;
                     } else {
@@ -547,7 +545,7 @@ where
         obj_encs: &'a mut [ObjEncoding<DbGte, DbTotalizer>],
     ) -> anyhow::Result<impl Iterator<Item = Lit> + 'a> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
-        if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+        if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
             let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
             #[cfg(feature = "verbose-proofs")]
             {
@@ -611,7 +609,9 @@ where
                     let only_if_def = proofs::certify_assump_reification(
                         &mut self.oracle,
                         proof_stuff,
+                        &self.objs[idx],
                         enc,
+                        idx,
                         cst,
                         and_lit,
                         &assumps,
@@ -643,7 +643,7 @@ where
         let block_lit = self.var_manager.new_var().pos_lit();
         clause.add(block_lit);
         self.oracle.add_clause_ref(&clause).unwrap();
-        if let Some(ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+        if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
             let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
             let id = proof.redundant(&clause, [block_lit.var().substitute_fixed(true)], None)?;
             Ok((!block_lit, Some((id, reification_ids))))
