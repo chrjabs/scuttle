@@ -241,7 +241,8 @@ where
         };
         let objs: Vec<_> = objs
             .into_iter()
-            .map(|(wlits, offset)| Objective::new(wlits, offset))
+            .enumerate()
+            .map(|(idx, (wlits, offset))| Objective::new(wlits, offset, idx))
             .collect();
         stats.n_objs = objs.len();
         stats.n_real_objs = objs.iter().fold(0, |cnt, o| {
@@ -355,7 +356,7 @@ where
                         .expect("multiplied cost exceeds `isize`");
                     signed_mult_cost + offset
                 }
-                Objective::Constant { offset } => {
+                Objective::Constant { offset, .. } => {
                     debug_assert_eq!(cst, 0);
                     offset
                 }
@@ -882,14 +883,15 @@ where
                         continue;
                     }
 
-                    if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
-                        // for now, can only derive lower bound without base assumptions
+                    if let Some(proof_stuff) = &mut self.proof_stuff {
                         lb_id = Some(proofs::linsu_certify_lower_bound(
                             base_assumps,
                             cost,
                             &(self.oracle.core()?),
+                            &self.objs[obj_idx],
                             encoding,
-                            self.oracle.proof_tracer_mut(pt_handle),
+                            proof_stuff,
+                            &mut self.oracle,
                         )?);
                     }
 

@@ -169,22 +169,20 @@ pub fn certify_pmin_cut<ProofW>(
 where
     ProofW: io::Write + 'static,
 {
-    let ProofStuff {
-        pt_handle,
-        value_map,
-        obj_bound_constrs,
-    } = proof_stuff;
-
-    let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
-
     #[cfg(feature = "verbose-proofs")]
     {
         use itertools::Itertools;
-        proof.comment(&format_args!(
-            "Introducing P-minimal cut for costs [{}] based on the following witness:",
-            costs.iter().format(", "),
-        ))?;
-        proof.comment(&format_args!("{witness}"))?;
+        oracle
+            .proof_tracer_mut(&proof_stuff.pt_handle)
+            .proof_mut()
+            .comment(&format_args!(
+                "Introducing P-minimal cut for costs [{}] based on the following witness:",
+                costs.iter().format(", "),
+            ))?;
+        oracle
+            .proof_tracer_mut(&proof_stuff.pt_handle)
+            .proof_mut()
+            .comment(&format_args!("{witness}"))?;
     }
 
     // buid the "ideal" cut. this is only valid with the strict proof semantics
@@ -192,8 +190,7 @@ where
         .iter()
         .zip(objs)
         .zip(costs)
-        .enumerate()
-        .map(|(idx, ((enc, obj), cst))| {
+        .map(|((enc, obj), cst)| {
             if *cst <= enc.offset() {
                 return (None, None);
             }
@@ -212,21 +209,21 @@ where
             } else {
                 // totalizer output semantics do _not_ include the entire objective and can
                 // therefore not be used
-                let (lit, _, def) =
-                    get_obj_bound_constraint(idx, *cst, obj, value_map, obj_bound_constrs, proof)
-                        .expect("failed to write proof");
+                let (lit, _, def) = get_obj_bound_constraint(*cst, obj, proof_stuff, oracle)
+                    .expect("failed to write proof");
                 (lit, Some(def))
             };
             (Some(!lit), def)
         })
         .collect();
-    let cut = LbConstraint {
-        lits: cut_data
-            .iter()
-            .flat_map(|&(l, _)| l.map(|l| (1, l)))
-            .collect(),
-        bound: 1,
-    };
+    let cut = LbConstraint::clause(cut_data.iter().filter_map(|&(l, _)| l.map(|l| l)));
+
+    let ProofStuff {
+        pt_handle,
+        value_map,
+        ..
+    } = proof_stuff;
+    let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
 
     // Extend witness to encoding variables under strict semantics
     // TODO: avoid clone
@@ -314,10 +311,7 @@ where
                     ProofGoalId::specific(idx + 2),
                     [
                         Derivation::Rup(
-                            LbConstraint {
-                                lits: vec![(1, !lit)],
-                                bound: 1,
-                            },
+                            LbConstraint::clause([!lit]),
                             vec![(is_this_def + 1).into()],
                         ),
                         Derivation::from(
@@ -334,14 +328,12 @@ where
     let exclude = proof.exclude_solution(witness.iter().map(Axiom::from))?;
     #[cfg(feature = "verbose-proofs")]
     proof.equals(
-        &LbConstraint {
-            lits: fixed_witness
+        &LbConstraint::clause(
+            fixed_witness
                 .iter()
-                .map(|l| (1, !*l))
-                .chain([(1, is_this.neg_axiom())])
-                .collect(),
-            bound: 1,
-        },
+                .map(|l| !*l)
+                .chain([is_this.neg_axiom()]),
+        ),
         Some(exclude.into()),
     )?;
 
@@ -384,7 +376,6 @@ pub fn certify_assump_reification<ProofW>(
     proof_stuff: &mut ProofStuff<ProofW>,
     obj: &Objective,
     enc: &ObjEncoding<DbGte, DbTotalizer>,
-    obj_idx: usize,
     value: usize,
     reif_lit: Lit,
     assumps: &[Lit],
@@ -392,18 +383,19 @@ pub fn certify_assump_reification<ProofW>(
 where
     ProofW: io::Write + 'static,
 {
-    let ProofStuff {
-        pt_handle,
-        value_map,
-        obj_bound_constrs,
-    } = proof_stuff;
     #[cfg(feature = "verbose-proofs")]
     oracle
-        .proof_tracer_mut(pt_handle)
+        .proof_tracer_mut(&proof_stuff.pt_handle)
         .proof_mut()
         .comment(&"reification of multiple assumptions for one objective encoding")?;
-    let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
     Ok(if enc.is_buffer_empty() {
+        let ProofStuff {
+            pt_handle,
+            value_map,
+            ..
+        } = proof_stuff;
+        let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
+
         // NOTE: this assumes that the assumptions are outputs in increasing order
         let mut assumps = assumps.iter();
         let a = *assumps.next().unwrap();
@@ -442,31 +434,40 @@ where
             let clause = atomics::lit_impl_lit(reif_lit, a);
             let id = proof.reverse_unit_prop(&clause, [implication.into(), if_def.into()])?;
             CadicalCertCollector::new(oracle, pt_handle).add_cert_clause(clause, id)?;
+            // delete implication
+            oracle
+                .proof_tracer_mut(pt_handle)
+                .proof_mut()
+                .delete_ids::<AnyVar, LbConstraint<_>, _, _>(
+                    [ConstraintId::from(implication)],
+                    None,
+                )?;
         }
         only_if_def
     } else {
         // cannot reuse first totalizer output as semantics of the reification literal, need to
         // introduce new proof variable for needed semantics
-        let (ideal_lit, def_1, _) =
-            get_obj_bound_constraint(obj_idx, value, obj, value_map, obj_bound_constrs, proof)?;
+        let (ideal_lit, def_1, _) = get_obj_bound_constraint(value, obj, proof_stuff, oracle)?;
+
+        let ProofStuff {
+            pt_handle,
+            value_map,
+            ..
+        } = proof_stuff;
+        let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
+
         // the reification variable is implied by the objective bound
         let if_def = proof.redundant(
-            &LbConstraint {
-                lits: vec![(1, axiom(!reif_lit)), (1, !ideal_lit)],
-                bound: 1,
-            },
+            &LbConstraint::clause([axiom(!reif_lit), !ideal_lit]),
             [AnyVar::Solver(reif_lit.var()).substitute_fixed(false)],
             None,
         )?;
         let only_if_def = proof.redundant(
-            &LbConstraint {
-                lits: vec![(1, axiom(reif_lit)), (1, ideal_lit)],
-                bound: 1,
-            },
+            &LbConstraint::clause([axiom(reif_lit), (ideal_lit)]),
             [AnyVar::Solver(reif_lit.var()).substitute_fixed(true)],
             None,
         )?;
-        value_map.push((axiom(!reif_lit), Value::ObjAtLeast(obj_idx, value)));
+        value_map.push((axiom(!reif_lit), Value::ObjAtLeast(obj.idx(), value)));
         let mut val = value;
         for &a in assumps {
             let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
@@ -507,113 +508,187 @@ pub fn linsu_certify_lower_bound<ProofW>(
     base_assumps: &[Lit],
     cost: usize,
     core: &[Lit],
+    obj: &Objective,
     encoding: &ObjEncoding<DbGte, DbTotalizer>,
-    proof_tracer: &mut CadicalTracer<ProofW>,
+    proof_stuff: &mut ProofStuff<ProofW>,
+    oracle: &mut rustsat_cadical::CaDiCaL<'_, '_>,
 ) -> io::Result<AbsConstraintId>
 where
     ProofW: io::Write + 'static,
 {
     // derive lower bound on objective in proof
-    let core_id = proof_tracer.core_id().expect("expected core id in proof");
-    let proof = proof_tracer.proof_mut();
+    let core_id = oracle
+        .proof_tracer_mut(&proof_stuff.pt_handle)
+        .core_id()
+        .expect("expected core id in proof");
     #[cfg(feature = "verbose-proofs")]
     {
         use itertools::Itertools;
-        proof.comment(&format_args!(
-            "certifying linsu lower bound for bound {cost} from core [{}]",
-            core.iter().format(", ")
-        ))?;
+        oracle
+            .proof_tracer_mut(&proof_stuff.pt_handle)
+            .proof_mut()
+            .comment(&format_args!(
+                "certifying linsu lower bound for bound {cost} from core [{}]",
+                core.iter().format(", ")
+            ))?;
     }
-    let (first_olit, first_sems) = encoding.output_proof_details(cost);
-    let core_id = if core.len() == 1 {
-        // unit core explicitly implies bound
-        debug_assert_eq!(core[0], first_olit);
-        core_id
-    } else {
-        // convince veripb that `core_lit -> first_olit` and therefore
-        // rewrite core as `first_olit` unit
-        // NOTE: this assumes that
-        // - the base assumptions are in the core first
-        // - the outputs are in the core in order of increasing value
-        let mut start = 0;
-        for &ba in base_assumps {
-            if core[start] == !ba {
-                start += 1;
+    let mut start = 0;
+    for &ba in base_assumps {
+        if core[start] == !ba {
+            start += 1;
+        }
+    }
+    let core_id = if encoding.is_buffer_empty() {
+        // encoding has empty buffer, output semantics can therefore be reused for objective bound
+        // semantics
+        let (first_olit, first_sems) = encoding.output_proof_details(cost);
+        if core.len() == 1 {
+            // unit core explicitly implies bound
+            debug_assert_eq!(core[0], first_olit);
+            core_id
+        } else {
+            let proof = oracle.proof_tracer_mut(&proof_stuff.pt_handle).proof_mut();
+
+            // convince veripb that `core_lit -> first_olit` and therefore
+            // rewrite core as `first_olit` unit
+            // NOTE: this assumes that
+            // - the base assumptions are in the core first
+            // - the outputs are in the core in order of increasing value
+            let start = if core[start] == first_olit {
+                start + 1
+            } else {
+                start
+            };
+            let mut implications = Vec::with_capacity(core.len());
+            let mut val = cost;
+            for &clit in &core[start..] {
+                let (mut olit, mut sems) = encoding.output_proof_details(val);
+                while clit != olit {
+                    val = encoding.next_higher(val);
+                    (olit, sems) = encoding.output_proof_details(val);
+                }
+                let implication = proof.operations::<Var>(
+                    &((OperationSequence::from(first_sems.if_def.unwrap())
+                        + sems.only_if_def.unwrap())
+                        / (val - cost + 1))
+                        .saturate(),
+                )?;
+                #[cfg(feature = "verbose-proofs")]
+                proof.equals(
+                    &rustsat::clause![!olit, first_olit],
+                    Some(ConstraintId::from(implication)),
+                )?;
+                implications.push(implication);
+                val = encoding.next_higher(val);
+            }
+            if !implications.is_empty() || !base_assumps.is_empty() {
+                // NOTE: we always run this case with base assumptions to ensure that all base
+                // assumptions are present in the returned ID
+
+                // rewrite the core
+                let core_id = proof.reverse_unit_prop(
+                    &atomics::cube_impl_lit(base_assumps, first_olit),
+                    implications
+                        .iter()
+                        .copied()
+                        .chain([core_id])
+                        .map(ConstraintId::from),
+                )?;
+                if !implications.is_empty() {
+                    // delete implications
+                    proof.delete_ids::<AnyVar, LbConstraint<_>, _, _>(
+                        implications.into_iter().map(ConstraintId::from),
+                        None,
+                    )?;
+                }
+                core_id
+            } else {
+                core_id
             }
         }
-        let start = if core[start] == first_olit {
-            start + 1
-        } else {
-            start
-        };
+    } else {
+        // cannot reuse first totalizer output as semantics of the reification literal, need to
+        // introduce new proof variable for needed semantics
+        let (ideal_lit, def_1, _) = get_obj_bound_constraint(cost, obj, proof_stuff, oracle)?;
+
+        let proof = oracle.proof_tracer_mut(&proof_stuff.pt_handle).proof_mut();
+
         let mut implications = Vec::with_capacity(core.len());
         let mut val = cost;
         for &clit in &core[start..] {
-            let (mut olit, mut sems);
-            loop {
-                val = encoding.next_higher(val);
-                (olit, sems) = encoding.output_proof_details(val);
-                if clit == olit {
-                    break;
+            let clause = LbConstraint::clause([axiom(!clit), ideal_lit]);
+            let (mut olit, mut sems) = encoding.output_proof_details(val);
+            let implication = if clit.var() < olit.var() {
+                proof.reverse_unit_prop(&clause, [ConstraintId::from(def_1)])?
+            } else {
+                while clit.var() != olit.var() {
+                    val = encoding.next_higher(val);
+                    (olit, sems) = encoding.output_proof_details(val);
                 }
-            }
-            let implication = proof.operations::<Var>(
-                &((OperationSequence::from(first_sems.if_def.unwrap())
-                    + sems.only_if_def.unwrap())
-                    / (val - cost + 1))
-                    .saturate(),
-            )?;
-            #[cfg(feature = "verbose-proofs")]
-            proof.equals(
-                &rustsat::clause![!olit, first_olit],
-                Some(ConstraintId::from(implication)),
-            )?;
+                let tmp = proof.operations::<AnyVar>(
+                    &(OperationSequence::from(def_1) + sems.only_if_def.unwrap()),
+                )?;
+                let implication = proof.reverse_unit_prop(&clause, [ConstraintId::from(tmp)])?;
+                proof.delete_ids::<AnyVar, LbConstraint<AnyVar>, _, _>(
+                    [ConstraintId::from(tmp)],
+                    None,
+                )?;
+                val = encoding.next_higher(val);
+                implication
+            };
             implications.push(implication);
-            val = encoding.next_higher(val);
         }
-        if !implications.is_empty() && core.len() != base_assumps.len() + 1 {
-            // rewrite the core
-            proof.reverse_unit_prop(
-                &atomics::cube_impl_lit(base_assumps, first_olit),
-                implications
-                    .into_iter()
-                    .chain([core_id])
-                    .map(ConstraintId::from),
-            )?
-        } else {
-            core_id
-        }
+        // rewrite the core
+        // we do this always to ensure that all base assumptions and the proof-only var are there
+        #[cfg(feature = "verbose-proofs")]
+        proof.comment(&"the next constraint is a linsu bound")?;
+        let core_id = proof.reverse_unit_prop(
+            &LbConstraint::clause(base_assumps.iter().map(|l| axiom(!*l)).chain([ideal_lit])),
+            implications
+                .iter()
+                .copied()
+                .chain([core_id])
+                .map(ConstraintId::from),
+        )?;
+        // delete implications
+        proof.delete_ids::<AnyVar, LbConstraint<_>, _, _>(
+            implications.into_iter().map(ConstraintId::from),
+            None,
+        )?;
+        core_id
     };
-    // let bound_id = proof.operations::<Var>(
-    //     &(OperationSequence::from(core_id) * cost
-    //         + first_sems.only_if_def.expect("expected only if definition")),
-    // )?;
     Ok(core_id)
 }
 
-fn get_obj_bound_constraint<ProofW>(
-    obj_idx: usize,
+pub fn get_obj_bound_constraint<ProofW>(
     value: usize,
     obj: &Objective,
-    value_map: &mut Vec<(Axiom<AnyVar>, Value)>,
-    obj_bound_constrs: &mut RsHashMap<
-        (usize, usize),
-        (Axiom<AnyVar>, AbsConstraintId, AbsConstraintId),
-    >,
-    proof: &mut Proof<ProofW>,
+    proof_stuff: &mut ProofStuff<ProofW>,
+    oracle: &mut rustsat_cadical::CaDiCaL<'_, '_>,
 ) -> io::Result<(Axiom<AnyVar>, AbsConstraintId, AbsConstraintId)>
 where
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
 {
-    if let Some((lit, def_1, def_2)) = obj_bound_constrs.get(&(obj_idx, value)) {
+    let ProofStuff {
+        pt_handle,
+        value_map,
+        obj_bound_constrs,
+    } = proof_stuff;
+    let proof = oracle.proof_tracer_mut(pt_handle).proof_mut();
+
+    if let Some((lit, def_1, def_2)) = obj_bound_constrs.get(&(obj.idx(), value)) {
         return Ok((*lit, *def_1, *def_2));
     }
     // introduce a new objective bound reification
     let obj_reif_var = AnyVar::Proof(proof.new_proof_var());
-    value_map.push((obj_reif_var.pos_axiom(), Value::ObjAtLeast(obj_idx, value)));
+    value_map.push((
+        obj_reif_var.pos_axiom(),
+        Value::ObjAtLeast(obj.idx(), value),
+    ));
     #[cfg(feature = "verbose-proofs")]
     proof.comment(&format_args!(
-        "{obj_reif_var} = objective {obj_idx} is >= {value}",
+        "{obj_reif_var} = objective {} is >= {value}",
+        obj.idx()
     ))?;
     let bound = isize::try_from(obj.iter().fold(0, |sum, (_, w)| sum + w)).unwrap() + 1
         - isize::try_from(value).unwrap();
@@ -648,13 +723,22 @@ where
         [obj_reif_var.substitute_fixed(false)],
         [],
     )?;
-    obj_bound_constrs.insert((obj_idx, value), (obj_reif_var.pos_axiom(), def_1, def_2));
+    obj_bound_constrs.insert((obj.idx(), value), (obj_reif_var.pos_axiom(), def_1, def_2));
     Ok((obj_reif_var.pos_axiom(), def_1, def_2))
 }
 
-struct LbConstraint<V: VarLike> {
+pub struct LbConstraint<V: VarLike> {
     lits: Vec<(isize, Axiom<V>)>,
     bound: isize,
+}
+
+impl<V: VarLike> LbConstraint<V> {
+    pub fn clause<I: IntoIterator<Item = Axiom<V>>>(iter: I) -> Self {
+        LbConstraint {
+            lits: iter.into_iter().map(|a| (1, a)).collect(),
+            bound: 1,
+        }
+    }
 }
 
 impl<V: VarLike> ConstraintLike<V> for LbConstraint<V> {
@@ -668,7 +752,7 @@ impl<V: VarLike> ConstraintLike<V> for LbConstraint<V> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum AnyVar {
+pub enum AnyVar {
     Proof(ProofOnlyVar),
     Solver(Var),
 }
@@ -753,7 +837,8 @@ where
 
         let objs: Vec<_> = objs
             .into_iter()
-            .map(|(wlits, offset)| Objective::new(wlits, offset))
+            .enumerate()
+            .map(|(idx, (wlits, offset))| Objective::new(wlits, offset, idx))
             .collect();
         stats.n_objs = objs.len();
         stats.n_real_objs = objs.iter().fold(0, |cnt, o| {
@@ -905,14 +990,16 @@ mod tests {
                 offset: 3,
                 unit_weight: 2,
                 lits: vec![lit![0], !lit![1], lit![2], lit![3]],
+                idx: 0,
             },
             Objective::Weighted {
                 offset: 42,
                 lits: [(lit![4], 4), (lit![2], 2), (lit![42], 42)]
                     .into_iter()
                     .collect(),
+                idx: 1,
             },
-            Objective::Constant { offset: 11 },
+            Objective::Constant { offset: 11, idx: 2 },
         ];
         let order = super::objectives_as_order(&objectives);
         let formatted = format!("{order}");

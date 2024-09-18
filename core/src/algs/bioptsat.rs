@@ -8,7 +8,7 @@
 use std::{fs, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;
-use pidgeons::{OperationLike, OperationSequence};
+use pidgeons::{ConstraintId, OperationLike, OperationSequence, VarLike};
 use rustsat::{
     clause,
     encodings::{
@@ -430,19 +430,20 @@ where
                         // global lower bound on increasing objective in proof
                         let inc_lb_id = if inc_cost == inc_lb {
                             // manually derive lower bound from last cut
-                            // TODO: with GTE, need to derive shortened version of last_dec_lb_id
-                            // in order for this to work
                             let lb_id = proof.operations::<Var>(
                                 &(OperationSequence::from(last_cut_id.unwrap())
                                     + last_dec_lb_id.unwrap()),
                             )?;
                             #[cfg(feature = "verbose-proofs")]
                             {
-                                let (olit, _) = encodings[0].output_proof_details(inc_cost);
-                                proof.equals(
-                                    &pidgeons::Axiom::from(olit),
-                                    Some(pidgeons::ConstraintId::from(lb_id)),
-                                )?;
+                                if encodings[0].is_buffer_empty() {
+                                    let (olit, _) = encodings[0].output_proof_details(inc_cost);
+                                    proof.equals(
+                                        &pidgeons::Axiom::from(olit),
+                                        Some(pidgeons::ConstraintId::from(lb_id)),
+                                    )?;
+                                }
+                                // otherwise, this should equal the proof-only variable
                             }
                             lb_id
                         } else {
@@ -478,10 +479,117 @@ where
                     proof_stuff,
                     &mut self.oracle,
                 )?;
+
+                // while we know the assumptions, simplify dec_lb_id
+                dec_lb_id = if encodings[0].is_buffer_empty() {
+                    let (first_olit, first_sems) = encodings[0].output_proof_details(inc_cost + 1);
+                    if assumps.len() <= 1 {
+                        // already minimal
+                        debug_assert!(assumps.len() != 1 || assumps[0] == !first_olit);
+                        dec_lb_id
+                    } else {
+                        let proof = self
+                            .oracle
+                            .proof_tracer_mut(&proof_stuff.pt_handle)
+                            .proof_mut();
+
+                        let start = if assumps[0] == !first_olit { 1 } else { 0 };
+                        let mut implications = Vec::with_capacity(assumps.len());
+                        let mut val = encodings[0].next_higher(inc_cost + 1);
+                        for &a in &assumps[start..] {
+                            let (olit, sems) = encodings[0].output_proof_details(val);
+                            debug_assert_eq!(a, !olit);
+                            let implication = proof.operations::<Var>(
+                                &((OperationSequence::from(first_sems.if_def.unwrap())
+                                    + sems.only_if_def.unwrap())
+                                    / (val - inc_cost + 2))
+                                    .saturate(),
+                            )?;
+                            #[cfg(feature = "verbose-proofs")]
+                            proof.equals(
+                                &rustsat::clause![!olit, first_olit],
+                                Some(ConstraintId::from(implication)),
+                            )?;
+                            implications.push(implication);
+                            val = encodings[0].next_higher(val);
+                        }
+                        debug_assert!(!implications.is_empty());
+                        // rewrite the derived bound
+                        let shortened = proof.operations::<Var>(
+                            &(implications
+                                .iter()
+                                .fold(OperationSequence::from(dec_lb_id.unwrap()), |s, imp| {
+                                    s + *imp
+                                })
+                                .saturate()),
+                        )?;
+                        // delete implications
+                        proof.delete_ids::<Var, Clause, _, _>(
+                            implications.into_iter().map(ConstraintId::from),
+                            None,
+                        )?;
+                        Some(shortened)
+                    }
+                } else {
+                    let (ideal_lit, def_1, _) = proofs::get_obj_bound_constraint(
+                        dec_cost,
+                        &self.objs[1],
+                        proof_stuff,
+                        &mut self.oracle,
+                    )?;
+                    let proof = self
+                        .oracle
+                        .proof_tracer_mut(&proof_stuff.pt_handle)
+                        .proof_mut();
+                    let mut implications = Vec::with_capacity(assumps.len());
+                    let mut val = inc_cost + 1;
+                    for &a in &assumps {
+                        let (olit, sems) = encodings[0].output_proof_details(val);
+                        let clause = proofs::LbConstraint::clause([
+                            !proofs::AnyVar::Solver(a.var()).axiom(a.is_neg()),
+                            ideal_lit,
+                        ]);
+                        let implication = if a.var() < olit.var() {
+                            debug_assert!(a.var() <= self.var_manager.max_enc_var());
+                            // this is an input literal with weight higher than the bound
+                            proof.reverse_unit_prop(&clause, [ConstraintId::from(def_1)])?
+                        } else {
+                            // this is an output literal of a subtree
+                            debug_assert_eq!(!olit, a);
+                            let tmp = proof.operations::<Var>(
+                                &(OperationSequence::from(def_1) + sems.only_if_def.unwrap()),
+                            )?;
+                            let id = proof.reverse_unit_prop(&clause, [ConstraintId::from(tmp)])?;
+                            proof
+                                .delete_ids::<Var, Clause, _, _>([ConstraintId::from(tmp)], None)?;
+                            val = encodings[1].next_higher(val);
+                            id
+                        };
+                        implications.push(implication);
+                    }
+                    debug_assert!(!implications.is_empty());
+                    // rewrite the derived bound
+                    let shortened = proof.operations::<Var>(
+                        &(implications
+                            .iter()
+                            .fold(OperationSequence::from(dec_lb_id.unwrap()), |s, imp| {
+                                s + *imp
+                            })
+                            .saturate()),
+                    )?;
+                    // delete implications
+                    proof.delete_ids::<Var, Clause, _, _>(
+                        implications.into_iter().map(ConstraintId::from),
+                        None,
+                    )?;
+                    Some(shortened)
+                };
+
                 let proof = self
                     .oracle
                     .proof_tracer_mut(&proof_stuff.pt_handle)
                     .proof_mut();
+
                 // derive cut that will be added
                 let cut_id = if inc_cost <= encodings[0].offset() {
                     pmin_cut_id
@@ -495,11 +603,14 @@ where
                         )?;
                         #[cfg(feature = "verbose-proofs")]
                         {
-                            let (olit, _) = encodings[0].output_proof_details(inc_cost);
-                            proof.equals(
-                                &pidgeons::Axiom::from(olit),
-                                Some(pidgeons::ConstraintId::from(lb_id)),
-                            )?;
+                            if encodings[0].is_buffer_empty() {
+                                let (olit, _) = encodings[0].output_proof_details(inc_cost);
+                                proof.comment(&"here")?;
+                                proof.equals(
+                                    &pidgeons::Axiom::from(olit),
+                                    Some(pidgeons::ConstraintId::from(lb_id)),
+                                )?;
+                            }
                         }
                         lb_id
                     } else {
@@ -509,46 +620,104 @@ where
                 };
                 #[cfg(feature = "verbose-proofs")]
                 {
-                    let (olit, _) = encodings[1].output_proof_details(dec_cost);
-                    proof.equals(
-                        &pidgeons::Axiom::from(!olit),
-                        Some(pidgeons::ConstraintId::from(cut_id)),
-                    )?;
+                    if encodings[1].is_buffer_empty() {
+                        let (olit, _) = encodings[1].output_proof_details(dec_cost);
+                        proof.equals(
+                            &pidgeons::Axiom::from(!olit),
+                            Some(pidgeons::ConstraintId::from(cut_id)),
+                        )?;
+                    }
                 }
                 last_cut_id = Some(cut_id);
 
                 // add cut
                 let assumps = encodings[1].enforce_ub(dec_cost - 1)?;
-                CadicalCertCollector::new(&mut self.oracle, &proof_stuff.pt_handle)
-                    .add_cert_clause(clause![assumps[0]], cut_id)?;
-                let (first_olit, first_sems) = encodings[1].output_proof_details(dec_cost);
-                debug_assert_eq!(!first_olit, assumps[0]);
 
-                let mut val = dec_cost;
-                for &a in &assumps[1..] {
-                    val = encodings[1].next_higher(val);
-                    // first convince veripb that `olit -> first_olit`
-                    let (olit, sems) = encodings[1].output_proof_details(val);
-                    debug_assert_eq!(!olit, a);
-                    let proof = self
-                        .oracle
-                        .proof_tracer_mut(&proof_stuff.pt_handle)
-                        .proof_mut();
-                    let implication = proof.operations::<Var>(
-                        &((OperationSequence::from(first_sems.if_def.unwrap())
-                            + sems.only_if_def.unwrap())
-                            / (val - dec_cost + 1))
-                            .saturate(),
-                    )?;
-                    #[cfg(feature = "verbose-proofs")]
-                    proof.equals(
-                        &clause![!olit, first_olit],
-                        Some(pidgeons::ConstraintId::from(implication)),
-                    )?;
-                    let id = proof
-                        .operations::<Var>(&(OperationSequence::from(cut_id) + implication))?;
+                if encodings[1].is_buffer_empty() {
+                    let (first_olit, first_sems) = encodings[1].output_proof_details(dec_cost);
+                    debug_assert_eq!(!first_olit, assumps[0]);
                     CadicalCertCollector::new(&mut self.oracle, &proof_stuff.pt_handle)
-                        .add_cert_clause(clause![a], id)?;
+                        .add_cert_clause(clause![assumps[0]], cut_id)?;
+
+                    let mut val = dec_cost;
+                    for &a in &assumps[1..] {
+                        val = encodings[1].next_higher(val);
+                        // first convince veripb that `olit -> first_olit`
+                        let (olit, sems) = encodings[1].output_proof_details(val);
+                        debug_assert_eq!(!olit, a);
+                        let proof = self
+                            .oracle
+                            .proof_tracer_mut(&proof_stuff.pt_handle)
+                            .proof_mut();
+                        let implication = proof.operations::<Var>(
+                            &((OperationSequence::from(first_sems.if_def.unwrap())
+                                + sems.only_if_def.unwrap())
+                                / (val - dec_cost + 1))
+                                .saturate(),
+                        )?;
+                        #[cfg(feature = "verbose-proofs")]
+                        proof.equals(
+                            &clause![!olit, first_olit],
+                            Some(pidgeons::ConstraintId::from(implication)),
+                        )?;
+                        let id = proof
+                            .operations::<Var>(&(OperationSequence::from(cut_id) + implication))?;
+                        CadicalCertCollector::new(&mut self.oracle, &proof_stuff.pt_handle)
+                            .add_cert_clause(clause![a], id)?;
+                        self.oracle
+                            .proof_tracer_mut(&proof_stuff.pt_handle)
+                            .proof_mut()
+                            .delete_ids::<Var, Clause, _, _>(
+                                [ConstraintId::from(implication)],
+                                None,
+                            )?;
+                    }
+                } else {
+                    let (ideal_lit, def_1, _) = proofs::get_obj_bound_constraint(
+                        dec_cost,
+                        &self.objs[1],
+                        proof_stuff,
+                        &mut self.oracle,
+                    )?;
+                    let mut val = dec_cost;
+                    for &a in &assumps {
+                        let proof = self
+                            .oracle
+                            .proof_tracer_mut(&proof_stuff.pt_handle)
+                            .proof_mut();
+                        let clause = proofs::LbConstraint::clause([
+                            ideal_lit,
+                            proofs::AnyVar::Solver(a.var()).axiom(a.is_neg()),
+                        ]);
+                        let (olit, sems) = encodings[1].output_proof_details(val);
+                        let implication = if a.var() < olit.var() {
+                            debug_assert!(a.var() <= self.var_manager.max_enc_var());
+                            // this is an input literal with weight higher than the bound
+                            proof.reverse_unit_prop(&clause, [ConstraintId::from(def_1)])?
+                        } else {
+                            // this is an output literal of a subtree
+                            debug_assert_eq!(!olit, a);
+                            let tmp = proof.operations::<Var>(
+                                &(OperationSequence::from(def_1) + sems.only_if_def.unwrap()),
+                            )?;
+                            let id = proof.reverse_unit_prop(&clause, [ConstraintId::from(tmp)])?;
+                            proof
+                                .delete_ids::<Var, Clause, _, _>([ConstraintId::from(tmp)], None)?;
+                            val = encodings[1].next_higher(val);
+                            id
+                        };
+                        let id = proof
+                            .operations::<Var>(&(OperationSequence::from(cut_id) + implication))?;
+                        CadicalCertCollector::new(&mut self.oracle, &proof_stuff.pt_handle)
+                            .add_cert_clause(clause![a], id)?;
+                        self.oracle
+                            .proof_tracer_mut(&proof_stuff.pt_handle)
+                            .proof_mut()
+                            .delete_ids::<Var, Clause, _, _>(
+                                [ConstraintId::from(implication)],
+                                None,
+                            )?;
+                    }
                 }
             } else {
                 for cl in
@@ -558,7 +727,6 @@ where
                 }
             }
             inc_lb = inc_cost + 1;
-            dbg!(dec_lb_id);
             last_dec_lb_id = dec_lb_id;
 
             (sol, inc_cost) = match self.solve_assumps(base_assumps)? {
@@ -568,7 +736,9 @@ where
                         self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
                     (sol, cost)
                 }
-                SolverResult::Unsat => break,
+                SolverResult::Unsat => {
+                    break;
+                }
                 _ => panic!(),
             };
         }

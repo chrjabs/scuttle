@@ -611,7 +611,6 @@ where
                         proof_stuff,
                         &self.objs[idx],
                         enc,
-                        idx,
                         cst,
                         and_lit,
                         &assumps,

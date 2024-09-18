@@ -279,6 +279,7 @@ where
             if softs.is_empty() {
                 self.objs[obj_idx] = Objective::Constant {
                     offset: self.objs[obj_idx].offset() + reform.offset as isize + offset,
+                    idx: obj_idx,
                 };
                 continue;
             }

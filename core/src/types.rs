@@ -223,23 +223,26 @@ pub(crate) enum Objective {
     Weighted {
         offset: isize,
         lits: RsHashMap<Lit, usize>,
+        idx: usize,
     },
     Unweighted {
         offset: isize,
         unit_weight: usize,
         lits: Vec<Lit>,
+        idx: usize,
     },
     Constant {
         offset: isize,
+        idx: usize,
     },
 }
 
 impl Objective {
     /// Initializes the objective from a soft lit iterator and an offset
-    pub fn new<Iter: WLitIter>(lits: Iter, offset: isize) -> Self {
+    pub fn new<Iter: WLitIter>(lits: Iter, offset: isize, idx: usize) -> Self {
         let lits: Vec<_> = lits.into_iter().collect();
         if lits.is_empty() {
-            return Objective::Constant { offset };
+            return Objective::Constant { offset, idx };
         }
         let unit_weight = lits[0].1;
         let weighted = 'detect_weighted: {
@@ -254,12 +257,14 @@ impl Objective {
             Objective::Weighted {
                 offset,
                 lits: lits.into_iter().collect(),
+                idx,
             }
         } else {
             Objective::Unweighted {
                 offset,
                 unit_weight,
                 lits: lits.into_iter().map(|(l, _)| l).collect(),
+                idx,
             }
         }
     }
@@ -269,7 +274,7 @@ impl Objective {
         match self {
             Objective::Weighted { offset, .. } => *offset,
             Objective::Unweighted { offset, .. } => *offset,
-            Objective::Constant { offset } => *offset,
+            Objective::Constant { offset, .. } => *offset,
         }
     }
 
@@ -296,6 +301,15 @@ impl Objective {
             Objective::Weighted { lits, .. } => lits.len(),
             Objective::Unweighted { lits, .. } => lits.len(),
             Objective::Constant { .. } => 0,
+        }
+    }
+
+    /// Gets the index of the objective
+    pub fn idx(&self) -> usize {
+        match self {
+            Objective::Weighted { idx, .. }
+            | Objective::Unweighted { idx, .. }
+            | Objective::Constant { idx, .. } => *idx,
         }
     }
 }

@@ -2,7 +2,7 @@
 
 use std::io;
 
-use pidgeons::{AbsConstraintId, Proof};
+use pidgeons::{AbsConstraintId, Conclusion, ConstraintId, OutputGuarantee, Proof};
 use rustsat::{
     encodings::{CollectCertClauses, CollectClauses},
     solvers::SolverResult,
@@ -153,20 +153,34 @@ where
         self.weakened_clauses.insert(id);
     }
 
-    fn report_status(&mut self, _status: SolverResult, _id: ClauseId) {
+    fn report_status(&mut self, status: SolverResult, id: ClauseId) {
+        let id = if id.0 > 0 {
+            Some(self.cmap.map(id))
+        } else {
+            None
+        };
         #[cfg(feature = "verbose")]
-        {
-            let id = if _id.0 > 0 {
-                Some(self.cmap.map(_id))
-            } else {
-                None
-            };
+        self.proof
+            .as_mut()
+            .expect("expected proof")
+            .comment(&format_args!(
+                "CaDiCaL: finished solving: {status}, id: {id:?}",
+            ))
+            .expect("failed to write proof");
+        if let Some(id) = id {
+            debug_assert_eq!(status, SolverResult::Unsat);
             self.proof
                 .as_mut()
                 .expect("expected proof")
-                .comment(&format_args!(
-                    "CaDiCaL: finished solving: {_status}, id: {id:?}",
-                ))
+                .update_default_conclusion::<Var>(
+                    OutputGuarantee::None,
+                    &Conclusion::Unsat(Some(ConstraintId::from(id))),
+                );
+            #[cfg(feature = "verbose")]
+            self.proof
+                .as_mut()
+                .expect("expected proof")
+                .equals(&rustsat::clause![], Some(ConstraintId::from(id)))
                 .expect("failed to write proof");
         }
     }
