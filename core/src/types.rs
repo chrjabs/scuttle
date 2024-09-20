@@ -224,16 +224,19 @@ pub(crate) enum Objective {
         offset: isize,
         lits: RsHashMap<Lit, usize>,
         idx: usize,
+        lb_id: Option<pidgeons::AbsConstraintId>,
     },
     Unweighted {
         offset: isize,
         unit_weight: usize,
         lits: Vec<Lit>,
         idx: usize,
+        lb_id: Option<pidgeons::AbsConstraintId>,
     },
     Constant {
         offset: isize,
         idx: usize,
+        lb_id: Option<pidgeons::AbsConstraintId>,
     },
 }
 

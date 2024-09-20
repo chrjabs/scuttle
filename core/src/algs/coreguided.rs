@@ -9,14 +9,16 @@ use rustsat::{
     },
     instances::{Cnf, ManageVars},
     solvers::{
-        SolveIncremental, SolveStats,
+        Solve, SolveIncremental,
         SolverResult::{Interrupted, Sat, Unsat},
     },
     types::{Assignment, Lit, RsHashMap, RsHashSet},
 };
-use scuttle_proc::oracle_bounds;
 
-use crate::MaybeTerminatedError::{self, Done};
+use crate::{
+    algs::proofs,
+    MaybeTerminatedError::{self, Done},
+};
 
 use super::{Kernel, Objective};
 
@@ -214,11 +216,10 @@ struct CoreData {
     weight: usize,
 }
 
-#[oracle_bounds]
-impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG>
+    Kernel<rustsat_cadical::CaDiCaL<'learn, 'term>, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
 {
     /// OLL core-guided search over an objective. The implementation includes the following
     /// refinements:
@@ -255,6 +256,9 @@ where
         assumps.sort_unstable();
         assumps.extend(reform.inactives.assumps());
 
+        // the core constraints in the proof
+        let mut core_ids = vec![];
+
         loop {
             match &mut reform.inactives {
                 Inactives::Weighted(inacts) => {
@@ -282,10 +286,17 @@ where
                     if unreform_cores.is_empty() {
                         let sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
                         reform.inactives.final_cleanup();
+
+                        if let Some(proof_stuff) = self.proof_stuff {
+                            // prove lower bound on objective
+                            // TODO:
+                        }
+
                         self.log_routine_end()?;
                         return Done(Some(sol));
                     }
-                    // TODO: maybe get solution and do hardening
+                    // NOTE: hardening is not sound for core boosting
+
                     // Reformulate cores
                     let mut encs = Cnf::new();
                     for CoreData { idx, len, weight } in unreform_cores.drain(..) {
@@ -325,6 +336,12 @@ where
                 }
                 Unsat => {
                     let mut core = self.oracle.core()?;
+
+                    if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                        // keep track of core ids
+                        core_ids.push(self.oracle.proof_tracer_mut(pt_handle).core_id());
+                    }
+
                     if !base_assumps.is_empty() {
                         // filter out base assumptions
                         // NOTE: this relies on the fact that the core is in the same order as the
