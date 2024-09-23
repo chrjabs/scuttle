@@ -23,7 +23,7 @@ use crate::{
 };
 
 use super::{
-    coreguided::{Inactives, OllReformulation, TotOutput},
+    coreguided::{Inactives, OllReformulation, ReformData},
     Kernel, ObjEncoding, Objective,
 };
 
@@ -89,11 +89,12 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
         let mut max_leaf_weight = 0;
         for (lit, &weight) in &reform.inactives {
             max_leaf_weight = std::cmp::max(weight, max_leaf_weight);
-            if let Some(&TotOutput {
+            if let Some(&ReformData {
                 root,
                 oidx,
                 tot_weight,
-            }) = reform.outputs.get(lit)
+                ..
+            }) = reform.reformulations.get(lit)
             {
                 debug_assert_ne!(weight, 0);
                 debug_assert!(oidx < tot_db[root].len());
@@ -124,11 +125,10 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
     }
 }
 
-#[oracle_bounds]
-impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG>
+    Kernel<rustsat_cadical::CaDiCaL<'learn, 'term>, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
 {
     /// Performs core boosting on the instance by executing single-objective OLL
     /// on each objective individually. Returns the OLL reformulations or
@@ -149,6 +149,7 @@ where
                     }
                 };
             }
+            self.objs[obj_idx].set_reform_id(reform.reform_id);
             res.push((reform, tot_db));
         }
         self.log_routine_end()?;
@@ -176,6 +177,8 @@ where
     where
         (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     {
+        debug_assert!(self.proof_stuff.is_none());
+
         ensure!(
             self.opts.store_cnf,
             "cannot reset oracle without having stored the CNF"
@@ -190,18 +193,19 @@ where
         let mut orig_cnf = self.orig_cnf.clone().unwrap();
         let mut all_outputs: Vec<_> = reforms
             .iter()
-            .map(|reform| reform.0.outputs.clone())
+            .map(|reform| reform.0.reformulations.clone())
             .collect();
         let mut objs = Vec::with_capacity(reforms.len());
         for (obj_idx, (reform, tot_db)) in reforms.iter_mut().enumerate() {
             tot_db.reset_encoded(Semantics::IfAndOnlyIf);
             let mut softs = Vec::with_capacity(reform.inactives.len());
             for (lit, weight) in reform.inactives.iter() {
-                if let Some(TotOutput {
+                if let Some(ReformData {
                     root,
                     oidx,
                     tot_weight,
-                }) = reform.outputs.get(lit)
+                    proof_id,
+                }) = reform.reformulations.get(lit)
                 {
                     for idx in *oidx..tot_db[*root].len() {
                         let olit = tot_db.define_unweighted(
@@ -216,10 +220,11 @@ where
                         } else {
                             all_outputs[obj_idx].insert(
                                 olit,
-                                TotOutput {
+                                ReformData {
                                     root: *root,
                                     oidx: idx,
                                     tot_weight: *tot_weight,
+                                    proof_id: *proof_id,
                                 },
                             );
                             softs.push((clause![!olit], *tot_weight));
@@ -280,6 +285,7 @@ where
                 self.objs[obj_idx] = Objective::Constant {
                     offset: self.objs[obj_idx].offset() + reform.offset as isize + offset,
                     idx: obj_idx,
+                    reform_id: reform.reform_id,
                 };
                 continue;
             }
@@ -288,10 +294,11 @@ where
                 debug_assert_eq!(cl.len(), 1);
                 max_leaf_weight = std::cmp::max(w, max_leaf_weight);
                 let olit = !cl[0];
-                if let Some(TotOutput {
+                if let Some(ReformData {
                     root,
                     oidx,
                     tot_weight,
+                    ..
                 }) = outputs.get(&olit)
                 {
                     if w < *tot_weight {

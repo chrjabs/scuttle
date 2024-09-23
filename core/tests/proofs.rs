@@ -159,6 +159,23 @@ macro_rules! medium_weighted_3 {
     };
 }
 
+macro_rules! core_boost {
+    ($s:ty, $o:expr) => {
+        test_instance!(
+            $s,
+            $o,
+            "./data/core-boost.mcnf",
+            vec![
+                (vec![3, 8], 1),
+                (vec![4, 6], 1),
+                (vec![6, 4], 1),
+                (vec![8, 2], 1),
+                (vec![11, 0], 1),
+            ]
+        )
+    };
+}
+
 macro_rules! four {
     ($s:ty, $o:expr) => {
         test_instance!(
@@ -229,6 +246,11 @@ macro_rules! generate_tests {
             }
 
             #[test]
+            fn core_boost_cert() {
+                core_boost!($s, $o);
+            }
+
+            #[test]
             fn four_cert() {
                 four!($s, $o);
             }
@@ -267,6 +289,11 @@ macro_rules! generate_biobj_tests {
             #[test]
             fn medium_weighted_3_cert() {
                 medium_weighted_3!($s, $o);
+            }
+
+            #[test]
+            fn core_boost_cert() {
+                core_boost!($s, $o);
             }
         }
     };

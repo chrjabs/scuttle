@@ -31,7 +31,7 @@ use rustsat::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Clause, Lit, WLitIter},
+    types::{Assignment, Clause, Lit, Var, WLitIter},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
@@ -334,13 +334,12 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, PBE, CE, ProofW, OInit, BCG> CoreBoost for PMinimal<O, PBE, CE, ProofW, OInit, BCG>
+impl<'learn, 'term, PBE, CE, ProofW, OInit, BCG> CoreBoost
+    for PMinimal<rustsat_cadical::CaDiCaL<'learn, 'term>, PBE, CE, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
-    OInit: Initialize<O>,
+    OInit: Initialize<rustsat_cadical::CaDiCaL<'learn, 'term>>,
 {
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
         ensure!(
@@ -372,6 +371,24 @@ where
                 tot_db.reset_vars();
             }
             if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.kernel.proof_stuff {
+                    // delete remaining reformulation constraints from proof
+                    let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    if !reform.reformulations.is_empty() {
+                        #[cfg(feature = "verbose-proofs")]
+                        proof.comment(&format_args!(
+                            "deleting remaining reformulation constraints from OLL of objective {oidx}"
+                        ))?;
+                        proof.delete_ids::<Var, Clause, _, _>(
+                            reform
+                                .reformulations
+                                .values()
+                                .map(|re| ConstraintId::from(re.proof_id.unwrap())),
+                            None,
+                        )?;
+                    }
+                }
+
                 self.obj_encs[oidx] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
             }
             self.kernel.check_termination()?;

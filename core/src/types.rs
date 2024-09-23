@@ -224,19 +224,19 @@ pub(crate) enum Objective {
         offset: isize,
         lits: RsHashMap<Lit, usize>,
         idx: usize,
-        lb_id: Option<pidgeons::AbsConstraintId>,
+        reform_id: Option<pidgeons::AbsConstraintId>,
     },
     Unweighted {
         offset: isize,
         unit_weight: usize,
         lits: Vec<Lit>,
         idx: usize,
-        lb_id: Option<pidgeons::AbsConstraintId>,
+        reform_id: Option<pidgeons::AbsConstraintId>,
     },
     Constant {
         offset: isize,
         idx: usize,
-        lb_id: Option<pidgeons::AbsConstraintId>,
+        reform_id: Option<pidgeons::AbsConstraintId>,
     },
 }
 
@@ -245,7 +245,11 @@ impl Objective {
     pub fn new<Iter: WLitIter>(lits: Iter, offset: isize, idx: usize) -> Self {
         let lits: Vec<_> = lits.into_iter().collect();
         if lits.is_empty() {
-            return Objective::Constant { offset, idx };
+            return Objective::Constant {
+                offset,
+                idx,
+                reform_id: None,
+            };
         }
         let unit_weight = lits[0].1;
         let weighted = 'detect_weighted: {
@@ -261,6 +265,7 @@ impl Objective {
                 offset,
                 lits: lits.into_iter().collect(),
                 idx,
+                reform_id: None,
             }
         } else {
             Objective::Unweighted {
@@ -268,6 +273,7 @@ impl Objective {
                 unit_weight,
                 lits: lits.into_iter().map(|(l, _)| l).collect(),
                 idx,
+                reform_id: None,
             }
         }
     }
@@ -315,6 +321,24 @@ impl Objective {
             | Objective::Constant { idx, .. } => *idx,
         }
     }
+
+    /// Gets the reformulation ID of the objective
+    pub fn reform_id(&self) -> Option<pidgeons::AbsConstraintId> {
+        match self {
+            Objective::Weighted { reform_id, .. }
+            | Objective::Unweighted { reform_id, .. }
+            | Objective::Constant { reform_id, .. } => *reform_id,
+        }
+    }
+
+    /// Sets the objective reformulation ID
+    pub fn set_reform_id(&mut self, new_reform_id: Option<pidgeons::AbsConstraintId>) {
+        match self {
+            Objective::Weighted { reform_id, .. }
+            | Objective::Unweighted { reform_id, .. }
+            | Objective::Constant { reform_id, .. } => *reform_id = new_reform_id,
+        }
+    }
 }
 
 pub(crate) enum ObjIter<'a> {
@@ -336,6 +360,7 @@ impl Iterator for ObjIter<'_> {
 }
 
 /// An objective encoding for either a weighted or an unweighted objective
+#[derive(Debug)]
 pub(crate) enum ObjEncoding<PBE, CE> {
     Weighted(PBE, usize),
     Unweighted(CE, usize),
@@ -544,8 +569,12 @@ where
 impl ObjEncoding<pb::DbGte, card::DbTotalizer> {
     pub fn output_proof_details(&self, value: usize) -> (Lit, totdb::cert::SemDefs) {
         match self {
-            ObjEncoding::Weighted(enc, _) => enc.output_proof_details(value).unwrap(),
-            ObjEncoding::Unweighted(enc, _) => enc.output_proof_details(value).unwrap(),
+            ObjEncoding::Weighted(enc, offset) => {
+                enc.output_proof_details(value - *offset).unwrap()
+            }
+            ObjEncoding::Unweighted(enc, offset) => {
+                enc.output_proof_details(value - *offset).unwrap()
+            }
             ObjEncoding::Constant => {
                 panic!("cannot get output proof details for constant objective")
             }

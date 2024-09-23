@@ -192,7 +192,8 @@ where
         .zip(costs)
         .map(|((enc, obj), cst)| {
             if *cst <= enc.offset() {
-                return (None, None);
+                debug_assert!(*cst == 0 || obj.reform_id().is_some());
+                return (None, obj.reform_id());
             }
             if obj.n_lits() == 1 {
                 let lit = !obj.iter().next().unwrap().0;
@@ -213,10 +214,13 @@ where
                     .expect("failed to write proof");
                 (lit, Some(def))
             };
+            debug_assert!(def.is_some());
             (Some(!lit), def)
         })
         .collect();
-    let cut = LbConstraint::clause(cut_data.iter().filter_map(|&(l, _)| l.map(|l| l)));
+    let cut = LbConstraint::clause(cut_data.iter().filter_map(|&(l, _)| l));
+
+    dbg!(&obj_encs[0]);
 
     let ProofStuff {
         pt_handle,
@@ -297,30 +301,46 @@ where
         [is_this.substitute_fixed(true)]
             .into_iter()
             .chain(fixed_witness.iter().map(|l| Substitution::from(*l))),
-        //obj_encs.iter().zip(objs).zip(costs).enumerate().filter_map(
         cut_data
             .into_iter()
             .zip(objs)
             .zip(costs)
             .enumerate()
             .filter_map(|(idx, ((dat, obj), cst))| {
-                let (Some(lit), Some(def)) = dat else {
-                    return None;
-                };
-                Some(ProofGoal::new(
-                    ProofGoalId::specific(idx + 2),
-                    [
-                        Derivation::Rup(
-                            LbConstraint::clause([!lit]),
-                            vec![(is_this_def + 1).into()],
-                        ),
-                        Derivation::from(
-                            ((OperationSequence::from(ConstraintId::last(1)) * *cst) + def)
-                                * obj.unit_weight()
-                                + ConstraintId::last(2),
-                        ),
-                    ],
-                ))
+                match dat {
+                    (None, Some(reform_id)) => {
+                        // Cost is lower bound derived in core boosting
+                        Some(ProofGoal::new(
+                            ProofGoalId::specific(idx + 2),
+                            [Derivation::Rup(
+                                LbConstraint::clause([]),
+                                vec![ConstraintId::from(reform_id), ConstraintId::last(1)],
+                            )],
+                        ))
+                    }
+                    (Some(lit), Some(def)) => {
+                        // Prove that the witness dominates
+                        Some(ProofGoal::new(
+                            ProofGoalId::specific(idx + 2),
+                            [
+                                Derivation::Rup(
+                                    LbConstraint::clause([!lit]),
+                                    vec![(is_this_def + 1).into()],
+                                ),
+                                Derivation::from(
+                                    ((OperationSequence::from(ConstraintId::last(1)) * *cst) + def)
+                                        * obj.unit_weight()
+                                        + ConstraintId::last(2),
+                                ),
+                            ],
+                        ))
+                    }
+                    (_, None) => {
+                        // Cost is trivial lower bound of objective or objective is trivial
+                        debug_assert!(obj.n_lits() == 1 || *cst == 0);
+                        None
+                    }
+                }
             }),
     )?;
 
@@ -991,6 +1011,7 @@ mod tests {
                 unit_weight: 2,
                 lits: vec![lit![0], !lit![1], lit![2], lit![3]],
                 idx: 0,
+                reform_id: None,
             },
             Objective::Weighted {
                 offset: 42,
@@ -998,8 +1019,13 @@ mod tests {
                     .into_iter()
                     .collect(),
                 idx: 1,
+                reform_id: None,
             },
-            Objective::Constant { offset: 11, idx: 2 },
+            Objective::Constant {
+                offset: 11,
+                idx: 2,
+                reform_id: None,
+            },
         ];
         let order = super::objectives_as_order(&objectives);
         let formatted = format!("{order}");
@@ -1041,14 +1067,22 @@ end"#;
                 offset: 3,
                 unit_weight: 2,
                 lits: vec![lit![0], !lit![1], lit![2], lit![3]],
+                idx: 0,
+                reform_id: None,
             },
             Objective::Weighted {
                 offset: 42,
                 lits: [(lit![4], 4), (lit![2], 2), (lit![42], 42)]
                     .into_iter()
                     .collect(),
+                idx: 1,
+                reform_id: None,
             },
-            Objective::Constant { offset: 11 },
+            Objective::Constant {
+                offset: 11,
+                idx: 2,
+                reform_id: None,
+            },
         ];
         let order = super::objectives_as_order(&objectives);
 
