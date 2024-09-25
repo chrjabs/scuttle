@@ -838,7 +838,7 @@ where
                 self.log_routine_end()?;
                 return Done(None);
             }
-            let mut sol = self.oracle.solution(self.var_manager.max_orig_var())?;
+            let mut sol = self.oracle.solution(self.var_manager.max_enc_var())?;
             let cost = self.get_cost_with_heuristic_improvements(obj_idx, &mut sol, true)?;
             (cost, Some(sol))
         };
@@ -858,7 +858,7 @@ where
             assumps.extend(encoding.enforce_ub(bound).unwrap());
             match self.solve_assumps(&assumps)? {
                 SolverResult::Sat => {
-                    let mut thissol = self.oracle.solution(self.var_manager.max_orig_var())?;
+                    let mut thissol = self.oracle.solution(self.var_manager.max_enc_var())?;
                     let new_cost =
                         self.get_cost_with_heuristic_improvements(obj_idx, &mut thissol, false)?;
                     debug_assert!(new_cost < cost);
@@ -908,7 +908,7 @@ where
             assumps.extend(encoding.enforce_ub(cost).unwrap());
             let res = self.solve_assumps(&assumps)?;
             debug_assert_eq!(res, SolverResult::Sat);
-            sol = Some(self.oracle.solution(self.var_manager.max_orig_var())?);
+            sol = Some(self.oracle.solution(self.var_manager.max_enc_var())?);
         }
         self.log_routine_end()?;
         Done(Some((cost, sol.unwrap(), lb_id)))
