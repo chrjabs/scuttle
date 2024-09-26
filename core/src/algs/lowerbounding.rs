@@ -11,6 +11,7 @@
 use std::{fs, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;
+use pidgeons::ConstraintId;
 use rustsat::{
     clause,
     encodings::{
@@ -22,11 +23,12 @@ use rustsat::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Clause, Lit, WLitIter},
+    types::{Assignment, Clause, Lit, Var, WLitIter},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions};
+use scuttle_proc::KernelFunctions;
 
 use crate::{
+    algs::coreguided::ReformData,
     options::{AfterCbOptions, CoreBoostingOptions},
     termination::ensure,
     types::{NonDomPoint, ParetoFront, VarManager},
@@ -216,49 +218,33 @@ where
     }
 }
 
-impl<'term, 'learn, ProofW, OInit, BCG>
-    LowerBounding<rustsat_cadical::CaDiCaL<'term, 'learn>, DbGte, DbTotalizer, ProofW, OInit, BCG>
+impl<O, PBE, CE, ProofW, OInit, BCG> LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
 where
     ProofW: io::Write + 'static,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
+    CE: card::BoundUpperIncremental + FromIterator<Lit>,
 {
     /// Initializes the solver
-    fn init(
-        mut kernel: Kernel<rustsat_cadical::CaDiCaL<'term, 'learn>, ProofW, OInit, BCG>,
-    ) -> anyhow::Result<Self> {
+    fn init(mut kernel: Kernel<O, ProofW, OInit, BCG>) -> anyhow::Result<Self> {
         // Initialize objective encodings
-        let mut obj_encs = Vec::with_capacity(kernel.objs.len());
-        let mut fence_data = Vec::with_capacity(kernel.objs.len());
-        for obj in &kernel.objs {
-            let mut enc = match obj {
-                Objective::Weighted { lits, .. } => {
-                    ObjEncoding::<DbGte, DbTotalizer>::new_weighted(
-                        lits.iter().map(|(&l, &w)| (l, w)),
-                        kernel.opts.reserve_enc_vars,
-                        &mut kernel.var_manager,
-                    )
-                }
-                Objective::Unweighted { lits, .. } => {
-                    ObjEncoding::<DbGte, DbTotalizer>::new_unweighted(
-                        lits.iter().copied(),
-                        kernel.opts.reserve_enc_vars,
-                        &mut kernel.var_manager,
-                    )
-                }
+        let fence_data = Vec::with_capacity(kernel.objs.len());
+        let obj_encs = kernel
+            .objs
+            .iter()
+            .map(|obj| match obj {
+                Objective::Weighted { lits, .. } => ObjEncoding::<PBE, CE>::new_weighted(
+                    lits.iter().map(|(&l, &w)| (l, w)),
+                    kernel.opts.reserve_enc_vars,
+                    &mut kernel.var_manager,
+                ),
+                Objective::Unweighted { lits, .. } => ObjEncoding::<PBE, CE>::new_unweighted(
+                    lits.iter().copied(),
+                    kernel.opts.reserve_enc_vars,
+                    &mut kernel.var_manager,
+                ),
                 Objective::Constant { .. } => ObjEncoding::Constant,
-            };
-            if let Some(proofs::ProofStuff { pt_handle, .. }) = &kernel.proof_stuff {
-                let proof: *mut _ = kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
-                let mut collector = CadicalCertCollector::new(&mut kernel.oracle, pt_handle);
-                enc.encode_ub_change_cert(0..1, &mut collector, &mut kernel.var_manager, unsafe {
-                    &mut *proof
-                })?;
-            } else {
-                enc.encode_ub_change(0..1, &mut kernel.oracle, &mut kernel.var_manager)?;
-            };
-            let assumps = enc.enforce_ub(0).unwrap();
-            obj_encs.push(enc);
-            fence_data.push((0, assumps));
-        }
+            })
+            .collect();
         Ok(Self {
             kernel,
             obj_encs,
@@ -278,6 +264,30 @@ where
     fn alg_main(&mut self) -> MaybeTerminatedError {
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
         self.kernel.log_routine_start("lower-bounding")?;
+        // Initialize fence here if not yet done
+        if self.fence.data.is_empty() {
+            for enc in self.obj_encs.iter_mut() {
+                if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.kernel.proof_stuff {
+                    let proof: *mut _ = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    let mut collector =
+                        CadicalCertCollector::new(&mut self.kernel.oracle, pt_handle);
+                    enc.encode_ub_change_cert(
+                        enc.offset()..enc.offset() + 1,
+                        &mut collector,
+                        &mut self.kernel.var_manager,
+                        unsafe { &mut *proof },
+                    )?;
+                } else {
+                    enc.encode_ub_change(
+                        enc.offset()..enc.offset() + 1,
+                        &mut self.kernel.oracle,
+                        &mut self.kernel.var_manager,
+                    )?;
+                }
+                let assumps = enc.enforce_ub(enc.offset()).unwrap();
+                self.fence.data.push((enc.offset(), assumps));
+            }
+        }
         loop {
             let assumps: Vec<_> = self.fence.assumps().collect();
             let res = self.kernel.solve_assumps(&assumps)?;
@@ -319,24 +329,19 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, PBE, CE, ProofW, OInit, BCG> CoreBoost for LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
+impl<'learn, 'term, PBE, CE, ProofW, OInit, BCG> CoreBoost
+    for LowerBounding<rustsat_cadical::CaDiCaL<'learn, 'term>, PBE, CE, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
-    PBE: pb::BoundUpperIncremental,
-    CE: card::BoundUpperIncremental,
-    OInit: Initialize<O>,
+    OInit: Initialize<rustsat_cadical::CaDiCaL<'learn, 'term>>,
 {
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
         ensure!(
             self.kernel.stats.n_solve_calls == 0,
             "cannot perform core boosting after solve has been called"
         );
-        let cb_res = if let Some(cb_res) = self.kernel.core_boost()? {
-            cb_res
-        } else {
+        let Some(cb_res) = self.kernel.core_boost()? else {
             return Done(false);
         };
         self.kernel.check_termination()?;
@@ -356,24 +361,39 @@ where
         self.kernel.log_routine_start("merge encodings")?;
         for (oidx, (reform, mut tot_db)) in cb_res.into_iter().enumerate() {
             if reset_dbs {
+                debug_assert!(self.kernel.proof_stuff.is_none());
                 tot_db.reset_vars();
             }
             if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.kernel.proof_stuff {
+                    // delete remaining reformulation constraints from proof
+                    let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    if !reform.reformulations.is_empty() {
+                        #[cfg(feature = "verbose-proofs")]
+                        proof.comment(&format_args!(
+                            "deleting remaining reformulation constraints from OLL of objective {oidx}"
+                        ))?;
+                        proof.delete_ids::<Var, Clause, _, _>(
+                            reform
+                                .reformulations
+                                .values()
+                                .map(|re| ConstraintId::from(re.proof_id.unwrap())),
+                            None,
+                        )?;
+                    }
+                }
+
+                // reserve totalizer output variables since they are required for the pseudo
+                // semantics when proof logging
+                for &ReformData { root, .. } in reform.reformulations.values() {
+                    tot_db[root].reserve_vars(&mut self.kernel.var_manager);
+                }
+
                 self.obj_encs[oidx] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
             }
             self.kernel.check_termination()?;
         }
         self.kernel.log_routine_end()?;
-        // Update fence
-        for (idx, enc) in self.obj_encs.iter_mut().enumerate() {
-            enc.encode_ub_change(
-                enc.offset()..enc.offset() + 1,
-                &mut self.kernel.oracle,
-                &mut self.kernel.var_manager,
-            )?;
-            let assumps = enc.enforce_ub(enc.offset()).unwrap();
-            self.fence.data[idx] = (enc.offset(), assumps);
-        }
         Done(true)
     }
 }

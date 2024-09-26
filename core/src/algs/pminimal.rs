@@ -31,12 +31,12 @@ use rustsat::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Clause, Lit, WLitIter},
+    types::{Assignment, Clause, Lit, Var, WLitIter},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
-    algs::{proofs, ObjEncoding},
+    algs::{coreguided::ReformData, proofs, ObjEncoding},
     options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
     termination::ensure,
     types::{ParetoFront, VarManager},
@@ -334,22 +334,19 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, PBE, CE, ProofW, OInit, BCG> CoreBoost for PMinimal<O, PBE, CE, ProofW, OInit, BCG>
+impl<'learn, 'term, PBE, CE, ProofW, OInit, BCG> CoreBoost
+    for PMinimal<rustsat_cadical::CaDiCaL<'learn, 'term>, PBE, CE, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
-    OInit: Initialize<O>,
+    OInit: Initialize<rustsat_cadical::CaDiCaL<'learn, 'term>>,
 {
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
         ensure!(
             self.kernel.stats.n_solve_calls == 0,
             "cannot perform core boosting after solve has been called"
         );
-        let cb_res = if let Some(cb_res) = self.kernel.core_boost()? {
-            cb_res
-        } else {
+        let Some(cb_res) = self.kernel.core_boost()? else {
             return Done(false);
         };
         self.kernel.check_termination()?;
@@ -369,9 +366,34 @@ where
         self.kernel.log_routine_start("merge encodings")?;
         for (oidx, (reform, mut tot_db)) in cb_res.into_iter().enumerate() {
             if reset_dbs {
+                debug_assert!(self.kernel.proof_stuff.is_none());
                 tot_db.reset_vars();
             }
             if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.kernel.proof_stuff {
+                    // delete remaining reformulation constraints from proof
+                    let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    if !reform.reformulations.is_empty() {
+                        #[cfg(feature = "verbose-proofs")]
+                        proof.comment(&format_args!(
+                            "deleting remaining reformulation constraints from OLL of objective {oidx}"
+                        ))?;
+                        proof.delete_ids::<Var, Clause, _, _>(
+                            reform
+                                .reformulations
+                                .values()
+                                .map(|re| ConstraintId::from(re.proof_id.unwrap())),
+                            None,
+                        )?;
+                    }
+                }
+
+                // reserve totalizer output variables since they are required for the pseudo
+                // semantics when proof logging
+                for &ReformData { root, .. } in reform.reformulations.values() {
+                    tot_db[root].reserve_vars(&mut self.kernel.var_manager);
+                }
+
                 self.obj_encs[oidx] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
             }
             self.kernel.check_termination()?;

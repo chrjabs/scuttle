@@ -2,32 +2,37 @@
 
 use std::io;
 
+use cadical_veripb_tracer::CadicalCertCollector;
+use pidgeons::{AbsConstraintId, ConstraintId, OperationSequence};
 use rustsat::{
     encodings::{
         nodedb::{NodeById, NodeCon, NodeId, NodeLike},
         totdb::{Db as TotDb, Node, Semantics},
     },
-    instances::{Cnf, ManageVars},
+    instances::ManageVars,
     solvers::{
-        SolveIncremental, SolveStats,
+        LimitConflicts, Solve, SolveIncremental,
         SolverResult::{Interrupted, Sat, Unsat},
     },
-    types::{Assignment, Lit, RsHashMap, RsHashSet},
+    types::{Assignment, Clause, Lit, RsHashMap, RsHashSet, Var},
 };
-use scuttle_proc::oracle_bounds;
 
-use crate::MaybeTerminatedError::{self, Done};
+use crate::{
+    algs::proofs,
+    MaybeTerminatedError::{self, Done},
+};
 
 use super::{Kernel, Objective};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct TotOutput {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReformData {
     pub root: NodeId,
     pub oidx: usize,
     pub tot_weight: usize,
+    pub proof_id: Option<pidgeons::AbsConstraintId>,
 }
 
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub enum Inactives {
     Weighted(RsHashMap<Lit, usize>),
     Unweighted {
@@ -177,14 +182,16 @@ impl<'a> Iterator for InactIter<'a> {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct OllReformulation {
     /// Inactive literals, aka the reformulated objective
     pub inactives: Inactives,
     /// Mapping totalizer output assumption to totalizer data
-    pub outputs: RsHashMap<Lit, TotOutput>,
+    pub reformulations: RsHashMap<Lit, ReformData>,
     /// The constant offset derived by the reformulation
     pub offset: usize,
+    /// The objective reformulation constraint in the proof
+    pub reform_id: Option<AbsConstraintId>,
 }
 
 impl From<&Objective> for OllReformulation {
@@ -212,19 +219,20 @@ struct CoreData {
     idx: usize,
     len: usize,
     weight: usize,
+    proof_id: Option<pidgeons::AbsConstraintId>,
 }
 
-#[oracle_bounds]
-impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+impl<'learn, 'term, ProofW, OInit, BCG>
+    Kernel<rustsat_cadical::CaDiCaL<'learn, 'term>, ProofW, OInit, BCG>
 where
-    O: SolveIncremental + SolveStats,
-    ProofW: io::Write,
+    ProofW: io::Write + 'static,
 {
     /// OLL core-guided search over an objective. The implementation includes the following
     /// refinements:
     /// - Weight-aware core extraction
     /// - Core trimming
     /// - Core exhaustion
+    ///
     /// When using base assumptions, the user has to guarantee that a potential
     /// subsequent call is only made with tighter constraints.
     pub fn oll(
@@ -255,6 +263,10 @@ where
         assumps.sort_unstable();
         assumps.extend(reform.inactives.assumps());
 
+        // need to keep track of reformulations that are not in the hash map anymore, namely unit
+        // cores and fully built totalizers
+        let mut reform_ids = vec![];
+
         loop {
             match &mut reform.inactives {
                 Inactives::Weighted(inacts) => {
@@ -282,18 +294,52 @@ where
                     if unreform_cores.is_empty() {
                         let sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
                         reform.inactives.final_cleanup();
+
+                        if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                            // derive objective reformulation
+                            let ops = reform_ids
+                                .iter()
+                                .fold(OperationSequence::<Var>::empty(), |seq, (c, w)| {
+                                    seq + OperationSequence::<Var>::from(*c) * *w
+                                });
+                            let ops = reform.reformulations.values().fold(ops, |seq, re| {
+                                seq + OperationSequence::<Var>::from(re.proof_id.unwrap())
+                                    * re.tot_weight
+                            });
+                            if !ops.is_empty() {
+                                let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                                #[cfg(feature = "verbose-proofs")]
+                                proof.comment(&"final oll reformulation")?;
+                                reform.reform_id = Some(proof.operations(&ops)?);
+                                if !reform_ids.is_empty() {
+                                    // delete fully exhausted reformulations
+                                    proof.delete_ids::<Var, Clause, _, _>(
+                                        reform_ids.into_iter().map(|(c, _)| ConstraintId::from(c)),
+                                        None,
+                                    )?;
+                                }
+                            }
+                        }
+
                         self.log_routine_end()?;
                         return Done(Some(sol));
                     }
-                    // TODO: maybe get solution and do hardening
+                    // NOTE: hardening is not sound for core boosting
+
                     // Reformulate cores
-                    let mut encs = Cnf::new();
-                    for CoreData { idx, len, weight } in unreform_cores.drain(..) {
+                    for CoreData {
+                        idx,
+                        len,
+                        weight,
+                        proof_id,
+                    } in unreform_cores.drain(..)
+                    {
                         let con = tot_db.merge(&core_cons[idx..idx + len]);
                         debug_assert_eq!(con.offset(), 0);
                         debug_assert_eq!(con.multiplier(), 1);
                         let root = con.id;
-                        let oidx = self.exhaust_core(root, base_assumps, tot_db)?;
+                        let (olit, oidx, proof_id) =
+                            self.exhaust_core(root, base_assumps, tot_db, proof_id)?;
                         if oidx > 1 {
                             reform.offset += (oidx - 1) * weight;
                             if let Some(log) = &mut self.logger {
@@ -301,30 +347,27 @@ where
                             }
                         }
                         if oidx < tot_db[root].len() {
-                            let olit = tot_db.define_unweighted(
-                                root,
-                                oidx,
-                                Semantics::If,
-                                &mut encs,
-                                &mut self.var_manager,
-                            )?;
                             reform.inactives.insert(olit, weight);
-                            reform.outputs.insert(
+
+                            reform.reformulations.insert(
                                 olit,
-                                TotOutput {
+                                ReformData {
                                     root,
                                     oidx,
                                     tot_weight: weight,
+                                    proof_id,
                                 },
                             );
                             assumps.push(!olit);
+                        } else if let Some(proof_id) = proof_id {
+                            reform_ids.push((proof_id, weight));
                         }
                     }
-                    self.oracle.add_cnf(encs)?;
                     core_cons.clear();
                 }
                 Unsat => {
                     let mut core = self.oracle.core()?;
+
                     if !base_assumps.is_empty() {
                         // filter out base assumptions
                         // NOTE: this relies on the fact that the core is in the same order as the
@@ -349,9 +392,19 @@ where
                         self.log_routine_end()?;
                         return Done(None);
                     }
+
+                    let mut core_id =
+                        if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                            let core_id = self.oracle.proof_tracer_mut(pt_handle).core_id();
+                            debug_assert!(core_id.is_some());
+                            core_id
+                        } else {
+                            None
+                        };
+
                     let orig_len = core.len();
-                    core = self.minimize_core(core, base_assumps)?;
-                    core = self.trim_core(core, base_assumps)?;
+                    (core, core_id) = self.minimize_core(core, base_assumps, core_id)?;
+                    (core, core_id) = self.trim_core(core, base_assumps, core_id)?;
                     let core_weight = match &reform.inactives {
                         Inactives::Weighted(inact) => core
                             .iter()
@@ -365,15 +418,15 @@ where
                         log.log_core(core_weight, orig_len, core.len())?;
                     }
                     // Extend tot if output in core
-                    let mut encs = Cnf::new();
                     let mut cons = Vec::with_capacity(core.len());
                     for olit in &core {
                         let inact_weight = reform.inactives.relax(*olit, core_weight);
-                        if let Some(&TotOutput {
+                        if let Some(&ReformData {
                             root,
                             oidx,
                             tot_weight,
-                        }) = reform.outputs.get(olit)
+                            proof_id,
+                        }) = reform.reformulations.get(olit)
                         {
                             cons.push(NodeCon::single(root, oidx + 1, 1));
                             if inact_weight > 0 {
@@ -381,24 +434,56 @@ where
                             }
                             // remove old output to only have one entry per totalizer in outputs
                             // map
-                            reform.outputs.remove(olit);
+                            reform.reformulations.remove(olit);
                             if oidx + 1 >= tot_db[root].len() {
+                                // make sure to keep proof_id around
+                                if let Some(proof_id) = proof_id {
+                                    reform_ids.push((proof_id, tot_weight));
+                                }
                                 continue;
                             }
-                            let new_olit = tot_db.define_unweighted(
-                                root,
-                                oidx + 1,
-                                Semantics::If,
-                                &mut encs,
-                                &mut self.var_manager,
-                            )?;
+                            let new_olit = self.build_output(root, oidx + 1, tot_db)?;
                             reform.inactives.insert(new_olit, tot_weight);
-                            reform.outputs.insert(
+
+                            let proof_id = if let Some(proofs::ProofStuff { pt_handle, .. }) =
+                                &self.proof_stuff
+                            {
+                                // Extend reformulation in proof and delete old reformulation
+                                // constraint
+                                let proof_id = proof_id.expect(
+                                    "expected a reformulation proof id while proof logging",
+                                );
+                                let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                                #[cfg(feature = "verbose-proofs")]
+                                proof.comment(&format_args!(
+                                    "extending core reformulation {root} from oidx {oidx}"
+                                ))?;
+                                let only_if_def = tot_db
+                                    .get_semantics(root, oidx + 2)
+                                    .unwrap()
+                                    .only_if_def
+                                    .unwrap();
+                                let new_id = proof.operations::<Var>(
+                                    &(((OperationSequence::from(proof_id) * (oidx + 1))
+                                        + only_if_def)
+                                        / (oidx + 2)),
+                                )?;
+                                proof.delete_ids::<Var, Clause, _, _>(
+                                    [ConstraintId::from(proof_id)],
+                                    None,
+                                )?;
+                                Some(new_id)
+                            } else {
+                                None
+                            };
+
+                            reform.reformulations.insert(
                                 new_olit,
-                                TotOutput {
+                                ReformData {
                                     root,
                                     oidx: oidx + 1,
                                     tot_weight,
+                                    proof_id,
                                 },
                             );
                             assumps.push(!new_olit);
@@ -408,15 +493,19 @@ where
                         }
                     }
                     debug_assert_eq!(core.len(), cons.len());
-                    self.oracle.add_cnf(encs)?;
+
                     if cons.len() > 1 {
                         // Save core for reformulation
                         unreform_cores.push(CoreData {
                             idx: core_cons.len(),
                             len: cons.len(),
                             weight: core_weight,
+                            proof_id: core_id,
                         });
                         core_cons.extend(cons);
+                    } else if let Some(core_id) = core_id {
+                        // keep track of units
+                        reform_ids.push((core_id, core_weight));
                     }
                 }
             }
@@ -429,9 +518,25 @@ where
         root: NodeId,
         base_assumps: &[Lit],
         tot_db: &mut TotDb,
-    ) -> MaybeTerminatedError<usize> {
+        core_id: Option<pidgeons::AbsConstraintId>,
+    ) -> MaybeTerminatedError<(Lit, usize, Option<pidgeons::AbsConstraintId>)> {
+        let mut proof_reform = core_id.map(OperationSequence::from);
+
         if !self.opts.core_exhaustion {
-            return Done(1);
+            let olit = self.build_output(root, 1, tot_db)?;
+            let proof_id = if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                let only_if_def = tot_db.get_semantics(root, 2).unwrap().only_if_def.unwrap();
+                Some(
+                    self.oracle
+                        .proof_tracer_mut(pt_handle)
+                        .proof_mut()
+                        .operations::<Var>(&((proof_reform.unwrap() + only_if_def) / 2))?,
+                )
+            } else {
+                None
+            };
+
+            return Done((olit, 1, proof_id));
         }
 
         self.log_routine_start("core-exhaustion")?;
@@ -440,15 +545,24 @@ where
         assumps.push(Lit::positive(0));
 
         let mut bound = 1;
+        let mut olit = rustsat::lit![0];
         let core_len = tot_db[root].len();
+        debug_assert!(core_len > bound);
         while bound < core_len {
-            let olit = tot_db.define_unweighted(
-                root,
-                bound,
-                Semantics::If,
-                &mut self.oracle,
-                &mut self.var_manager,
-            )?;
+            olit = self.build_output(root, bound, tot_db)?;
+
+            if let Some(proof_reform) = &mut proof_reform {
+                // Build up reformulation over core exhaustion
+                let if_def = tot_db
+                    .get_semantics(root, bound + 1)
+                    .unwrap()
+                    .if_def
+                    .unwrap();
+                *proof_reform *= bound;
+                *proof_reform += if_def;
+                *proof_reform /= bound + 1;
+            }
+
             #[cfg(feature = "limit-conflicts")]
             self.oracle.limit_conflicts(Some(50000))?;
             assumps[base_assumps.len()] = !olit;
@@ -456,13 +570,36 @@ where
             if res != Unsat {
                 break;
             }
+
+            if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                let proof_reform = proof_reform
+                    .as_mut()
+                    .expect("expected reformulation while proof logging");
+                let core_id = self.oracle.proof_tracer_mut(pt_handle).core_id().unwrap();
+                *proof_reform += core_id;
+            }
+
             bound += 1;
         }
 
         #[cfg(feature = "limit-conflicts")]
         self.oracle.limit_conflicts(None)?;
+
+        let proof_id = if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+            // Write the reformulation to the proof
+            let proof_reform = proof_reform.expect("expected reformulation while proof logging");
+            let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+            #[cfg(feature = "verbose-proofs")]
+            proof.comment(&format_args!(
+                "core reformulation from core exhaustion up to bound {bound}"
+            ))?;
+            Some(proof.operations::<Var>(&proof_reform)?)
+        } else {
+            None
+        };
+
         self.log_routine_end()?;
-        Done(bound)
+        Done((olit, bound, proof_id))
     }
 
     /// Minimizes a core
@@ -470,12 +607,13 @@ where
         &mut self,
         mut core: Vec<Lit>,
         base_assumps: &[Lit],
-    ) -> MaybeTerminatedError<Vec<Lit>> {
+        mut proof_id: Option<pidgeons::AbsConstraintId>,
+    ) -> MaybeTerminatedError<(Vec<Lit>, Option<pidgeons::AbsConstraintId>)> {
         if !self.opts.core_minimization {
-            return Done(core);
+            return Done((core, proof_id));
         }
         if core.len() <= 1 {
-            return Done(core);
+            return Done((core, proof_id));
         }
 
         self.log_routine_start("core-minimization")?;
@@ -499,7 +637,7 @@ where
                 core = self.oracle.core()?;
                 if !base_assumps.is_empty() {
                     // filter out base assumptions
-                    // !!! Note: this relies on the fact that the core is in the same order as the
+                    // NOTE: this relies on the fact that the core is in the same order as the
                     // assumptions going into the solver
                     let mut base_assumps_idx = 0;
                     core.retain(|&lit| {
@@ -516,6 +654,13 @@ where
                         false
                     });
                 }
+                proof_id = if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                    let core_id = self.oracle.proof_tracer_mut(pt_handle).core_id();
+                    debug_assert!(core_id.is_some());
+                    core_id
+                } else {
+                    None
+                };
             }
             assumps.drain(base_assumps.len()..);
         }
@@ -523,7 +668,7 @@ where
         #[cfg(feature = "limit-conflicts")]
         self.oracle.limit_conflicts(None)?;
         self.log_routine_end()?;
-        Done(core)
+        Done((core, proof_id))
     }
 
     /// Trims a core
@@ -531,12 +676,13 @@ where
         &mut self,
         mut core: Vec<Lit>,
         base_assumps: &[Lit],
-    ) -> MaybeTerminatedError<Vec<Lit>> {
+        mut proof_id: Option<pidgeons::AbsConstraintId>,
+    ) -> MaybeTerminatedError<(Vec<Lit>, Option<pidgeons::AbsConstraintId>)> {
         if !self.opts.core_trimming {
-            return Done(core);
+            return Done((core, proof_id));
         }
         if core.len() <= 1 {
-            return Done(core);
+            return Done((core, proof_id));
         }
 
         self.log_routine_start("core-trimming")?;
@@ -551,7 +697,7 @@ where
             core = self.oracle.core()?;
             if !base_assumps.is_empty() {
                 // filter out base assumptions
-                // !!! Note: this relies on the fact that the core is in the same order as the
+                // NOTE: this relies on the fact that the core is in the same order as the
                 // assumptions going into the solver
                 let mut base_assumps_idx = 0;
                 core.retain(|&lit| {
@@ -565,6 +711,13 @@ where
                     false
                 });
             }
+            proof_id = if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                let core_id = self.oracle.proof_tracer_mut(pt_handle).core_id();
+                debug_assert!(core_id.is_some());
+                core_id
+            } else {
+                None
+            };
             if core.len() == size_before {
                 break;
             }
@@ -573,6 +726,44 @@ where
 
         self.log_routine_end()?;
 
-        Done(core)
+        Done((core, proof_id))
+    }
+
+    /// Encode a totalzier output, either with or without proof logging
+    fn build_output(
+        &mut self,
+        root: NodeId,
+        oidx: usize,
+        tot_db: &mut TotDb,
+    ) -> anyhow::Result<Lit> {
+        if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+            let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+            #[cfg(feature = "verbose-proofs")]
+            {
+                unsafe { &mut *proof }
+                    .comment(&format_args!("extending totalizer {root} to {oidx}"))?;
+            }
+            let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
+            let mut leafs = vec![rustsat::lit![0]; tot_db[root].n_leafs()];
+            tot_db
+                .define_unweighted_cert(
+                    root,
+                    oidx,
+                    Semantics::If,
+                    &mut collector,
+                    &mut self.var_manager,
+                    unsafe { &mut *proof },
+                    (&mut leafs, false, false),
+                )
+                .map(|(ol, _)| ol)
+        } else {
+            Ok(tot_db.define_unweighted(
+                root,
+                oidx,
+                Semantics::If,
+                &mut self.oracle,
+                &mut self.var_manager,
+            )?)
+        }
     }
 }
