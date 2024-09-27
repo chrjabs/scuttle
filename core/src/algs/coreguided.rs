@@ -235,11 +235,15 @@ where
     ///
     /// When using base assumptions, the user has to guarantee that a potential
     /// subsequent call is only made with tighter constraints.
+    ///
+    /// The `exact_reformulation` argument specifies whether in the proof, we want to have an
+    /// exact objective reformulation including all lazy totalizer outputs, or only the ones built
     pub fn oll(
         &mut self,
         reform: &mut OllReformulation,
         base_assumps: &[Lit],
         tot_db: &mut TotDb,
+        exact_reformulation: bool,
     ) -> MaybeTerminatedError<Option<Assignment>> {
         if matches!(reform.inactives, Inactives::Constant) {
             match self.solve_assumps(base_assumps)? {
@@ -295,7 +299,53 @@ where
                         let sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
                         reform.inactives.final_cleanup();
 
+                        if exact_reformulation {
+                            // reserve totalizer output variables since they are required for the pseudo
+                            // semantics when proof logging
+                            for &ReformData { root, oidx, .. } in reform.reformulations.values() {
+                                tot_db[root].reserve_vars(oidx + 1.., &mut self.var_manager);
+                            }
+                        }
+
                         if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                            let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                            if exact_reformulation {
+                                // extend reformulation ids to include _all_ totalizer outputs
+                                for ReformData {
+                                    root,
+                                    oidx,
+                                    proof_id,
+                                    ..
+                                } in reform.reformulations.values_mut()
+                                {
+                                    if *oidx + 1 >= tot_db[*root].len() {
+                                        continue;
+                                    };
+                                    let mut reform_ops =
+                                        OperationSequence::<Var>::from(proof_id.unwrap());
+                                    let leafs: Vec<_> = tot_db.leaf_iter(*root).collect();
+                                    for val in *oidx + 2..=tot_db[*root].max_val() {
+                                        reform_ops *= val - 1;
+                                        reform_ops += tot_db
+                                            .ensure_semantics(
+                                                *root,
+                                                0,
+                                                val,
+                                                leafs.iter().copied(),
+                                                proof,
+                                            )?
+                                            .only_if_def
+                                            .unwrap();
+                                        reform_ops /= val;
+                                    }
+                                    let new_id = proof.operations::<Var>(&reform_ops)?;
+                                    proof.delete_ids::<Var, Clause, _, _>(
+                                        [ConstraintId::from(proof_id.unwrap())],
+                                        None,
+                                    )?;
+                                    *proof_id = Some(new_id);
+                                }
+                            }
                             // derive objective reformulation
                             let ops = reform_ids
                                 .iter()
@@ -307,7 +357,6 @@ where
                                     * re.tot_weight
                             });
                             if !ops.is_empty() {
-                                let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
                                 #[cfg(feature = "verbose-proofs")]
                                 proof.comment(&"final oll reformulation")?;
                                 reform.reform_id = Some(proof.operations(&ops)?);
@@ -459,7 +508,7 @@ where
                                     "extending core reformulation {root} from oidx {oidx}"
                                 ))?;
                                 let only_if_def = tot_db
-                                    .get_semantics(root, oidx + 2)
+                                    .get_semantics(root, 0, oidx + 2)
                                     .unwrap()
                                     .only_if_def
                                     .unwrap();
@@ -525,7 +574,11 @@ where
         if !self.opts.core_exhaustion {
             let olit = self.build_output(root, 1, tot_db)?;
             let proof_id = if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
-                let only_if_def = tot_db.get_semantics(root, 2).unwrap().only_if_def.unwrap();
+                let only_if_def = tot_db
+                    .get_semantics(root, 0, 2)
+                    .unwrap()
+                    .only_if_def
+                    .unwrap();
                 Some(
                     self.oracle
                         .proof_tracer_mut(pt_handle)
@@ -554,7 +607,7 @@ where
             if let Some(proof_reform) = &mut proof_reform {
                 // Build up reformulation over core exhaustion
                 let if_def = tot_db
-                    .get_semantics(root, bound + 1)
+                    .get_semantics(root, 0, bound + 1)
                     .unwrap()
                     .if_def
                     .unwrap();

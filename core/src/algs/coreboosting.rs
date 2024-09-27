@@ -63,10 +63,11 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
         if root.multiplier() == 1 {
             match &tot_db[root.id] {
                 Node::Leaf(_) | Node::Unit(_) => ObjEncoding::Unweighted(
-                    DbTotalizer::from_raw(root.id, tot_db),
-                    offset - root.offset(),
+                    DbTotalizer::from_raw(root.id, root.offset(), tot_db),
+                    offset,
                 ),
                 Node::General(_) => {
+                    debug_assert!(root.offset() == 0);
                     ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
                 }
                 Node::Dummy => unreachable!(),
@@ -141,7 +142,7 @@ where
             let mut reform = (&self.objs[obj_idx]).into();
             let mut tot_db = TotDb::default();
             if !matches!(self.objs[obj_idx], Objective::Constant { .. }) {
-                match self.oll(&mut reform, &[], &mut tot_db)? {
+                match self.oll(&mut reform, &[], &mut tot_db, true)? {
                     Some(_) => (), // TODO: maybe make use of solution?
                     None => {
                         unsat = true;
@@ -150,11 +151,12 @@ where
                 };
             }
 
-            // check that the reformulation is correct
-            #[cfg(feature = "verbose-proofs")]
             if let Some(super::proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
+                let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                // check that the reformulation is correct
+                #[cfg(feature = "verbose-proofs")]
                 if let Some(reform_id) = reform.reform_id {
-                    let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    let tot_db_ref = &tot_db;
                     proof.comment(&format_args!(
                         "check oll reformulation constraint for objective {obj_idx}"
                     ))?;
@@ -168,15 +170,51 @@ where
                                         .inactives
                                         .iter()
                                         .map(|(&l, &w)| (l, -isize::try_from(w).unwrap())),
-                                ),
+                                )
+                                .chain(reform.reformulations.values().flat_map(
+                                    |&ReformData {
+                                         root,
+                                         oidx,
+                                         tot_weight,
+                                         ..
+                                     }| {
+                                        (oidx + 2..=tot_db[root].max_val()).map(move |val| {
+                                            (
+                                                tot_db_ref[root][val],
+                                                -isize::try_from(tot_weight).unwrap(),
+                                            )
+                                        })
+                                    },
+                                )),
                             isize::try_from(reform.offset).unwrap(),
                         ),
                         Some(pidgeons::ConstraintId::from(reform_id)),
                     )?;
                 }
+
+                // peculiar case where we only have one oll totalizer as the final encoding, need to
+                // ensure we have the pseudo semantics defined
+                if reform.inactives.len() == 1 && reform.reformulations.len() == 1 {
+                    let reform_data = reform.reformulations.values().next().unwrap();
+                    if tot_db[reform_data.root].max_val() - reform_data.oidx > 1 {
+                        // if only one literal, the semantics are defined on the fly and not cached
+                        let leafs: Vec<_> = (reform_data.oidx + 1
+                            ..=tot_db[reform_data.root].max_val())
+                            .map(|val| (tot_db[reform_data.root][val], 1))
+                            .collect();
+                        tot_db.ensure_semantics(
+                            reform_data.root,
+                            reform_data.oidx,
+                            reform_data.oidx + 1,
+                            leafs.into_iter(),
+                            proof,
+                        )?;
+                    }
+                }
             }
 
             self.objs[obj_idx].set_reform_id(reform.reform_id);
+            self.objs[obj_idx].set_lower_bound(reform.offset);
             res.push((reform, tot_db));
         }
         self.log_routine_end()?;
@@ -312,6 +350,7 @@ where
                 self.objs[obj_idx] = Objective::Constant {
                     offset: self.objs[obj_idx].offset() + reform.offset as isize + offset,
                     idx: obj_idx,
+                    lower_bound: reform.offset,
                     reform_id: reform.reform_id,
                 };
                 continue;

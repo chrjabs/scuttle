@@ -224,6 +224,7 @@ pub(crate) enum Objective {
         offset: isize,
         lits: RsHashMap<Lit, usize>,
         idx: usize,
+        lower_bound: usize,
         reform_id: Option<pidgeons::AbsConstraintId>,
     },
     Unweighted {
@@ -231,11 +232,13 @@ pub(crate) enum Objective {
         unit_weight: usize,
         lits: Vec<Lit>,
         idx: usize,
+        lower_bound: usize,
         reform_id: Option<pidgeons::AbsConstraintId>,
     },
     Constant {
         offset: isize,
         idx: usize,
+        lower_bound: usize,
         reform_id: Option<pidgeons::AbsConstraintId>,
     },
 }
@@ -248,6 +251,7 @@ impl Objective {
             return Objective::Constant {
                 offset,
                 idx,
+                lower_bound: 0,
                 reform_id: None,
             };
         }
@@ -265,6 +269,7 @@ impl Objective {
                 offset,
                 lits: lits.into_iter().collect(),
                 idx,
+                lower_bound: 0,
                 reform_id: None,
             }
         } else {
@@ -273,6 +278,7 @@ impl Objective {
                 unit_weight,
                 lits: lits.into_iter().map(|(l, _)| l).collect(),
                 idx,
+                lower_bound: 0,
                 reform_id: None,
             }
         }
@@ -328,6 +334,24 @@ impl Objective {
             Objective::Weighted { reform_id, .. }
             | Objective::Unweighted { reform_id, .. }
             | Objective::Constant { reform_id, .. } => *reform_id,
+        }
+    }
+
+    /// Sets the lower bound of the objective
+    pub fn set_lower_bound(&mut self, new_lower_bound: usize) {
+        match self {
+            Objective::Weighted { lower_bound, .. }
+            | Objective::Unweighted { lower_bound, .. }
+            | Objective::Constant { lower_bound, .. } => *lower_bound = new_lower_bound,
+        }
+    }
+
+    /// Gets the lower bound of the objective
+    pub fn lower_bound(&self) -> usize {
+        match self {
+            Objective::Weighted { lower_bound, .. }
+            | Objective::Unweighted { lower_bound, .. }
+            | Objective::Constant { lower_bound, .. } => *lower_bound,
         }
     }
 
@@ -470,7 +494,7 @@ where
     }
 
     /// Enforces the given upper bound
-    pub fn enforce_ub(&mut self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::Error> {
+    pub fn enforce_ub(&self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::Error> {
         match self {
             ObjEncoding::Weighted(enc, offset) => {
                 if ub >= *offset {
@@ -584,7 +608,7 @@ impl ObjEncoding<pb::DbGte, card::DbTotalizer> {
     pub fn extend_assignment<'slf>(
         &'slf self,
         assign: &'slf Assignment,
-    ) -> std::iter::Flatten<std::option::IntoIter<totdb::AssignIter<'slf>>> {
+    ) -> impl Iterator<Item = Lit> + 'slf {
         match self {
             ObjEncoding::Weighted(enc, _) => enc.strictly_extend_assignment(assign),
             ObjEncoding::Unweighted(enc, _) => enc.strictly_extend_assignment(assign),
@@ -596,6 +620,14 @@ impl ObjEncoding<pb::DbGte, card::DbTotalizer> {
         match self {
             ObjEncoding::Weighted(enc, _) => enc.is_buffer_empty(),
             ObjEncoding::Unweighted(_, _) | ObjEncoding::Constant => true,
+        }
+    }
+
+    pub fn n_output_lits(&self) -> usize {
+        match self {
+            ObjEncoding::Weighted(enc, _) => enc.n_output_lits(),
+            ObjEncoding::Unweighted(enc, _) => enc.n_output_lits(),
+            ObjEncoding::Constant => 0,
         }
     }
 }

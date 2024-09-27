@@ -110,13 +110,13 @@ pub struct ProofStuff<ProofW: io::Write> {
     /// The handle of the proof tracer
     pub pt_handle: rustsat_cadical::ProofTracerHandle<CadicalTracer<ProofW>>,
     /// Mapping literal values to other literal values or other expressions
-    value_map: Vec<(Axiom<AnyVar>, Value)>,
+    pub value_map: Vec<(Axiom<AnyVar>, Value)>,
     /// Reified objective constraints
     obj_bound_constrs: RsHashMap<(usize, usize), (Axiom<AnyVar>, AbsConstraintId, AbsConstraintId)>,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Value {
+pub enum Value {
     Identical(Lit),
     ObjAtLeast(usize, usize),
 }
@@ -163,6 +163,7 @@ pub fn certify_pmin_cut<ProofW>(
     objs: &[Objective],
     costs: &[usize],
     witness: &Assignment,
+    max_enc_var: Var,
     proof_stuff: &mut ProofStuff<ProofW>,
     oracle: &mut rustsat_cadical::CaDiCaL<'_, '_>,
 ) -> io::Result<AbsConstraintId>
@@ -191,12 +192,17 @@ where
         .zip(objs)
         .zip(costs)
         .map(|((enc, obj), cst)| {
-            if *cst <= enc.offset() {
+            if *cst <= obj.lower_bound() {
                 debug_assert!(*cst == 0 || obj.reform_id().is_some());
                 return (None, obj.reform_id());
             }
             if obj.n_lits() == 1 {
                 let lit = !obj.iter().next().unwrap().0;
+                return (Some(AnyVar::Solver(lit.var()).axiom(lit.is_neg())), None);
+            }
+            // weird edge case with a single oll totalizer output as the objective encoding
+            if enc.n_output_lits() == 1 {
+                let lit = enc.enforce_ub(enc.offset()).unwrap()[0];
                 return (Some(AnyVar::Solver(lit.var()).axiom(lit.is_neg())), None);
             }
             let (lit, def) = if enc.is_buffer_empty() {
@@ -230,7 +236,9 @@ where
     // Extend witness to encoding variables under strict semantics
     // TODO: avoid clone
     let fixed_witness: Vec<Axiom<AnyVar>> = {
-        let fixed_witness: Assignment = witness
+        // NOTE: assignments from `extend_assignment` have precendence, as they weill overwrite
+        // assignments coming from the witness
+        let mut fixed_witness: Assignment = witness
             .iter()
             .chain(
                 obj_encs
@@ -240,21 +248,36 @@ where
             .collect();
         // NOTE: Need to do this in two steps since the identities depend on the encoding
         // assignments
-        let mut additional = Vec::new();
+        let mut solver_vars = Vec::new();
+        // TODO: clean this up a bit
         for &(this, that) in value_map.iter() {
             match that {
                 Value::Identical(that) => match fixed_witness.lit_value(that) {
-                    TernaryVal::True => additional.push(this),
-                    TernaryVal::False => additional.push(!this),
+                    TernaryVal::True => match this.var() {
+                        AnyVar::Proof(_) => solver_vars.push(this),
+                        AnyVar::Solver(var) => fixed_witness.assign_lit(var.lit(this.is_neg())),
+                    },
+                    TernaryVal::False => match this.var() {
+                        AnyVar::Proof(_) => solver_vars.push(!this),
+                        AnyVar::Solver(var) => fixed_witness.assign_lit(var.lit(!this.is_neg())),
+                    },
                     TernaryVal::DontCare => {
                         panic!("need assignment for left of identity ({this:?}, {that})")
                     }
                 },
                 Value::ObjAtLeast(obj_idx, value) => {
                     if costs[obj_idx] >= value {
-                        additional.push(this);
+                        match this.var() {
+                            AnyVar::Proof(_) => solver_vars.push(this),
+                            AnyVar::Solver(var) => fixed_witness.assign_lit(var.lit(this.is_neg())),
+                        }
                     } else {
-                        additional.push(!this);
+                        match this.var() {
+                            AnyVar::Proof(_) => solver_vars.push(!this),
+                            AnyVar::Solver(var) => {
+                                fixed_witness.assign_lit(var.lit(!this.is_neg()))
+                            }
+                        }
                     }
                 }
             }
@@ -262,7 +285,7 @@ where
         fixed_witness
             .into_iter()
             .map(axiom)
-            .chain(additional)
+            .chain(solver_vars)
             .collect()
     };
 
@@ -308,18 +331,20 @@ where
                 match dat {
                     (None, Some(reform_id)) => {
                         // Cost is lower bound derived in core boosting
+                        debug_assert!(*cst <= obj.lower_bound());
                         Some(ProofGoal::new(
                             ProofGoalId::specific(idx + 2),
-                            [Derivation::Rup(
-                                LbConstraint::clause([]),
-                                vec![ConstraintId::from(reform_id), ConstraintId::last(1)],
+                            [Derivation::from(
+                                OperationSequence::from(ConstraintId::from(reform_id))
+                                    + ConstraintId::last(1),
                             )],
                         ))
                     }
                     (Some(lit), Some(def)) => {
                         // Prove that the witness dominates
-                        let mut conf_deriv =
-                            (OperationSequence::from(ConstraintId::last(1)) * *cst) + def;
+                        let mut conf_deriv = (OperationSequence::from(ConstraintId::last(1))
+                            * (*cst - obj.lower_bound()))
+                            + def;
                         if let Some(reform_id) = obj.reform_id() {
                             conf_deriv += reform_id;
                         }
@@ -338,7 +363,8 @@ where
                     }
                     (_, None) => {
                         // Cost is trivial lower bound of objective or objective is trivial
-                        debug_assert!(obj.n_lits() == 1 || *cst == 0);
+                        // NOTE: third case is that the encoding has only one output
+                        // debug_assert!(obj.n_lits() == 1 || *cst == 0);
                         None
                     }
                 }
@@ -346,7 +372,13 @@ where
     )?;
 
     // Exclude witness
-    let exclude = proof.exclude_solution(witness.iter().map(Axiom::from))?;
+    let exclude = proof.exclude_solution(
+        witness
+            .clone()
+            .truncate(max_enc_var)
+            .iter()
+            .map(Axiom::from),
+    )?;
     #[cfg(feature = "verbose-proofs")]
     proof.equals(
         &LbConstraint::clause(
@@ -794,7 +826,7 @@ impl VarLike for AnyVar {
     type Formatter = Self;
 }
 
-fn axiom(lit: Lit) -> Axiom<AnyVar> {
+pub fn axiom(lit: Lit) -> Axiom<AnyVar> {
     AnyVar::Solver(lit.var()).axiom(lit.is_neg())
 }
 
@@ -1012,6 +1044,7 @@ mod tests {
                 unit_weight: 2,
                 lits: vec![lit![0], !lit![1], lit![2], lit![3]],
                 idx: 0,
+                lower_bound: 0,
                 reform_id: None,
             },
             Objective::Weighted {
@@ -1020,11 +1053,13 @@ mod tests {
                     .into_iter()
                     .collect(),
                 idx: 1,
+                lower_bound: 0,
                 reform_id: None,
             },
             Objective::Constant {
                 offset: 11,
                 idx: 2,
+                lower_bound: 0,
                 reform_id: None,
             },
         ];
@@ -1069,6 +1104,7 @@ end"#;
                 unit_weight: 2,
                 lits: vec![lit![0], !lit![1], lit![2], lit![3]],
                 idx: 0,
+                lower_bound: 0,
                 reform_id: None,
             },
             Objective::Weighted {
@@ -1077,11 +1113,13 @@ end"#;
                     .into_iter()
                     .collect(),
                 idx: 1,
+                lower_bound: 0,
                 reform_id: None,
             },
             Objective::Constant {
                 offset: 11,
                 idx: 2,
+                lower_bound: 0,
                 reform_id: None,
             },
         ];

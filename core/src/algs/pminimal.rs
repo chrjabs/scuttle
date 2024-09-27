@@ -36,7 +36,6 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
-    algs::{coreguided::ReformData, proofs, ObjEncoding},
     options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
     termination::ensure,
     types::{ParetoFront, VarManager},
@@ -45,7 +44,7 @@ use crate::{
     Phase,
 };
 
-use super::{coreboosting::MergeOllRef, CoreBoost, Kernel, Objective};
+use super::{coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, Objective};
 
 /// The $P$-minimal algorithm type
 ///
@@ -293,14 +292,12 @@ where
                     use rustsat::encodings::CollectCertClauses;
 
                     let (reified_cut, reified_assump_ids) = ids.unwrap();
-                    let witness = solution
-                        .clone()
-                        .truncate(self.kernel.var_manager.max_enc_var());
                     let id = proofs::certify_pmin_cut(
                         &self.obj_encs,
                         &self.kernel.objs,
                         &costs,
-                        &witness,
+                        &solution,
+                        self.kernel.var_manager.max_enc_var(),
                         proof_stuff,
                         &mut self.kernel.oracle,
                     )?;
@@ -371,9 +368,9 @@ where
             }
             if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
                 if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.kernel.proof_stuff {
-                    // delete remaining reformulation constraints from proof
-                    let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
                     if !reform.reformulations.is_empty() {
+                        // delete remaining reformulation constraints from proof
+                        let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
                         #[cfg(feature = "verbose-proofs")]
                         proof.comment(&format_args!(
                             "deleting remaining reformulation constraints from OLL of objective {oidx}"
@@ -386,12 +383,6 @@ where
                             None,
                         )?;
                     }
-                }
-
-                // reserve totalizer output variables since they are required for the pseudo
-                // semantics when proof logging
-                for &ReformData { root, .. } in reform.reformulations.values() {
-                    tot_db[root].reserve_vars(&mut self.kernel.var_manager);
                 }
 
                 self.obj_encs[oidx] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
@@ -447,13 +438,13 @@ where
                 if let Some(proof_stuff) = &mut self.proof_stuff {
                     use rustsat::encodings::CollectCertClauses;
 
-                    let witness = solution.clone().truncate(self.var_manager.max_enc_var());
                     // this adds the "ideal cut"
                     let cut_id = proofs::certify_pmin_cut(
                         obj_encs,
                         &self.objs,
                         &costs,
-                        &witness,
+                        &solution,
+                        self.var_manager.max_enc_var(),
                         proof_stuff,
                         &mut self.oracle,
                     )?;
@@ -486,12 +477,12 @@ where
                         use rustsat::encodings::CollectCertClauses;
 
                         let (reified_cut, reified_assump_ids) = ids.unwrap();
-                        let witness = solution.clone().truncate(self.var_manager.max_enc_var());
                         let id = proofs::certify_pmin_cut(
                             obj_encs,
                             &self.objs,
                             &costs,
-                            &witness,
+                            &solution,
+                            self.var_manager.max_enc_var(),
                             proof_stuff,
                             &mut self.oracle,
                         )?;

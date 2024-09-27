@@ -26,7 +26,6 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
-    algs::coreguided::ReformData,
     options::{AfterCbOptions, CoreBoostingOptions},
     termination::ensure,
     types::{NonDomPoint, ParetoFront, VarManager},
@@ -301,9 +300,9 @@ where
             }
             if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
                 if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.kernel.proof_stuff {
-                    // delete remaining reformulation constraints from proof
-                    let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
                     if !reform.reformulations.is_empty() {
+                        // delete remaining reformulation constraints from proof
+                        let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
                         #[cfg(feature = "verbose-proofs")]
                         proof.comment(&format_args!(
                             "deleting remaining reformulation constraints from OLL of objective {oidx}"
@@ -316,12 +315,6 @@ where
                             None,
                         )?;
                     }
-                }
-
-                // reserve totalizer output variables since they are required for the pseudo
-                // semantics when proof logging
-                for &ReformData { root, .. } in reform.reformulations.values() {
-                    tot_db[root].reserve_vars(&mut self.kernel.var_manager);
                 }
 
                 if oidx == 0 {
@@ -433,12 +426,12 @@ where
                     // don't support base assumptions for proof logging for now
                     debug_assert!(base_assumps.is_empty());
                     // get p-min cut for current solution in proof
-                    let witness = sol.truncate(self.var_manager.max_enc_var());
                     let pmin_cut_id = proofs::certify_pmin_cut(
                         encodings,
                         &self.objs,
                         &[inc_cost, dec_cost],
-                        &witness,
+                        &sol,
+                        self.var_manager.max_enc_var(),
                         proof_stuff,
                         &mut self.oracle,
                     )?;
@@ -493,12 +486,12 @@ where
                 // don't support base assumptions for proof logging for now
                 debug_assert!(base_assumps.is_empty());
                 // get p-min cut for current solution in proof
-                let witness = sol.truncate(self.var_manager.max_enc_var());
                 let pmin_cut_id = proofs::certify_pmin_cut(
                     encodings,
                     &self.objs,
                     &[inc_cost, dec_cost],
-                    &witness,
+                    &sol,
+                    self.var_manager.max_enc_var(),
                     proof_stuff,
                     &mut self.oracle,
                 )?;

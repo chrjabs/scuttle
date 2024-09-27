@@ -409,6 +409,48 @@ macro_rules! set_cover_3 {
     };
 }
 
+macro_rules! dal2 {
+    ($s:ty, $o:expr) => {
+        test_instance!(
+            $s,
+            $o,
+            "./data/dal2.opb",
+            vec![
+                (vec![19, 4, 8, 0, 0, 0, 0], 1),
+                (vec![19, 4, 7, 1, 0, 0, 0], 1),
+                (vec![19, 4, 7, 0, 1, 0, 0], 1),
+                (vec![19, 4, 6, 1, 1, 0, 0], 1),
+                (vec![19, 4, 5, 1, 2, 0, 0], 1),
+                (vec![19, 4, 5, 0, 3, 0, 0], 1),
+                (vec![19, 4, 6, 0, 2, 0, 0], 1),
+                (vec![19, 4, 6, 2, 0, 0, 0], 1),
+                (vec![19, 4, 5, 3, 0, 0, 0], 1),
+                (vec![19, 4, 5, 2, 1, 0, 0], 1),
+            ]
+        )
+    };
+    ($s:ty, $o:expr, $cbo:expr) => {
+        test_instance!(
+            $s,
+            $o,
+            $cbo,
+            "./data/dal2.opb",
+            vec![
+                (vec![19, 4, 8, 0, 0, 0, 0], 1),
+                (vec![19, 4, 7, 1, 0, 0, 0], 1),
+                (vec![19, 4, 7, 0, 1, 0, 0], 1),
+                (vec![19, 4, 6, 1, 1, 0, 0], 1),
+                (vec![19, 4, 5, 1, 2, 0, 0], 1),
+                (vec![19, 4, 5, 0, 3, 0, 0], 1),
+                (vec![19, 4, 6, 0, 2, 0, 0], 1),
+                (vec![19, 4, 6, 2, 0, 0, 0], 1),
+                (vec![19, 4, 5, 3, 0, 0, 0], 1),
+                (vec![19, 4, 5, 2, 1, 0, 0], 1),
+            ]
+        )
+    };
+}
+
 macro_rules! generate_tests {
     ($mod:ident, $s:ty, $o:expr) => {
         mod $mod {
@@ -450,6 +492,11 @@ macro_rules! generate_tests {
             #[test]
             fn set_cover_3_cert() {
                 set_cover_3!($s, $o);
+            }
+
+            #[test]
+            fn dal2() {
+                dal2!($s, $o);
             }
         }
     };
@@ -494,6 +541,11 @@ macro_rules! generate_tests {
             #[test]
             fn set_cover_3_cert() {
                 set_cover_3!($s, $o, $cbo);
+            }
+
+            #[test]
+            fn dal2() {
+                dal2!($s, $o, $cbo);
             }
         }
     };
