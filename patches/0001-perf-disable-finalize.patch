@@ -1,26 +1,17 @@
-From fa156745a153e6603c7c7ce16f1cd0db8bfb087d Mon Sep 17 00:00:00 2001
+From bb0b1ea6b7445ddcf6c681876d338d34eb917513 Mon Sep 17 00:00:00 2001
 From: Christoph Jabs <christoph.jabs@helsinki.fi>
-Date: Fri, 13 Sep 2024 10:37:13 +0300
+Date: Tue, 1 Oct 2024 12:36:03 +0300
 Subject: [PATCH] perf: disable finalize
 
 ---
- src/internal.cpp | 85 ++++++++++++++++++++++++------------------------
- 1 file changed, 43 insertions(+), 42 deletions(-)
+ src/internal.cpp | 91 ++++++++++++++++++++++++------------------------
+ 1 file changed, 46 insertions(+), 45 deletions(-)
 
 diff --git a/src/internal.cpp b/src/internal.cpp
-index d524edd..55ec3c9 100644
+index d524edd..d450a54 100644
 --- a/src/internal.cpp
 +++ b/src/internal.cpp
-@@ -47,7 +47,7 @@ Internal::Internal ()
- }
- 
- Internal::~Internal () {
--  delete[](char *) dummy_binary;
-+  delete[] (char *) dummy_binary;
-   for (const auto &c : clauses)
-     delete_clause (c);
-   if (proof)
-@@ -841,47 +841,48 @@ void Internal::finalize (int res) {
+@@ -841,52 +841,53 @@ void Internal::finalize (int res) {
    if (!proof)
      return;
    LOG ("finalizing");
@@ -108,8 +99,17 @@ index d524edd..55ec3c9 100644
 +  //   proof->finalize_clause (conflict_id, {});
 +  // }
    proof->report_status (res, conflict_id);
-   if (res == 10)
-     external->conclude_sat ();
+-  if (res == 10)
+-    external->conclude_sat ();
+-  else if (res == 20)
+-    conclude_unsat ();
++  // if (res == 10)
++  //   external->conclude_sat ();
++  // else if (res == 20)
++  //   conclude_unsat ();
+ }
+ 
+ /*------------------------------------------------------------------------*/
 -- 
 2.46.0
 
