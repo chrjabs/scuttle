@@ -497,11 +497,12 @@ where
                 )?;
 
                 // while we know the assumptions, simplify dec_lb_id
+                let (first_olit, first_sems) =
+                    encodings[0].output_proof_details(encodings[0].next_higher(inc_cost));
                 dec_lb_id = if encodings[0].is_buffer_empty() {
-                    let (first_olit, first_sems) = encodings[0].output_proof_details(inc_cost + 1);
                     if assumps.len() <= 1 {
-                        // already minimal
                         debug_assert!(assumps.len() != 1 || assumps[0] == !first_olit);
+                        // already minimal
                         dec_lb_id
                     } else {
                         let proof = self
@@ -511,7 +512,7 @@ where
 
                         let start = if assumps[0] == !first_olit { 1 } else { 0 };
                         let mut implications = Vec::with_capacity(assumps.len());
-                        let mut val = encodings[0].next_higher(inc_cost + 1);
+                        let mut val = encodings[0].next_higher(encodings[0].next_higher(inc_cost));
                         for &a in &assumps[start..] {
                             let (olit, sems) = encodings[0].output_proof_details(val);
                             debug_assert_eq!(a, !olit);
