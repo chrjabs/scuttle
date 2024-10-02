@@ -22,13 +22,13 @@ use cli::{Algorithm, CadicalConfig, CardEncoding, Cli, PbEncoding};
 type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
-type PMin<OInit = DefaultInitializer> =
+type PMin<OInit = CaDiCaLDefaultInit> =
     PMinimal<Oracle, pb::DbGte, card::DbTotalizer, io::BufWriter<fs::File>, OInit>;
 /// BiOptSat Instantiation used
-type Bos<PBE, CE, OInit = DefaultInitializer> =
+type Bos<PBE, CE, OInit = CaDiCaLDefaultInit> =
     BiOptSat<Oracle, PBE, CE, io::BufWriter<fs::File>, OInit>;
 /// Lower-bounding instantiation used
-type Lb<OInit = DefaultInitializer> =
+type Lb<OInit = CaDiCaLDefaultInit> =
     LowerBounding<Oracle, pb::DbGte, card::DbTotalizer, io::BufWriter<fs::File>, OInit>;
 
 // TODO: this macro will potentially need a variant without core boosting
@@ -333,6 +333,18 @@ enum Error {
     InvalidConfig,
 }
 
+struct CaDiCaLDefaultInit;
+
+impl Initialize<CaDiCaL<'static, 'static>> for CaDiCaLDefaultInit {
+    fn init() -> CaDiCaL<'static, 'static> {
+        let mut slv = CaDiCaL::default();
+        // NOTE: ILB apparently causes CaDiCaL to diverge between proof logging or not?
+        // It might also be bad for core-guided search performance
+        slv.set_option("ilb", 0).unwrap();
+        slv
+    }
+}
+
 struct CaDiCaLPlainInit;
 
 impl Initialize<CaDiCaL<'static, 'static>> for CaDiCaLPlainInit {
@@ -340,6 +352,9 @@ impl Initialize<CaDiCaL<'static, 'static>> for CaDiCaLPlainInit {
         let mut slv = CaDiCaL::default();
         slv.set_configuration(rustsat_cadical::Config::Plain)
             .expect("failed to set cadical config");
+        // NOTE: ILB apparently causes CaDiCaL to diverge between proof logging or not?
+        // It might also be bad for core-guided search performance
+        slv.set_option("ilb", 0).unwrap();
         slv
     }
 }
@@ -351,6 +366,9 @@ impl Initialize<CaDiCaL<'static, 'static>> for CaDiCaLSatInit {
         let mut slv = CaDiCaL::default();
         slv.set_configuration(rustsat_cadical::Config::Sat)
             .expect("failed to set cadical config");
+        // NOTE: ILB apparently causes CaDiCaL to diverge between proof logging or not?
+        // It might also be bad for core-guided search performance
+        slv.set_option("ilb", 0).unwrap();
         slv
     }
 }
@@ -362,6 +380,9 @@ impl Initialize<CaDiCaL<'static, 'static>> for CaDiCaLUnsatInit {
         let mut slv = CaDiCaL::default();
         slv.set_configuration(rustsat_cadical::Config::Unsat)
             .expect("failed to set cadical config");
+        // NOTE: ILB apparently causes CaDiCaL to diverge between proof logging or not?
+        // It might also be bad for core-guided search performance
+        slv.set_option("ilb", 0).unwrap();
         slv
     }
 }
