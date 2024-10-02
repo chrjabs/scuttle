@@ -17,6 +17,7 @@ use rustsat::{
         pb::{self, DbGte},
         CollectCertClauses,
     },
+    instances::ManageVars,
     solvers::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
@@ -374,7 +375,7 @@ where
             if res == SolverResult::Unsat {
                 return Done(());
             }
-            let mut sol = self.oracle.solution(self.var_manager.max_enc_var())?;
+            let mut sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
             let cost = self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
             (cost, sol)
         };
@@ -748,7 +749,7 @@ where
 
             (sol, inc_cost) = match self.solve_assumps(base_assumps)? {
                 SolverResult::Sat => {
-                    let mut sol = self.oracle.solution(self.var_manager.max_enc_var())?;
+                    let mut sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
                     let cost =
                         self.get_cost_with_heuristic_improvements(inc_obj, &mut sol, true)?;
                     (sol, cost)
