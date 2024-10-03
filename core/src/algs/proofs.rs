@@ -289,39 +289,24 @@ where
             .collect()
     };
 
-    // Introduce indicator variable for being at accactly the solution in question
-    let is_this = AnyVar::Proof(proof.new_proof_var());
-    #[cfg(feature = "verbose-proofs")]
-    proof.comment(&format_args!(
-        "{is_this} = a solution is _exactly_ the witnessing one"
-    ))?;
-    let bound = isize::try_from(fixed_witness.len()).unwrap();
-    // NOTE: need to use the fixed complete witness here to not have to include the totalizer in
-    // the RUP hints for the cut constraint
-    let is_this_def = proof.redundant(
-        &LbConstraint {
-            lits: [(bound, is_this.neg_axiom())]
-                .into_iter()
-                .chain(fixed_witness.iter().map(|l| (1, *l)))
-                .collect(),
-            bound,
-        },
-        [is_this.substitute_fixed(false)],
-        [],
-    )?;
+    let negation_id = ConstraintId::from(proof.next_id());
 
     // Map all weakly dominated solutions to the witness itself
     let map_dom = proof.redundant(
         &LbConstraint {
-            lits: [(1, is_this.pos_axiom())]
-                .into_iter()
-                .chain(cut.lits.iter().copied())
+            lits: fixed_witness
+                .iter()
+                .map(|l| (1, *l))
+                .chain(
+                    cut.lits
+                        .iter()
+                        .map(|(_, l)| (isize::try_from(fixed_witness.len() + 1).unwrap(), *l)),
+                )
                 .collect(),
-            bound: 1,
+            bound: isize::try_from(fixed_witness.len())
+                .expect("can only handle bounds up to `usize::MAX`"),
         },
-        [is_this.substitute_fixed(true)]
-            .into_iter()
-            .chain(fixed_witness.iter().map(|l| Substitution::from(*l))),
+        fixed_witness.iter().map(|l| Substitution::from(*l)),
         cut_data
             .into_iter()
             .zip(objs)
@@ -353,10 +338,7 @@ where
                         Some(ProofGoal::new(
                             ProofGoalId::specific(idx + 2),
                             [
-                                Derivation::Rup(
-                                    LbConstraint::clause([!lit]),
-                                    vec![(is_this_def + 1).into()],
-                                ),
+                                Derivation::Rup(LbConstraint::clause([!lit]), vec![negation_id]),
                                 Derivation::from(conf_deriv),
                             ],
                         ))
@@ -381,31 +363,20 @@ where
     )?;
     #[cfg(feature = "verbose-proofs")]
     proof.equals(
-        &LbConstraint::clause(
-            fixed_witness
-                .iter()
-                .map(|l| !*l)
-                .chain([is_this.neg_axiom()]),
-        ),
+        &LbConstraint::clause(fixed_witness.iter().map(|l| !*l)),
         Some(exclude.into()),
     )?;
 
     // Add the actual P-minimal cut as a clause
-    let cut_id = proof.reverse_unit_prop(
-        &cut,
-        [map_dom, is_this_def, exclude]
-            .into_iter()
-            .map(ConstraintId::from),
-    )?;
+    let cut_id =
+        proof.reverse_unit_prop(&cut, [map_dom, exclude].into_iter().map(ConstraintId::from))?;
     // Need to move to core to be able to delete the derivation constraints
     proof.move_ids_to_core([ConstraintId::from(cut_id)])?;
 
     // Remove auxiliary constraints
     //proof.delete_ids::<AnyVar, LbConstraint<AnyVar>, _, _>(
     proof.delete_ids(
-        [exclude, map_dom, is_this_def]
-            .into_iter()
-            .map(ConstraintId::from),
+        [exclude, map_dom].into_iter().map(ConstraintId::from),
         [ProofGoal::new(
             ProofGoalId::specific(1),
             [Derivation::Rup(
