@@ -1,0 +1,19 @@
+c A Small MCNF example from the core boosting / proof logging paper
+c 
+c non-dominated points:
+c (4, 8)
+c (5, 7)
+c (6, 3)
+c 
+h 1 2 3 0
+h 1 2 4 0
+h 2 3 5 0
+h 3 4 5 0
+o1 3 -2 0
+o1 4 -3 0
+o1 2 -4 0
+o1 5 -5 0
+o2 7 -1 0
+o2 4 -2 0
+o2 1 -3 0
+o2 2 -4 0
