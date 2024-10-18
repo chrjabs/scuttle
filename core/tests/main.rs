@@ -958,3 +958,9 @@ mod bioptsat {
         }
     );
 }
+
+mod ihs {
+    type S =
+        scuttle_core::Ihs<rustsat_cadical::CaDiCaL<'static, 'static>, hitting_sets::HighsSolver>;
+    generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
+}

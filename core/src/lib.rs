@@ -22,6 +22,7 @@ pub use algs::{
 
 // Reexport algorithms
 pub use algs::bioptsat::BiOptSat;
+pub use algs::ihs::Ihs;
 pub use algs::lowerbounding::LowerBounding;
 pub use algs::pminimal::PMinimal;
 

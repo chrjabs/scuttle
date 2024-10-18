@@ -5,6 +5,8 @@ use std::time::Duration;
 use highs::{Col, HighsModelStatus, Model, RowProblem, Sense};
 use rustsat::types::{Cl, Lit, RsHashMap};
 
+use crate::{CompleteSolveResult, IncompleteSolveResult};
+
 use super::{BuildSolver, HittingSetSolver, VarMap};
 
 pub struct Solver {
@@ -34,12 +36,14 @@ impl HittingSetSolver for Solver {
                 let row: Vec<_> = core
                     .iter()
                     .map(|lit| {
+                        let (weight, lit) = if let Some(weight) = self.weights.get(lit) {
+                            (*weight, *lit)
+                        } else {
+                            (*self.weights.get(&!*lit).unwrap(), !*lit)
+                        };
                         (
-                            self.map.ensure_mapped(*lit, || {
-                                problem.add_integer_column(
-                                    (*self.weights.get(lit).unwrap()) as f64,
-                                    0..=1,
-                                )
+                            self.map.ensure_mapped(lit, || {
+                                problem.add_integer_column(weight as f64, 0..=1)
                             }),
                             1_f64,
                         )
@@ -51,13 +55,14 @@ impl HittingSetSolver for Solver {
                 let row: Vec<_> = core
                     .iter()
                     .map(|lit| {
+                        let (weight, lit) = if let Some(weight) = self.weights.get(lit) {
+                            (*weight, *lit)
+                        } else {
+                            (*self.weights.get(&!*lit).unwrap(), !*lit)
+                        };
                         (
-                            self.map.ensure_mapped(*lit, || {
-                                model.add_integer_column(
-                                    (*self.weights.get(lit).unwrap()) as f64,
-                                    0..=1,
-                                    [],
-                                )
+                            self.map.ensure_mapped(lit, || {
+                                model.add_integer_column(weight as f64, 0..=1, [])
                             }),
                             1_f64,
                         )
@@ -70,11 +75,11 @@ impl HittingSetSolver for Solver {
         self.state = state;
     }
 
-    fn optimal_hitting_set(&mut self) -> (usize, Vec<Lit>) {
-        self.solve(None).unwrap()
+    fn optimal_hitting_set(&mut self) -> CompleteSolveResult {
+        self.solve(None).into()
     }
 
-    fn hitting_set(&mut self, time_limit: Duration) -> Option<(usize, Vec<Lit>)> {
+    fn hitting_set(&mut self, time_limit: Duration) -> IncompleteSolveResult {
         self.solve(Some(time_limit))
     }
 }
@@ -89,7 +94,7 @@ impl Solver {
         self.state = State::Main(model);
     }
 
-    fn solve(&mut self, time_limit: Option<Duration>) -> Option<(usize, Vec<Lit>)> {
+    fn solve(&mut self, time_limit: Option<Duration>) -> IncompleteSolveResult {
         if matches!(self.state, State::Init { .. }) {
             self.transition_to_main();
         }
@@ -100,12 +105,21 @@ impl Solver {
             model.set_option("time_limit", time_limit.as_secs() as f64);
         }
         let solved = model.solve();
+        if solved.status() == HighsModelStatus::Infeasible {
+            let mut model = Model::from(solved);
+            if time_limit.is_some() {
+                model.set_option("time_limit", f64::INFINITY);
+            }
+            self.state = State::Main(model);
+            return IncompleteSolveResult::Infeasible;
+        }
         if solved.status() == HighsModelStatus::ReachedTimeLimit {
             assert!(time_limit.is_some());
             let mut model = Model::from(solved);
             model.set_option("time_limit", f64::INFINITY);
             self.state = State::Main(model);
-            return None;
+            // TODO: figure out how to get a feasible solution
+            return IncompleteSolveResult::Unknown;
         }
         assert_eq!(solved.status(), HighsModelStatus::Optimal);
         let solution = solved.get_solution();
@@ -129,7 +143,7 @@ impl Solver {
         let cost = hitting_set
             .iter()
             .fold(0, |sum, lit| sum + self.weights[lit]);
-        Some((cost, hitting_set))
+        IncompleteSolveResult::Optimal(cost, hitting_set)
     }
 }
 

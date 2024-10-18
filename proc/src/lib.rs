@@ -71,7 +71,7 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
     quote! {
-        impl #impl_generics KernelFunctions for #name #ty_generics #where_clause {
+        impl #impl_generics crate::KernelFunctions for #name #ty_generics #where_clause {
             fn pareto_front(&self) -> crate::types::ParetoFront {
                 self.pareto_front.clone()
             }
@@ -176,8 +176,8 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
     quote! {
-        impl #impl_generics Solve for #name #ty_generics #where_clause {
-            fn solve(&mut self, limits: Limits) -> crate::MaybeTerminatedError {
+        impl #impl_generics crate::Solve for #name #ty_generics #where_clause {
+            fn solve(&mut self, limits: crate::Limits) -> crate::MaybeTerminatedError {
                 #kernel.start_solving(limits);
                 self.alg_main()
             }

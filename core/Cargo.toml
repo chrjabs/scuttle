@@ -7,6 +7,7 @@ edition = "2021"
 anyhow.workspace = true
 cadical-veripb-tracer.workspace = true
 clap = { workspace = true, optional = true }
+hitting-sets.workspace = true
 itertools.workspace = true
 maxpre.workspace = true
 pidgeons.workspace = true

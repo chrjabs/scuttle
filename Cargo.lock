@@ -869,6 +869,7 @@ dependencies = [
  "anyhow",
  "cadical-veripb-tracer",
  "clap",
+ "hitting-sets",
  "itertools 0.13.0",
  "maxpre",
  "pidgeons",

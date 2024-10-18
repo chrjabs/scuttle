@@ -12,6 +12,7 @@ clap = { version = "4.5.15", features = ["derive", "cargo"] }
 cpu-time = "1.0.0"
 concolor-clap = "0.1.0"
 highs = { git = "https://github.com/chrjabs/highs.git", branch = "integer-vars" }
+hitting-sets = { path = "./hitting-sets" }
 itertools = "0.13.0"
 maxpre = { version = "0.2.2", path = "./maxpre-rs", features = ["multiopt"] }
 pidgeons = { version = "0.1.0", path = "./rustsat/pidgeons" }

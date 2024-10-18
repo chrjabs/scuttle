@@ -19,19 +19,54 @@ pub const EPSILON: f64 = 0.05;
 pub const TRUE: f64 = 1. - EPSILON;
 pub const FALSE: f64 = 0. + EPSILON;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum CompleteSolveResult {
+    Optimal(usize, Vec<Lit>),
+    Infeasible,
+}
+
+impl From<IncompleteSolveResult> for CompleteSolveResult {
+    fn from(value: IncompleteSolveResult) -> Self {
+        match value {
+            IncompleteSolveResult::Optimal(cost, hs) => CompleteSolveResult::Optimal(cost, hs),
+            IncompleteSolveResult::Infeasible => CompleteSolveResult::Infeasible,
+            IncompleteSolveResult::Feasible(_, _) | IncompleteSolveResult::Unknown => {
+                panic!("cannot convert incomplete result to complete")
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum IncompleteSolveResult {
+    Optimal(usize, Vec<Lit>),
+    Infeasible,
+    Feasible(usize, Vec<Lit>),
+    Unknown,
+}
+
+impl From<CompleteSolveResult> for IncompleteSolveResult {
+    fn from(value: CompleteSolveResult) -> Self {
+        match value {
+            CompleteSolveResult::Optimal(cost, hs) => IncompleteSolveResult::Optimal(cost, hs),
+            CompleteSolveResult::Infeasible => IncompleteSolveResult::Infeasible,
+        }
+    }
+}
+
 /// Trait specifying the unified interface to various hitting set solvers
 pub trait HittingSetSolver {
     /// The type that can be used to build a solver of this type
-    type Builder: BuildSolver;
+    type Builder: BuildSolver<Solver = Self>;
 
     /// Adds a new core to the solver
     fn add_core(&mut self, core: &Cl);
 
     /// Computes an optimal hitting set for the currently given cores
-    fn optimal_hitting_set(&mut self) -> (usize, Vec<Lit>);
+    fn optimal_hitting_set(&mut self) -> CompleteSolveResult;
 
     /// Computes a hitting set for the currently given cores under a time limit
-    fn hitting_set(&mut self, time_limit: Duration) -> Option<(usize, Vec<Lit>)>;
+    fn hitting_set(&mut self, time_limit: Duration) -> IncompleteSolveResult;
 }
 
 /// Trait for initializing a new solver
