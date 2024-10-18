@@ -1,5 +1,5 @@
 [workspace]
-members = ["cadical-veripb-tracer", "core", "proc"]
+members = ["cadical-veripb-tracer", "core", "hitting-sets", "proc"]
 exclude = ["rustsat", "maxpre-rs"]
 resolver = "2"
 
@@ -11,6 +11,7 @@ cfg-if = "1.0.0"
 clap = { version = "4.5.15", features = ["derive", "cargo"] }
 cpu-time = "1.0.0"
 concolor-clap = "0.1.0"
+highs = { git = "https://github.com/chrjabs/highs.git", branch = "integer-vars" }
 itertools = "0.13.0"
 maxpre = { version = "0.2.2", path = "./maxpre-rs", features = ["multiopt"] }
 pidgeons = { version = "0.1.0", path = "./rustsat/pidgeons" }
