@@ -439,7 +439,7 @@ checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
 [[package]]
 name = "highs"
 version = "1.6.1"
-source = "git+https://github.com/chrjabs/highs.git?branch=integer-vars#40db61af06c691c65bb7e9d24a2e0a4f400d4173"
+source = "git+https://github.com/chrjabs/highs.git?branch=integer-vars#977931b792cd8a11d7f8e8b05e8889ebb595ae80"
 dependencies = [
  "highs-sys",
  "log",
@@ -852,6 +852,7 @@ dependencies = [
  "clap",
  "concolor-clap",
  "cpu-time",
+ "hitting-sets",
  "maxpre",
  "pidgeons",
  "rustsat",

@@ -656,7 +656,7 @@ where
     }
 
     /// Minimizes a core
-    fn minimize_core(
+    pub fn minimize_core(
         &mut self,
         mut core: Vec<Lit>,
         base_assumps: &[Lit],
@@ -725,7 +725,7 @@ where
     }
 
     /// Trims a core
-    fn trim_core(
+    pub fn trim_core(
         &mut self,
         mut core: Vec<Lit>,
         base_assumps: &[Lit],

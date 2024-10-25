@@ -26,6 +26,12 @@ impl<T> VarMap<T>
 where
     T: IndexedVar + std::fmt::Debug,
 {
+    /// Gets the maximum value mapped to
+    pub fn max_mapped(&self) -> Option<&T> {
+        let var = self.backward.last()?;
+        self.forward[var.idx()].as_ref()
+    }
+
     /// For a variable, returns it's internal representation. If none is tracked, generates a new
     /// one with `if_not`.
     ///

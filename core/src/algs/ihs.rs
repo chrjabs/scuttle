@@ -7,25 +7,21 @@ use rustsat::{
     solvers::{
         DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
     },
-    types::{Assignment, Cl, Clause, Lit, RsHashMap, WLitIter},
+    types::{Assignment, Cl, Clause, Lit, RsHashSet, WLitIter},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions, Solve};
+use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
-    types::{ParetoFront, VarManager},
-    EncodingStats, ExtendedSolveStats, KernelOptions,
+    options::EnumOptions,
+    types::{Objective, ParetoFront, VarManager},
+    EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
     MaybeTerminatedError::{self, Done},
 };
 
 use super::Kernel;
 
-#[derive(KernelFunctions, Solve)]
-#[solve(bounds = "where O: SolveIncremental + SolveStats,
-        Hss: HittingSetSolver,
-        ProofW: io::Write,
-        OInit: Initialize<O>,
-        BCG: Fn(Assignment) -> Clause")]
-pub struct Ihs<
+#[derive(KernelFunctions)]
+pub struct ParetoIhs<
     O,
     Hss,
     ProofW = io::BufWriter<std::fs::File>,
@@ -36,13 +32,41 @@ pub struct Ihs<
 {
     kernel: Kernel<O, ProofW, OInit, BCG>,
     hitting_set_solver: Hss,
-    joint_obj: RsHashMap<Lit, usize>,
+    objective_lits: RsHashSet<Lit>,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
 }
 
+impl<Hss, ProofW, OInit, BCG> super::Solve
+    for ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, ProofW, OInit, BCG>
+where
+    Hss: HittingSetSolver,
+    ProofW: io::Write + 'static,
+    BCG: Fn(Assignment) -> Clause,
+{
+    fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
+        self.kernel.start_solving(limits);
+        self.alg_main()
+    }
+
+    fn all_stats(
+        &self,
+    ) -> (
+        crate::Stats,
+        Option<SolverStats>,
+        Option<Vec<EncodingStats>>,
+    ) {
+        use crate::ExtendedSolveStats;
+        (
+            self.kernel.stats,
+            Some(self.oracle_stats()),
+            Some(self.encoding_stats()),
+        )
+    }
+}
+
 #[oracle_bounds]
-impl<O, Hss, ProofW, OInit, BCG> super::Init for Ihs<O, Hss, ProofW, OInit, BCG>
+impl<O, Hss, ProofW, OInit, BCG> super::Init for ParetoIhs<O, Hss, ProofW, OInit, BCG>
 where
     O: SolveIncremental,
     Hss: HittingSetSolver,
@@ -67,48 +91,47 @@ where
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
+        anyhow::ensure!(
+            matches!(opts.enumeration, EnumOptions::NoEnum),
+            "cannot enumerate with IHS algorithm"
+        );
         let objs: Vec<_> = objs
             .into_iter()
             .map(|(obj, off)| (obj.into_iter().collect::<Vec<_>>(), off))
             .collect();
-        let mut joint_obj = RsHashMap::default();
-        let mut max_var = rustsat::var![0];
-        for (obj, _) in &objs {
-            for (l, w) in obj.iter() {
-                max_var = std::cmp::max(l.var(), max_var);
-                if let Some(val) = joint_obj.get_mut(l) {
-                    *val += *w;
-                } else {
-                    joint_obj.insert(*l, *w);
-                }
-            }
-        }
-        let mut builder = Hss::Builder::new(joint_obj.iter().map(|(&l, &w)| (l, w)));
-        builder.reserve_vars(max_var.idx() + 1, joint_obj.len());
+        let builder = Hss::Builder::new(objs.iter().map(|(obj, _)| obj.iter().copied()));
         let mut hitting_set_solver = builder.init();
         let clauses: Vec<_> = clauses.into_iter().collect();
 
         // Seed constraints over objective variables
+        let obj_vars: RsHashSet<_> = objs
+            .iter()
+            .flat_map(|(obj, _)| obj.iter().map(|(lit, _)| lit.var()))
+            .collect();
         'outer: for cl in &clauses {
             for lit in cl {
-                if !joint_obj.contains_key(lit) && !joint_obj.contains_key(&!*lit) {
+                if !obj_vars.contains(&lit.var()) {
                     continue 'outer;
                 }
-                hitting_set_solver.add_core(cl);
             }
+            hitting_set_solver.add_core(cl);
         }
+        let objective_lits: RsHashSet<_> = objs
+            .iter()
+            .flat_map(|(obj, _)| obj.iter().map(|(lit, _)| *lit))
+            .collect();
 
         let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, opts)?;
         Ok(Self {
             kernel,
             hitting_set_solver,
-            joint_obj,
+            objective_lits,
             pareto_front: Default::default(),
         })
     }
 }
 
-impl<O, Hss, ProofW, OInit, BCG> ExtendedSolveStats for Ihs<O, Hss, ProofW, OInit, BCG>
+impl<O, Hss, ProofW, OInit, BCG> ExtendedSolveStats for ParetoIhs<O, Hss, ProofW, OInit, BCG>
 where
     O: SolveStats,
     ProofW: io::Write,
@@ -122,13 +145,10 @@ where
     }
 }
 
-#[oracle_bounds]
-impl<O, Hss, ProofW, OInit, BCG> Ihs<O, Hss, ProofW, OInit, BCG>
+impl<Hss, ProofW, OInit, BCG> ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, ProofW, OInit, BCG>
 where
-    O: SolveIncremental,
     Hss: HittingSetSolver,
-    ProofW: io::Write,
-    OInit: Initialize<O>,
+    ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
 {
     /// The solving algorithm main routine.
@@ -141,24 +161,40 @@ where
                 self.kernel.log_routine_end()?;
                 return Done(());
             };
-            dbg!(cost);
-            self.kernel.check_termination()?;
-            hitting_set.sort_unstable();
-            let mut assumps = vec![];
-            'outer: for (l, _) in &self.joint_obj {
-                for l2 in &hitting_set {
-                    if *l == *l2 {
-                        continue 'outer;
-                    }
-                }
-                assumps.push(!*l);
+            if let Some(logger) = &mut self.kernel.logger {
+                logger.log_hitting_set(cost)?;
             }
             self.kernel.check_termination()?;
-            match self.kernel.solve_assumps(&assumps)? {
-                SolverResult::Sat => todo!(),
+            hitting_set.retain(|lit| self.objective_lits.contains(&!*lit));
+            match self.kernel.solve_assumps(&hitting_set)? {
+                SolverResult::Sat => {
+                    // found pareto-optimal solution
+                    let (mut costs, solution) =
+                        self.kernel.get_solution_and_internal_costs(false)?;
+                    // store solution
+                    self.kernel.yield_solutions(
+                        costs.clone(),
+                        &[],
+                        solution,
+                        &mut self.pareto_front,
+                    )?;
+                    // introduce PD cut in the hitting set solver
+                    for (obj, cost) in self.kernel.objs.iter().zip(&mut costs) {
+                        if let Objective::Unweighted { unit_weight, .. } = obj {
+                            *cost *= *unit_weight;
+                        }
+                    }
+                    self.hitting_set_solver.add_pd_cut(&costs);
+                }
                 SolverResult::Unsat => {
                     let core = self.kernel.oracle.core()?;
-                    let core = Cl::new(&core);
+                    if core.is_empty() {
+                        self.kernel.log_routine_end()?;
+                        return Done(());
+                    }
+                    let (core, _) = self.kernel.trim_core(core, &[], None)?;
+                    let (core, _) = self.kernel.minimize_core(core, &[], None)?;
+                    let core = dbg!(Cl::new(&core));
                     self.hitting_set_solver.add_core(core);
                 }
                 SolverResult::Interrupted => unreachable!(),

@@ -5,7 +5,7 @@ macro_rules! check_pf_shape {
             .map(|pp| (pp.costs().clone(), pp.n_sols()))
             .collect();
         let shape_set: rustsat::types::RsHashSet<(Vec<isize>, usize)> = $t.into_iter().collect();
-        assert_eq!(pps_set, shape_set);
+        assert_eq!(pps_set, shape_set, "pareto front shape does not match");
     }};
 }
 
@@ -22,8 +22,8 @@ macro_rules! test_instance {
         );
         let mut solver = <$s>::from_instance_default_blocking(inst, $o).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
-        let pf = solver.pareto_front();
-        assert_eq!(pf.len(), $t.len());
+        let pf = dbg!(solver.pareto_front());
+        assert_eq!(pf.len(), $t.len(), "pareto front length does not match");
         check_pf_shape!(pf, $t);
     }};
     ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
@@ -41,8 +41,8 @@ macro_rules! test_instance {
         if cont {
             solver.solve(scuttle_core::Limits::none()).unwrap();
         }
-        let pf = solver.pareto_front();
-        assert_eq!(pf.len(), $t.len());
+        let pf = dbg!(solver.pareto_front());
+        assert_eq!(pf.len(), $t.len(), "pareto front length does not match");
         check_pf_shape!(pf, $t);
     }};
 }
@@ -960,7 +960,17 @@ mod bioptsat {
 }
 
 mod ihs {
-    type S =
-        scuttle_core::Ihs<rustsat_cadical::CaDiCaL<'static, 'static>, hitting_sets::HighsSolver>;
+    type S = scuttle_core::ParetoIhs<
+        rustsat_cadical::CaDiCaL<'static, 'static>,
+        hitting_sets::HighsSolver,
+    >;
     generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
+    generate_tests!(
+        minimize,
+        super::S,
+        scuttle_core::KernelOptions {
+            core_minimization: true,
+            ..Default::default()
+        }
+    );
 }

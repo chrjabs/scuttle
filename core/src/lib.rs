@@ -22,7 +22,7 @@ pub use algs::{
 
 // Reexport algorithms
 pub use algs::bioptsat::BiOptSat;
-pub use algs::ihs::Ihs;
+pub use algs::ihs::ParetoIhs;
 pub use algs::lowerbounding::LowerBounding;
 pub use algs::pminimal::PMinimal;
 
@@ -140,4 +140,6 @@ pub trait WriteSolverLog {
     ) -> anyhow::Result<()>;
     /// Logs any string
     fn log_message(&mut self, msg: &str) -> anyhow::Result<()>;
+    /// Logs a hitting set value
+    fn log_hitting_set(&mut self, hitting_set_val: f64) -> anyhow::Result<()>;
 }

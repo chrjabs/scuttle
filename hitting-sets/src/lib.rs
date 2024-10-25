@@ -91,9 +91,6 @@ pub trait BuildSolver {
     /// Initializes a solver from the given building
     fn init(self) -> Self::Solver;
 
-    /// Reserves space for the given number of external and internal variables
-    fn reserve_vars(&mut self, external: usize, internal: usize) -> &mut Self;
-
     /// Sets the number of threads to solve with
     ///
     /// # Default

@@ -70,6 +70,14 @@ enum AlgorithmCommand {
         #[arg(long)]
         log_fence: bool,
     },
+    /// Paretop-k IHS
+    ParetoIhs {
+        #[command(flatten)]
+        shared: SharedArgs,
+        /// Log extracted hitting set values
+        #[arg(long)]
+        log_hitting_sets: bool,
+    },
 }
 
 #[derive(Args)]
@@ -298,6 +306,7 @@ impl From<&LogArgs> for LoggerConfig {
             log_bound_points: value.log_bound_points || value.verbosity >= 2,
             log_cores: value.log_cores || value.verbosity >= 2,
             log_inpro: value.log_inprocessing || value.verbosity >= 1,
+            log_hitting_sets: false,
         }
     }
 }
@@ -454,6 +463,7 @@ pub enum Algorithm {
         Option<CoreBoostingOptions>,
     ),
     LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
+    ParetoIhs(KernelOptions),
 }
 
 impl fmt::Display for Algorithm {
@@ -462,6 +472,7 @@ impl fmt::Display for Algorithm {
             Algorithm::PMinimal(..) => write!(f, "p-pminimal"),
             Algorithm::BiOptSat(..) => write!(f, "bioptsat"),
             Algorithm::LowerBounding(..) => write!(f, "lower-bounding"),
+            Algorithm::ParetoIhs(..) => write!(f, "pareto-ihs"),
         }
     }
 }
@@ -624,6 +635,35 @@ impl Cli {
                     proof_paths,
                 }
             }
+            AlgorithmCommand::ParetoIhs {
+                shared,
+                log_hitting_sets,
+            } => Cli {
+                limits: (&shared.limits).into(),
+                file_format: shared.file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: shared.file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: shared.file.inst_path.clone(),
+                preprocessing: shared.prepro.preprocessing.into(),
+                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                reindexing: shared.prepro.reindexing.into(),
+                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                cadical_config: shared.cadical_config.into(),
+                stdout: stdout(shared.log.color),
+                stderr: stderr(shared.log.color),
+                print_solver_config: shared.log.print_solver_config,
+                print_solutions: shared.log.print_solutions,
+                print_stats: !shared.log.no_print_stats,
+                color: shared.log.color,
+                logger_config: LoggerConfig {
+                    log_hitting_sets: log_hitting_sets || shared.log.verbosity >= 2,
+                    ..(&shared.log).into()
+                },
+                alg: Algorithm::ParetoIhs(kernel_opts(shared, false)),
+                proof_paths: None,
+            },
         }
     }
 
@@ -741,6 +781,7 @@ impl Cli {
                     Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
                 }
+                Algorithm::ParetoIhs(_) => {}
             }
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;
             Self::print_parameter(&mut buffer, "sol-limit", OptVal::new(self.limits.sols))?;
@@ -991,6 +1032,7 @@ struct LoggerConfig {
     log_bound_points: bool,
     log_cores: bool,
     log_inpro: bool,
+    log_hitting_sets: bool,
 }
 
 pub struct CliLogger {
@@ -1252,6 +1294,18 @@ impl WriteSolverLog for CliLogger {
         let mut buffer = self.stdout.buffer();
         writeln!(buffer, "{}", msg)?;
         self.stdout.print(&buffer)?;
+        Ok(())
+    }
+
+    fn log_hitting_set(&mut self, hitting_set_val: f64) -> anyhow::Result<()> {
+        if self.config.log_hitting_sets {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
+            write!(buffer, "extracted hitting set")?;
+            buffer.reset()?;
+            writeln!(buffer, ": val {hitting_set_val}")?;
+            self.stdout.print(&buffer)?;
+        }
         Ok(())
     }
 }
