@@ -8,7 +8,7 @@ fn basic<S: HittingSetSolver>() {
     let objective: RsHashMap<_, _> = [(lit![0], 2), (lit![1], 1), (lit![2], 1), (lit![3], 3)]
         .into_iter()
         .collect();
-    let mut builder = S::Builder::new([objective]);
+    let builder = S::Builder::new([objective]);
     let mut solver = builder.init();
     solver.add_core(Cl::new(&[lit![1], lit![3]]));
     solver.add_core(Cl::new(&[lit![0], lit![1], lit![2]]));

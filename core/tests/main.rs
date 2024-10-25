@@ -619,105 +619,6 @@ macro_rules! set_cover_3 {
     };
 }
 
-macro_rules! generate_biobj_tests {
-    ($mod:ident, $s:ty, $o:expr) => {
-        mod $mod {
-            #[test]
-            fn small() {
-                small!($s, $o)
-            }
-
-            #[test]
-            fn medium_single() {
-                medium_single!($s, $o)
-            }
-
-            #[test]
-            fn medium_all() {
-                let mut opts = $o;
-                opts.set_enumeration(scuttle_core::options::EnumOptions::Solutions(None));
-                medium_all!($s, opts)
-            }
-
-            #[test]
-            fn parkinsons() {
-                parkinsons!($s, $o)
-            }
-
-            #[test]
-            #[ignore]
-            fn mushroom() {
-                mushroom!($s, $o)
-            }
-
-            #[test]
-            fn set_cover() {
-                set_cover!($s, $o)
-            }
-
-            #[test]
-            #[ignore]
-            fn ftp() {
-                ftp!($s, $o)
-            }
-
-            #[test]
-            #[ignore]
-            fn spot5() {
-                spot5!($s, $o)
-            }
-        }
-    };
-    ($mod:ident, $s:ty, $o:expr, $cbo:expr) => {
-        mod $mod {
-            #[test]
-            fn small() {
-                small!($s, $o, $cbo)
-            }
-
-            #[test]
-            fn medium_single() {
-                medium_single!($s, $o, $cbo)
-            }
-
-            #[test]
-            fn medium_all() {
-                let mut opts = $o;
-                opts.set_enumeration(scuttle_core::options::EnumOptions::Solutions(None));
-                medium_all!($s, opts, $cbo)
-            }
-
-            #[test]
-            fn parkinsons() {
-                parkinsons!($s, $o, $cbo)
-            }
-
-            #[test]
-            #[ignore]
-            fn mushroom() {
-                mushroom!($s, $o, $cbo)
-            }
-
-            #[test]
-            fn set_cover() {
-                set_cover!($s, $o, $cbo)
-            }
-
-            #[test]
-            #[ignore]
-            fn ftp() {
-                ftp!($s, $o, $cbo)
-            }
-
-            #[test]
-            #[ignore]
-            fn spot5() {
-                spot5!($s, $o, $cbo)
-            }
-        }
-    };
-}
-
 macro_rules! generate_tests {
     ($mod:ident, $s:ty, $o:expr) => {
         mod $mod {
@@ -865,6 +766,234 @@ macro_rules! generate_tests {
             }
         }
     };
+    (noenum: $mod:ident, $s:ty, $o:expr) => {
+        mod $mod {
+            #[test]
+            fn small() {
+                small!($s, $o)
+            }
+
+            #[test]
+            fn medium() {
+                medium_single!($s, $o)
+            }
+
+            #[test]
+            fn four() {
+                four!($s, $o)
+            }
+
+            #[test]
+            fn parkinsons() {
+                parkinsons!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn mushroom() {
+                mushroom!($s, $o)
+            }
+
+            #[test]
+            fn dal() {
+                dal!($s, $o)
+            }
+
+            #[test]
+            fn dal2() {
+                dal2!($s, $o)
+            }
+
+            #[test]
+            fn set_cover() {
+                set_cover!($s, $o)
+            }
+
+            #[test]
+            fn packup_3() {
+                packup_3!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn ftp() {
+                ftp!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn spot5() {
+                spot5!($s, $o)
+            }
+
+            #[test]
+            fn set_cover_3() {
+                set_cover_3!($s, $o)
+            }
+        }
+    };
+    (noenum: $mod:ident, $s:ty, $o:expr, $cbo:expr) => {
+        mod $mod {
+            #[test]
+            fn small() {
+                small!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn medium() {
+                medium_single!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn four() {
+                four!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn parkinsons() {
+                parkinsons!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn mushroom() {
+                mushroom!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn dal() {
+                dal!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn dal2() {
+                dal2!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn set_cover() {
+                set_cover!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn packup_3() {
+                packup_3!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn ftp() {
+                ftp!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn spot5() {
+                spot5!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn set_cover_3() {
+                set_cover_3!($s, $o, $cbo)
+            }
+        }
+    };
+    (biobj: $mod:ident, $s:ty, $o:expr) => {
+        mod $mod {
+            #[test]
+            fn small() {
+                small!($s, $o)
+            }
+
+            #[test]
+            fn medium_single() {
+                medium_single!($s, $o)
+            }
+
+            #[test]
+            fn medium_all() {
+                let mut opts = $o;
+                opts.set_enumeration(scuttle_core::options::EnumOptions::Solutions(None));
+                medium_all!($s, opts)
+            }
+
+            #[test]
+            fn parkinsons() {
+                parkinsons!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn mushroom() {
+                mushroom!($s, $o)
+            }
+
+            #[test]
+            fn set_cover() {
+                set_cover!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn ftp() {
+                ftp!($s, $o)
+            }
+
+            #[test]
+            #[ignore]
+            fn spot5() {
+                spot5!($s, $o)
+            }
+        }
+    };
+    (biobj: $mod:ident, $s:ty, $o:expr, $cbo:expr) => {
+        mod $mod {
+            #[test]
+            fn small() {
+                small!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn medium_single() {
+                medium_single!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn medium_all() {
+                let mut opts = $o;
+                opts.set_enumeration(scuttle_core::options::EnumOptions::Solutions(None));
+                medium_all!($s, opts, $cbo)
+            }
+
+            #[test]
+            fn parkinsons() {
+                parkinsons!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn mushroom() {
+                mushroom!($s, $o, $cbo)
+            }
+
+            #[test]
+            fn set_cover() {
+                set_cover!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn ftp() {
+                ftp!($s, $o, $cbo)
+            }
+
+            #[test]
+            #[ignore]
+            fn spot5() {
+                spot5!($s, $o, $cbo)
+            }
+        }
+    };
 }
 
 mod pmin {
@@ -941,14 +1070,14 @@ mod lb {
 
 mod bioptsat {
     type S = scuttle_core::BiOptSat<rustsat_cadical::CaDiCaL<'static, 'static>>;
-    generate_biobj_tests!(default, super::S, scuttle_core::KernelOptions::default());
-    generate_biobj_tests!(
+    generate_tests!(biobj: default, super::S, scuttle_core::KernelOptions::default());
+    generate_tests!(biobj:
         cb,
         super::S,
         scuttle_core::KernelOptions::default(),
         scuttle_core::CoreBoostingOptions::default()
     );
-    generate_biobj_tests!(
+    generate_tests!(biobj:
         cb_rebase,
         super::S,
         scuttle_core::KernelOptions::default(),
@@ -964,8 +1093,8 @@ mod ihs {
         rustsat_cadical::CaDiCaL<'static, 'static>,
         hitting_sets::HighsSolver,
     >;
-    generate_tests!(default, super::S, scuttle_core::KernelOptions::default());
-    generate_tests!(
+    generate_tests!(noenum: default, super::S, scuttle_core::KernelOptions::default());
+    generate_tests!(noenum:
         minimize,
         super::S,
         scuttle_core::KernelOptions {

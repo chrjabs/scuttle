@@ -194,7 +194,7 @@ where
                     }
                     let (core, _) = self.kernel.trim_core(core, &[], None)?;
                     let (core, _) = self.kernel.minimize_core(core, &[], None)?;
-                    let core = dbg!(Cl::new(&core));
+                    let core = Cl::new(&core);
                     self.hitting_set_solver.add_core(core);
                 }
                 SolverResult::Interrupted => unreachable!(),
