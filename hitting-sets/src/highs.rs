@@ -3,14 +3,15 @@
 use std::time::Duration;
 
 use highs::{Col, HighsModelStatus, Model, RowProblem, Sense};
-use rustsat::types::{Cl, Lit, RsHashMap};
+use rustsat::types::{Cl, Lit, RsHashMap, Var};
 
 use crate::{CompleteSolveResult, IncompleteSolveResult};
 
 use super::{BuildSolver, HittingSetSolver, VarMap};
 
 pub struct Solver {
-    weights: RsHashMap<Lit, usize>,
+    objectives: Vec<RsHashMap<Lit, usize>>,
+    multipliers: Vec<f64>,
     map: VarMap<Col>,
     state: State,
 }
@@ -26,8 +27,35 @@ enum State {
     Working,
 }
 
+fn get_joint_weight(var: Var, objectives: &[RsHashMap<Lit, usize>], multipliers: &[f64]) -> f64 {
+    objectives
+        .iter()
+        .zip(multipliers)
+        .fold(0., |sum, (obj, &mult)| {
+            if let Some(&weight) = obj.get(&var.pos_lit()) {
+                return sum + (weight as f64) * mult;
+            }
+            if let Some(&weight) = obj.get(&var.neg_lit()) {
+                return sum - (weight as f64) * mult;
+            }
+            sum
+        })
+}
+
 impl HittingSetSolver for Solver {
     type Builder = Builder;
+
+    fn change_multipliers(&mut self, multi: &[f64]) {
+        self.multipliers.clear();
+        self.multipliers.extend(multi.iter().copied());
+        match self.state {
+            State::Init { .. } => {}
+            State::Main(_) => {
+                todo!("Update model")
+            }
+            State::Working => unreachable!("working state should never happen externally"),
+        }
+    }
 
     fn add_core(&mut self, core: &Cl) {
         let mut state = std::mem::take(&mut self.state);
@@ -36,16 +64,16 @@ impl HittingSetSolver for Solver {
                 let row: Vec<_> = core
                     .iter()
                     .map(|lit| {
-                        let (weight, lit) = if let Some(weight) = self.weights.get(lit) {
-                            (*weight, *lit)
-                        } else {
-                            (*self.weights.get(&!*lit).unwrap(), !*lit)
-                        };
                         (
-                            self.map.ensure_mapped(lit, || {
-                                problem.add_integer_column(weight as f64, 0..=1)
+                            self.map.ensure_mapped(lit.var(), || {
+                                let weight = get_joint_weight(
+                                    lit.var(),
+                                    &self.objectives,
+                                    &self.multipliers,
+                                );
+                                problem.add_integer_column(weight, 0..=1)
                             }),
-                            1_f64,
+                            if lit.is_pos() { 1. } else { -1. },
                         )
                     })
                     .collect();
@@ -55,16 +83,16 @@ impl HittingSetSolver for Solver {
                 let row: Vec<_> = core
                     .iter()
                     .map(|lit| {
-                        let (weight, lit) = if let Some(weight) = self.weights.get(lit) {
-                            (*weight, *lit)
-                        } else {
-                            (*self.weights.get(&!*lit).unwrap(), !*lit)
-                        };
                         (
-                            self.map.ensure_mapped(lit, || {
-                                model.add_integer_column(weight as f64, 0..=1, [])
+                            self.map.ensure_mapped(lit.var(), || {
+                                let weight = get_joint_weight(
+                                    lit.var(),
+                                    &self.objectives,
+                                    &self.multipliers,
+                                );
+                                model.add_integer_column(weight, 0..=1, [])
                             }),
-                            1_f64,
+                            if lit.is_pos() { 1. } else { -1. },
                         )
                     })
                     .collect();
@@ -81,6 +109,10 @@ impl HittingSetSolver for Solver {
 
     fn hitting_set(&mut self, time_limit: Duration) -> IncompleteSolveResult {
         self.solve(Some(time_limit))
+    }
+
+    fn add_pd_cut(&mut self, costs: &[usize]) {
+        todo!()
     }
 }
 
@@ -132,24 +164,30 @@ impl Solver {
             .columns()
             .iter()
             .enumerate()
-            .filter_map(|(idx, val)| {
+            .map(|(idx, val)| {
                 if *val >= super::TRUE {
-                    Some(self.map[idx])
+                    self.map[idx].pos_lit()
+                } else if *val <= super::FALSE {
+                    self.map[idx].neg_lit()
                 } else {
-                    None
+                    panic!("variable assigned to non-integer value");
                 }
             })
             .collect();
-        let cost = hitting_set
-            .iter()
-            .fold(0, |sum, lit| sum + self.weights[lit]);
+        let cost = hitting_set.iter().fold(0., |sum, lit| {
+            if lit.is_pos() {
+                sum + get_joint_weight(lit.var(), &self.objectives, &self.multipliers)
+            } else {
+                sum
+            }
+        });
         IncompleteSolveResult::Optimal(cost, hitting_set)
     }
 }
 
 /// The [`BuildSolver`] type for the HiGHS solver
 pub struct Builder {
-    weights: RsHashMap<Lit, usize>,
+    objectives: Vec<RsHashMap<Lit, usize>>,
     reserve_vars: (usize, usize),
     options: Options,
 }
@@ -161,20 +199,27 @@ struct Options {
 impl BuildSolver for Builder {
     type Solver = Solver;
 
-    fn new<I>(weights: I) -> Self
+    fn new<Outer, Inner>(objectives: Outer) -> Self
     where
-        I: IntoIterator<Item = (Lit, usize)>,
+        Outer: IntoIterator<Item = Inner>,
+        Inner: IntoIterator<Item = (Lit, usize)>,
     {
+        let objectives: Vec<RsHashMap<_, _>> = objectives
+            .into_iter()
+            .map(|inner| inner.into_iter().collect())
+            .collect();
         Builder {
-            weights: weights.into_iter().collect(),
+            objectives,
             reserve_vars: (0, 0),
             options: Options { threads: 1 },
         }
     }
 
     fn init(self) -> Self::Solver {
+        let multipliers = vec![1.; self.objectives.len()];
         Solver {
-            weights: self.weights,
+            objectives: self.objectives,
+            multipliers,
             map: VarMap::new(self.reserve_vars.0, self.reserve_vars.1),
             state: State::Init {
                 problem: RowProblem::default(),

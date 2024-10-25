@@ -19,9 +19,9 @@ pub const EPSILON: f64 = 0.05;
 pub const TRUE: f64 = 1. - EPSILON;
 pub const FALSE: f64 = 0. + EPSILON;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum CompleteSolveResult {
-    Optimal(usize, Vec<Lit>),
+    Optimal(f64, Vec<Lit>),
     Infeasible,
 }
 
@@ -37,11 +37,11 @@ impl From<IncompleteSolveResult> for CompleteSolveResult {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum IncompleteSolveResult {
-    Optimal(usize, Vec<Lit>),
+    Optimal(f64, Vec<Lit>),
     Infeasible,
-    Feasible(usize, Vec<Lit>),
+    Feasible(f64, Vec<Lit>),
     Unknown,
 }
 
@@ -59,6 +59,11 @@ pub trait HittingSetSolver {
     /// The type that can be used to build a solver of this type
     type Builder: BuildSolver<Solver = Self>;
 
+    /// Changes the multipliers for the individual objectives
+    ///
+    /// The default multipliers are 1 for each objective
+    fn change_multipliers(&mut self, multi: &[f64]);
+
     /// Adds a new core to the solver
     fn add_core(&mut self, core: &Cl);
 
@@ -67,6 +72,9 @@ pub trait HittingSetSolver {
 
     /// Computes a hitting set for the currently given cores under a time limit
     fn hitting_set(&mut self, time_limit: Duration) -> IncompleteSolveResult;
+
+    /// Adds a PD cut to the hitting set solver
+    fn add_pd_cut(&mut self, costs: &[usize]);
 }
 
 /// Trait for initializing a new solver
@@ -75,9 +83,10 @@ pub trait BuildSolver {
     type Solver: HittingSetSolver;
 
     /// Initializes a new solver builder with default options and given objective weights
-    fn new<I>(weights: I) -> Self
+    fn new<Outer, Inner>(objectives: Outer) -> Self
     where
-        I: IntoIterator<Item = (Lit, usize)>;
+        Outer: IntoIterator<Item = Inner>,
+        Inner: IntoIterator<Item = (Lit, usize)>;
 
     /// Initializes a solver from the given building
     fn init(self) -> Self::Solver;
