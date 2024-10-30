@@ -187,15 +187,37 @@ where
                     self.hitting_set_solver.add_pd_cut(&costs);
                 }
                 SolverResult::Unsat => {
-                    let core = self.kernel.oracle.core()?;
-                    if core.is_empty() {
-                        self.kernel.log_routine_end()?;
-                        return Done(());
+                    loop {
+                        let core = self.kernel.oracle.core()?;
+                        if core.is_empty() {
+                            self.kernel.log_routine_end()?;
+                            return Done(());
+                        }
+                        let (core, _) = self.kernel.trim_core(core, &[], None)?;
+                        let (core, _) = self.kernel.minimize_core(core, &[], None)?;
+                        let core = Cl::new(&core);
+                        self.hitting_set_solver.add_core(core);
+                        // NOTE: core is in same order as hitting set, we can therefore remove the
+                        // core literals in a single sweep
+                        let mut core_idx = 0;
+                        hitting_set.retain(|&lit| {
+                            while core_idx < core.len() && core[core_idx] < !lit {
+                                core_idx += 1;
+                            }
+                            if core_idx >= core.len() || !lit != core[core_idx] {
+                                return true;
+                            }
+                            false
+                        });
+                        if hitting_set.is_empty() {
+                            break;
+                        }
+                        match self.kernel.solve_assumps(&hitting_set)? {
+                            SolverResult::Sat => break,
+                            SolverResult::Unsat => {}
+                            SolverResult::Interrupted => unreachable!(),
+                        }
                     }
-                    let (core, _) = self.kernel.trim_core(core, &[], None)?;
-                    let (core, _) = self.kernel.minimize_core(core, &[], None)?;
-                    let core = Cl::new(&core);
-                    self.hitting_set_solver.add_core(core);
                 }
                 SolverResult::Interrupted => unreachable!(),
             }
