@@ -155,12 +155,15 @@ where
     fn alg_main(&mut self) -> MaybeTerminatedError {
         self.kernel.log_routine_start("ihs")?;
         loop {
+            self.kernel.log_routine_start("extract hitting set")?;
             let CompleteSolveResult::Optimal(cost, mut hitting_set) =
                 self.hitting_set_solver.optimal_hitting_set()
             else {
                 self.kernel.log_routine_end()?;
+                self.kernel.log_routine_end()?;
                 return Done(());
             };
+            self.kernel.log_routine_end()?;
             if let Some(logger) = &mut self.kernel.logger {
                 logger.log_hitting_set(cost)?;
             }
