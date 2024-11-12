@@ -3,8 +3,6 @@
 //! This crate contains a uniform interface to various hitting set solvers intended to be used in
 //! IHS-style MaxSAT algorithms.
 
-use std::time::Duration;
-
 use rustsat::types::{Cl, Lit};
 
 mod map;
@@ -30,7 +28,7 @@ impl From<IncompleteSolveResult> for CompleteSolveResult {
         match value {
             IncompleteSolveResult::Optimal(cost, hs) => CompleteSolveResult::Optimal(cost, hs),
             IncompleteSolveResult::Infeasible => CompleteSolveResult::Infeasible,
-            IncompleteSolveResult::Feasible(_, _) | IncompleteSolveResult::Unknown => {
+            IncompleteSolveResult::Feasible(_, _) => {
                 panic!("cannot convert incomplete result to complete")
             }
         }
@@ -42,7 +40,6 @@ pub enum IncompleteSolveResult {
     Optimal(f64, Vec<Lit>),
     Infeasible,
     Feasible(f64, Vec<Lit>),
-    Unknown,
 }
 
 impl From<CompleteSolveResult> for IncompleteSolveResult {
@@ -71,7 +68,7 @@ pub trait HittingSetSolver {
     fn optimal_hitting_set(&mut self) -> CompleteSolveResult;
 
     /// Computes a hitting set for the currently given cores under a time limit
-    fn hitting_set(&mut self, time_limit: Duration) -> IncompleteSolveResult;
+    fn hitting_set(&mut self, target_value: usize) -> IncompleteSolveResult;
 
     /// Adds a PD cut to the hitting set solver
     fn add_pd_cut(&mut self, costs: &[usize]);

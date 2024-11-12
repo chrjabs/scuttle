@@ -1,6 +1,6 @@
 //! # Hitting Set Solver Interface for the HiGHS Solver
 
-use std::{ops, time::Duration};
+use std::ops;
 
 use highs::{Col, HighsModelStatus, Model, RowProblem, Sense, Solution};
 use rustsat::types::{Cl, Lit, RsHashMap, Var};
@@ -30,12 +30,42 @@ impl HittingSetSolver for Solver {
     type Builder = Builder;
 
     fn change_multipliers(&mut self, multi: &[f64]) {
-        match self.state {
-            State::Init { .. } => {
-                todo!("Update problem")
+        match &mut self.state {
+            State::Init { problem, .. } => {
+                for (var, &col) in self.map.iter() {
+                    let weight = self
+                        .objectives
+                        .iter()
+                        .zip(multi)
+                        .fold(0., |sum, (obj, &mult)| {
+                            if let Some(&weight) = obj.get(&var.pos_lit()) {
+                                return sum + (weight as f64) * mult;
+                            }
+                            if let Some(&weight) = obj.get(&var.neg_lit()) {
+                                return sum - (weight as f64) * mult;
+                            }
+                            sum
+                        });
+                    problem.change_column_cost(col, weight);
+                }
             }
-            State::Main(_) => {
-                todo!("Update model")
+            State::Main(model) => {
+                for (var, &col) in self.map.iter() {
+                    let weight = self
+                        .objectives
+                        .iter()
+                        .zip(multi)
+                        .fold(0., |sum, (obj, &mult)| {
+                            if let Some(&weight) = obj.get(&var.pos_lit()) {
+                                return sum + (weight as f64) * mult;
+                            }
+                            if let Some(&weight) = obj.get(&var.neg_lit()) {
+                                return sum - (weight as f64) * mult;
+                            }
+                            sum
+                        });
+                    model.change_column_cost(col, weight);
+                }
             }
             State::Working => unreachable!("working state should never happen externally"),
         }
@@ -56,8 +86,8 @@ impl HittingSetSolver for Solver {
         self.solve(None).into()
     }
 
-    fn hitting_set(&mut self, time_limit: Duration) -> IncompleteSolveResult {
-        self.solve(Some(time_limit))
+    fn hitting_set(&mut self, target_value: usize) -> IncompleteSolveResult {
+        self.solve(Some(target_value))
     }
 
     fn add_pd_cut(&mut self, costs: &[usize]) {
@@ -226,48 +256,41 @@ impl Solver {
         self.state = State::Main(model);
     }
 
-    fn solve(&mut self, time_limit: Option<Duration>) -> IncompleteSolveResult {
+    fn solve(&mut self, target_value: Option<usize>) -> IncompleteSolveResult {
         if matches!(self.state, State::Init { .. }) {
             self.transition_to_main();
         }
         let State::Main(mut model) = std::mem::take(&mut self.state) else {
             unreachable!();
         };
-        if let Some(time_limit) = time_limit {
-            model.set_option("time_limit", time_limit.as_secs() as f64);
+        if let Some(target_value) = target_value {
+            model.set_option("objective_target", target_value as f64);
         }
         let solved = model.solve();
         if solved.status() == HighsModelStatus::Infeasible {
             let mut model = Model::from(solved);
-            if time_limit.is_some() {
-                model.set_option("time_limit", f64::INFINITY);
+            if target_value.is_some() {
+                model.set_option("objective_target", -f64::INFINITY);
             }
             self.state = State::Main(model);
             return IncompleteSolveResult::Infeasible;
         }
-        if solved.status() == HighsModelStatus::ReachedTimeLimit {
-            assert!(time_limit.is_some());
+        if solved.status() == HighsModelStatus::ObjectiveTarget {
+            assert!(target_value.is_some());
             let solution = solved.get_solution();
             let cost = solved.get_objective_value();
             let mut model = Model::from(solved);
-            model.set_option("time_limit", f64::INFINITY);
+            model.set_option("objective_target", -f64::INFINITY);
             self.state = State::Main(model);
             let hitting_set = collect_hitting_set(&solution, &self.map);
             return IncompleteSolveResult::Feasible(cost, hitting_set);
-        }
-        if solved.status() == HighsModelStatus::Unknown {
-            assert!(time_limit.is_some());
-            let mut model = Model::from(solved);
-            model.set_option("time_limit", f64::INFINITY);
-            self.state = State::Main(model);
-            return IncompleteSolveResult::Unknown;
         }
         assert_eq!(solved.status(), HighsModelStatus::Optimal);
         let solution = solved.get_solution();
         let cost = solved.get_objective_value();
         let mut model = Model::from(solved);
-        if time_limit.is_some() {
-            model.set_option("time_limit", f64::INFINITY);
+        if target_value.is_some() {
+            model.set_option("objective_target", -f64::INFINITY);
         }
         self.state = State::Main(model);
         let hitting_set = collect_hitting_set(&solution, &self.map);

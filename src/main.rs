@@ -61,8 +61,21 @@ macro_rules! run {
             post_solve(alg, $cli, $prepro, $reindexer)?;
         }
     };
+    // without proof
+    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {{
+        let mut alg = setup_alg::<$slv>($cli, $inst, $kernel_opts)?;
+        let cont = if let Some(opts) = $cb_opts {
+            handle_termination(alg.core_boost(opts.clone()), $cli)?.unwrap_or(false)
+        } else {
+            true
+        };
+        if cont {
+            handle_termination(alg.solve($cli.limits), $cli)?;
+        };
+        post_solve(alg, $cli, $prepro, $reindexer)?;
+    }};
     // without CB and proof
-    ($slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cli:expr) => {{
+    (no-cb-no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cli:expr) => {{
         let mut alg = setup_alg::<$slv>($cli, $inst, $kernel_opts)?;
         handle_termination(alg.solve($cli.limits), $cli)?;
         post_solve(alg, $cli, $prepro, $reindexer)?;
@@ -124,23 +137,43 @@ macro_rules! dispatch_options {
             }
         }
     };
-    // without CB and proof
-    ($slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cli:expr) => {
+    // without proof
+    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {
         match $cli.cadical_config {
             CadicalConfig::Default => {
-                run!($slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
+                run!(no-proof: $slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
             }
             CadicalConfig::Plain => {
                 type Slv = $slv<CaDiCaLPlainInit>;
-                run!(Slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
+                run!(no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
             }
             CadicalConfig::Sat => {
                 type Slv = $slv<CaDiCaLSatInit>;
-                run!(Slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
+                run!(no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
             }
             CadicalConfig::Unsat => {
                 type Slv = $slv<CaDiCaLUnsatInit>;
-                run!(Slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
+                run!(no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
+            }
+        }
+    };
+    // without CB and proof
+    (no-cb-no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cli:expr) => {
+        match $cli.cadical_config {
+            CadicalConfig::Default => {
+                run!(no-cb-no-proof: $slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
+            }
+            CadicalConfig::Plain => {
+                type Slv = $slv<CaDiCaLPlainInit>;
+                run!(no-cb-no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
+            }
+            CadicalConfig::Sat => {
+                type Slv = $slv<CaDiCaLSatInit>;
+                run!(no-cb-no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
+            }
+            CadicalConfig::Unsat => {
+                type Slv = $slv<CaDiCaLUnsatInit>;
+                run!(no-cb-no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
             }
         }
     };
@@ -233,8 +266,8 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
         Algorithm::LowerBounding(opts, ref cb_opts) => {
             dispatch_options!(Lb, inst, proof, prepro, reindexer, opts, cb_opts, cli)
         }
-        Algorithm::ParetoIhs(opts) => {
-            dispatch_options!(Ihs, inst, prepro, reindexer, opts, cli)
+        Algorithm::ParetoIhs(opts, ref cb_opts) => {
+            dispatch_options!(no-proof: Ihs, inst, prepro, reindexer, opts, cb_opts, cli)
         }
     }
     Ok(())

@@ -439,7 +439,6 @@ checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
 [[package]]
 name = "highs"
 version = "1.6.1"
-source = "git+https://github.com/chrjabs/highs.git?branch=integer-vars#977931b792cd8a11d7f8e8b05e8889ebb595ae80"
 dependencies = [
  "highs-sys",
  "log",

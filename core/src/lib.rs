@@ -31,6 +31,8 @@ pub use termination::MaybeTerminated;
 pub use termination::MaybeTerminatedError;
 pub use termination::Termination;
 
+mod archive;
+
 /// Trait for getting statistics from the solver
 pub trait ExtendedSolveStats {
     /// Gets statistics from the internal oracle
@@ -141,5 +143,5 @@ pub trait WriteSolverLog {
     /// Logs any string
     fn log_message(&mut self, msg: &str) -> anyhow::Result<()>;
     /// Logs a hitting set value
-    fn log_hitting_set(&mut self, hitting_set_val: f64) -> anyhow::Result<()>;
+    fn log_hitting_set(&mut self, hitting_set_val: f64, optimal: bool) -> anyhow::Result<()>;
 }

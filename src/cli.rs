@@ -74,6 +74,9 @@ enum AlgorithmCommand {
     ParetoIhs {
         #[command(flatten)]
         shared: SharedArgs,
+        /// Whether to perform core boosting before running the algorithm
+        #[arg(long, default_value_t = Bool::True)]
+        core_boosting: Bool,
         /// Log extracted hitting set values
         #[arg(long)]
         log_hitting_sets: bool,
@@ -463,7 +466,7 @@ pub enum Algorithm {
         Option<CoreBoostingOptions>,
     ),
     LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
-    ParetoIhs(KernelOptions),
+    ParetoIhs(KernelOptions, Option<CoreBoostingOptions>),
 }
 
 impl fmt::Display for Algorithm {
@@ -637,33 +640,43 @@ impl Cli {
             }
             AlgorithmCommand::ParetoIhs {
                 shared,
+                core_boosting,
                 log_hitting_sets,
-            } => Cli {
-                limits: (&shared.limits).into(),
-                file_format: shared.file.file_format,
-                opb_options: fio::opb::Options {
-                    first_var_idx: shared.file.first_var_idx,
-                    ..Default::default()
-                },
-                inst_path: shared.file.inst_path.clone(),
-                preprocessing: shared.prepro.preprocessing.into(),
-                maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                reindexing: shared.prepro.reindexing.into(),
-                maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                cadical_config: shared.cadical_config.into(),
-                stdout: stdout(shared.log.color),
-                stderr: stderr(shared.log.color),
-                print_solver_config: shared.log.print_solver_config,
-                print_solutions: shared.log.print_solutions,
-                print_stats: !shared.log.no_print_stats,
-                color: shared.log.color,
-                logger_config: LoggerConfig {
-                    log_hitting_sets: log_hitting_sets || shared.log.verbosity >= 2,
-                    ..(&shared.log).into()
-                },
-                alg: Algorithm::ParetoIhs(kernel_opts(shared, false)),
-                proof_paths: None,
-            },
+            } => {
+                let cb = if core_boosting == Bool::True {
+                    // NOTE: dummy options, simply to signify that we want to perform coreboosting
+                    // the IHS algorithm doesn't support the same options as the other algorithms
+                    Some(CoreBoostingOptions::default())
+                } else {
+                    None
+                };
+                Cli {
+                    limits: (&shared.limits).into(),
+                    file_format: shared.file.file_format,
+                    opb_options: fio::opb::Options {
+                        first_var_idx: shared.file.first_var_idx,
+                        ..Default::default()
+                    },
+                    inst_path: shared.file.inst_path.clone(),
+                    preprocessing: shared.prepro.preprocessing.into(),
+                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
+                    reindexing: shared.prepro.reindexing.into(),
+                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
+                    cadical_config: shared.cadical_config.into(),
+                    stdout: stdout(shared.log.color),
+                    stderr: stderr(shared.log.color),
+                    print_solver_config: shared.log.print_solver_config,
+                    print_solutions: shared.log.print_solutions,
+                    print_stats: !shared.log.no_print_stats,
+                    color: shared.log.color,
+                    logger_config: LoggerConfig {
+                        log_hitting_sets: log_hitting_sets || shared.log.verbosity >= 2,
+                        ..(&shared.log).into()
+                    },
+                    alg: Algorithm::ParetoIhs(kernel_opts(shared, false), cb),
+                    proof_paths: None,
+                }
+            }
         }
     }
 
@@ -781,7 +794,9 @@ impl Cli {
                     Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
                 }
-                Algorithm::ParetoIhs(_) => {}
+                Algorithm::ParetoIhs(_, cb_opts) => {
+                    Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
+                }
             }
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;
             Self::print_parameter(&mut buffer, "sol-limit", OptVal::new(self.limits.sols))?;
@@ -1297,13 +1312,17 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_hitting_set(&mut self, hitting_set_val: f64) -> anyhow::Result<()> {
+    fn log_hitting_set(&mut self, hitting_set_val: f64, optimal: bool) -> anyhow::Result<()> {
         if self.config.log_hitting_sets {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
             write!(buffer, "extracted hitting set")?;
             buffer.reset()?;
-            writeln!(buffer, ": val {hitting_set_val}")?;
+            write!(buffer, ": val {} ", hitting_set_val.round())?;
+            if optimal {
+                write!(buffer, "(optimal)")?;
+            }
+            writeln!(buffer, "")?;
             self.stdout.print(&buffer)?;
         }
         Ok(())

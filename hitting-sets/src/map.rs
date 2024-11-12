@@ -58,6 +58,11 @@ where
         self.forward[external.idx()] = Some(mapped);
         self[external].clone()
     }
+
+    /// Gets an iterator over pairs of unmapped and mapped variables
+    pub fn iter(&self) -> MapIter<'_, T> {
+        MapIter { data: self, idx: 0 }
+    }
 }
 
 impl<T> std::ops::Index<Var> for VarMap<T> {
@@ -101,4 +106,23 @@ where
 /// Trait for variables that an index can be gotten from
 pub trait IndexedVar: Clone {
     fn index(&self) -> usize;
+}
+
+pub struct MapIter<'data, T> {
+    data: &'data VarMap<T>,
+    idx: usize,
+}
+
+impl<'data, T> Iterator for MapIter<'data, T> {
+    type Item = (Var, &'data T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.data.backward.len() {
+            return None;
+        }
+        let var = self.data.backward[self.idx];
+        let t = self.data.forward[var.idx()].as_ref().unwrap();
+        self.idx += 1;
+        Some((var, t))
+    }
 }
