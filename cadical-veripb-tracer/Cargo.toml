@@ -1,0 +1,16 @@
+[package]
+name = "cadical-veripb-tracer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cfg-if.workspace = true
+itertools = { workspace = true, optional = true }
+pidgeons.workspace = true
+rustsat.workspace = true
+rustsat-cadical.workspace = true
+
+[features]
+default = ["rup-hints"]
+rup-hints = []
+verbose = ["dep:itertools"]

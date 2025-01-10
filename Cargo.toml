@@ -1,7 +1,39 @@
+[workspace]
+members = ["cadical-veripb-tracer", "core", "proc"]
+exclude = ["rustsat", "maxpre-rs"]
+resolver = "2"
+
+[workspace.dependencies]
+anyhow = "1.0.86"
+atty = "0.2.14"
+cadical-veripb-tracer = { version = "0.1.0", path = "./cadical-veripb-tracer" }
+cfg-if = "1.0.0"
+clap = { version = "4.5.15", features = ["derive", "cargo"] }
+cpu-time = "1.0.0"
+concolor-clap = "0.1.0"
+itertools = "0.13.0"
+maxpre = { version = "0.2.2", path = "./maxpre-rs", features = ["multiopt"] }
+pidgeons = { version = "0.1.0", path = "./rustsat/pidgeons" }
+rustsat = { version = "0.5.0", path = "./rustsat", features = [
+  "multiopt",
+  "internals",
+  "proof-logging",
+] }
+rustsat-cadical = { version = "0.3", path = "./rustsat/cadical", features = [
+  "v2-0-0",
+  "pidgeons",
+] }
+signal-hook = "0.3.17"
+scuttle-core = { version = "0.4.0", path = "./core" }
+scuttle-proc = { version = "0.2", path = "./proc" }
+tempfile = "3.12.0"
+termcolor = "1.4.1"
+thiserror = "1.0.63"
+
 [package]
 name = "scuttle"
 authors = ["Christoph Jabs <christoph.jabs@helsinki.fi>"]
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 license = "MIT"
 description = "A multi-objective MaxSAT solver."
@@ -9,58 +41,27 @@ keywords = ["solver", "multi-objective", "maxsat"]
 repository = "https://github.com/chrjabs/scuttle"
 readme = "README.md"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-rustsat = { version = "0.4.3", path = "../rustsat/rustsat", features = [
-  "multiopt",
-  "internals",
-] }
-rustsat-cadical = { optional = true, version = "0.2.4", path = "../rustsat/cadical", features = [
-  "v1-7-2",
-] }
-maxpre = { version = "=0.2.1", path = "../maxpre-rs", optional = true, features = [
-  "multiopt",
-] }
-cpu-time = { optional = true, version = "1.0.0" }
-clap = { optional = true, version = "4.5.13", features = ["derive", "cargo"] }
-concolor-clap = { optional = true, version = "0.1.0" }
-termcolor = { optional = true, version = "1.4.1" }
-atty = { optional = true, version = "0.2.14" }
-signal-hook = { optional = true, version = "0.3.17" }
-scuttle-proc = { version = "0.1", path = "./proc" }
+anyhow.workspace = true
+atty.workspace = true
+cpu-time.workspace = true
+clap.workspace = true
+concolor-clap.workspace = true
+maxpre.workspace = true
+pidgeons.workspace = true
+rustsat.workspace = true
+rustsat-cadical.workspace = true
+scuttle-core = { workspace = true, features = ["clap"] }
+signal-hook.workspace = true
+termcolor.workspace = true
+thiserror.workspace = true
 
 [features]
-default = [
-  "binary-deps",
-  "phasing",
-  "sol-tightening",
-  "interrupt-oracle",
-  "limit-conflicts",
-]
-interrupt-oracle = ["scuttle-proc/interrupt-oracle"]
-phasing = ["scuttle-proc/phasing"]
-sol-tightening = ["scuttle-proc/sol-tightening"]
-coarse-convergence = []
-limit-conflicts = ["scuttle-proc/limit-conflicts"]
-check-non-dominance = []
-binary-deps = [
-  "dep:clap",
-  "dep:concolor-clap",
-  "dep:termcolor",
-  "dep:atty",
-  "dep:cpu-time",
-  "dep:maxpre",
-  "dep:signal-hook",
-  "dep:rustsat-cadical",
-  "rustsat/compression",
-]
-data-helpers = []
-div-con = []
+sol-tightening = ["scuttle-core/sol-tightening"]
 
 [profile.release]
 lto = true
 
-[[bin]]
-name = "scuttle"
-required-features = ["binary-deps"]
+[profile.profiling]
+inherits = "release"
+debug = 1

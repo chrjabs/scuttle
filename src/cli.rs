@@ -8,24 +8,22 @@ use std::{
     io::Write,
 };
 
-use crate::options::{
-    AfterCbOptions, CoreBoostingOptions, EnumOptions, HeurImprOptions, HeurImprWhen, KernelOptions,
-};
-use crate::{
-    types::{NonDomPoint, ParetoFront},
-    EncodingStats, Limits, Stats, WriteSolverLog,
-};
-use crate::{LoggerError, Phase, Termination};
 use clap::{crate_authors, crate_name, crate_version, Args, Parser, Subcommand, ValueEnum};
 use cpu_time::ProcessTime;
 use rustsat::{
     instances::fio,
     solvers::{SolverResult, SolverStats},
 };
+use scuttle_core::prepro::FileFormat;
+use scuttle_core::{
+    options::{
+        AfterCbOptions, CoreBoostingOptions, EnumOptions, HeurImprOptions, HeurImprWhen,
+        KernelOptions,
+    },
+    types::{NonDomPoint, ParetoFront},
+    EncodingStats, Limits, Phase, Stats, Termination, WriteSolverLog,
+};
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
-
-#[cfg(feature = "div-con")]
-use crate::options::{self, BuildEncodings, DivConOptions};
 
 macro_rules! none_if_zero {
     ($val:expr) => {
@@ -72,31 +70,6 @@ enum AlgorithmCommand {
         #[arg(long)]
         log_fence: bool,
     },
-    /// Divide and conquer prototype
-    #[cfg(feature = "div-con")]
-    DivCon {
-        #[command(flatten)]
-        shared: SharedArgs,
-        /// The divide and conquer recursion anchor to use
-        #[arg(long, default_value_t = DivConAnchor::from(DivConOptions::default().anchor))]
-        anchor: DivConAnchor,
-        /// When/how to (re)build the objective encodings for upper bounding search
-        #[arg(long, default_value_t = DivConOptions::default().build_encodings)]
-        build_encodings: BuildEncodings,
-        /// If true, don't merge OLL totalizers into GTE but ignore the totalizer structure.
-        #[arg(long, default_value_t = DivConOptions::default().rebase_encodings.into())]
-        rebase_encodings: Bool,
-        /// Whether to reset the oracle after finding a global ideal point, i.e., core boosting
-        #[arg(long, default_value_t = DivConOptions::default().reset_after_global_ideal.into())]
-        reset_after_cb: Bool,
-        /// Whether to perform inprocessing after finding the first ideal point
-        #[arg(long, default_value_t = DivConOptions::default().inpro.is_some().into())]
-        inprocessing: Bool,
-        /// Instead of solving, print some statistics about clauses in the encoding
-        #[cfg(feature = "data-helpers")]
-        #[arg(long)]
-        enc_clauses_summary: bool,
-    },
 }
 
 #[derive(Args)]
@@ -132,6 +105,8 @@ struct SharedArgs {
     file: FileArgs,
     #[command(flatten)]
     log: LogArgs,
+    #[command(flatten)]
+    proof: ProofArgs,
 }
 
 #[derive(Args)]
@@ -278,6 +253,7 @@ struct LogArgs {
     #[arg(long)]
     log_oracle_calls: bool,
     /// Log heuristic objective improvement
+    #[cfg(feature = "sol-tightening")]
     #[arg(long)]
     log_heuristic_obj_improvement: bool,
     /// Log extracted cores
@@ -294,6 +270,19 @@ struct LogArgs {
     log_inprocessing: bool,
 }
 
+#[derive(Args)]
+struct ProofArgs {
+    /// The path to write the VeriPB proof to. If not provided, will not write a proof.
+    proof_path: Option<PathBuf>,
+    /// The path to output the VeriPB input to. If not provided, will write to
+    /// `scuttle-veripb-input.opb`.
+    ///
+    /// VeriPB does not natively understand multi-objective input files, so Scuttle will write only
+    /// the constraints to a separate OPB file for VeriPB to use as input, while the objectives are
+    /// written to the proof as an order.
+    veripb_input_path: Option<PathBuf>,
+}
+
 impl From<&LogArgs> for LoggerConfig {
     fn from(value: &LogArgs) -> Self {
         LoggerConfig {
@@ -301,6 +290,7 @@ impl From<&LogArgs> for LoggerConfig {
             log_solutions: value.log_solutions,
             log_non_dom: value.log_non_dom || value.verbosity >= 1,
             log_oracle_calls: value.log_oracle_calls || value.verbosity >= 3,
+            #[cfg(feature = "sol-tightening")]
             log_heuristic_obj_improvement: value.log_heuristic_obj_improvement
                 || value.verbosity >= 3,
             log_fence: false,
@@ -317,15 +307,15 @@ pub enum PbEncoding {
     /// Generalized totalizer encoding - Joshi et al. CP'15
     #[default]
     Gte,
-    /// Dynamic polynomial watchdog encoding - Paxian et al. SAT'18
-    Dpw,
+    // /// Dynamic polynomial watchdog encoding - Paxian et al. SAT'18
+    // Dpw,
 }
 
 impl fmt::Display for PbEncoding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PbEncoding::Gte => write!(f, "gte"),
-            PbEncoding::Dpw => write!(f, "dpw"),
+            // PbEncoding::Dpw => write!(f, "dpw"),
         }
     }
 }
@@ -341,57 +331,6 @@ impl fmt::Display for CardEncoding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CardEncoding::Tot => write!(f, "tot"),
-        }
-    }
-}
-
-#[cfg(feature = "div-con")]
-#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
-pub enum DivConAnchor {
-    /// Linear Sat-Unsat for single-objective subproblems
-    LinSu,
-    /// BiOptSat (Sat-Unsat) for bi-objective subproblems
-    Bioptsat,
-    /// P-Minimal after the first ideal point was found
-    PMinimal,
-    /// Lower-bounding search after the first ideal point was found
-    LowerBounding,
-    /// Run an appropriate anchor (Linear Sat-Unsat / BiOptSat / P-Minimal) at
-    /// subproblems of size `n-1`.
-    NMinusOne,
-    /// Run P-Minimal at subproblems of size `n-1`.
-    PMinNMinusOne,
-}
-
-#[cfg(feature = "div-con")]
-impl fmt::Display for DivConAnchor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DivConAnchor::LinSu => write!(f, "lin-su"),
-            DivConAnchor::Bioptsat => write!(f, "bioptsat"),
-            DivConAnchor::PMinimal => write!(f, "p-minimal"),
-            DivConAnchor::LowerBounding => write!(f, "lower-bounding"),
-            DivConAnchor::NMinusOne => write!(f, "n-minus-one"),
-            DivConAnchor::PMinNMinusOne => write!(f, "p-min-n-minus-once"),
-        }
-    }
-}
-
-#[cfg(feature = "div-con")]
-impl From<options::DivConAnchor> for DivConAnchor {
-    fn from(value: options::DivConAnchor) -> Self {
-        match value {
-            options::DivConAnchor::LinSu => DivConAnchor::LinSu,
-            options::DivConAnchor::BiOptSat => DivConAnchor::Bioptsat,
-            options::DivConAnchor::LowerBounding(_) => DivConAnchor::LowerBounding,
-            options::DivConAnchor::PMinimal(size) => match size {
-                options::SubProblemSize::Abs(_) => DivConAnchor::PMinimal,
-                options::SubProblemSize::Smaller(x) => match x {
-                    1 => DivConAnchor::PMinNMinusOne,
-                    _ => DivConAnchor::PMinimal,
-                },
-            },
-            options::DivConAnchor::NMinus(_) => DivConAnchor::NMinusOne,
         }
     }
 }
@@ -430,30 +369,7 @@ impl From<bool> for Bool {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
-pub enum FileFormat {
-    /// Infer the file format from the file extension. `.mcnf`, `.bicnf`,
-    /// `.cnf`, `.wcnf` or `.dimacs` are all interpreted as DIMACS files and
-    /// `.opb` as an OPB file. All file extensions can also be prepended with
-    /// `.bz2` or `.gz` if compression is used.
-    Infer,
-    /// A DIMACS MCNF file
-    Dimacs,
-    /// A multi-objective OPB file
-    Opb,
-}
-
-impl fmt::Display for FileFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FileFormat::Infer => write!(f, "infer"),
-            FileFormat::Dimacs => write!(f, "dimacs"),
-            FileFormat::Opb => write!(f, "opb"),
-        }
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
-enum CadicalConfig {
+pub enum CadicalConfig {
     /// Set default advanced internal options
     Default,
     /// Disable all internal preprocessing options
@@ -480,8 +396,8 @@ impl From<CadicalConfig> for rustsat_cadical::Config {
         match cfg {
             CadicalConfig::Default => rustsat_cadical::Config::Default,
             CadicalConfig::Plain => rustsat_cadical::Config::Plain,
-            CadicalConfig::Sat => rustsat_cadical::Config::SAT,
-            CadicalConfig::Unsat => rustsat_cadical::Config::UNSAT,
+            CadicalConfig::Sat => rustsat_cadical::Config::Sat,
+            CadicalConfig::Unsat => rustsat_cadical::Config::Unsat,
         }
     }
 }
@@ -517,7 +433,7 @@ pub struct Cli {
     pub maxpre_techniques: String,
     pub reindexing: bool,
     pub maxpre_reindexing: bool,
-    pub cadical_config: rustsat_cadical::Config,
+    pub cadical_config: CadicalConfig,
     stdout: BufferWriter,
     stderr: BufferWriter,
     print_solver_config: bool,
@@ -526,6 +442,7 @@ pub struct Cli {
     color: concolor_clap::Color,
     logger_config: LoggerConfig,
     pub alg: Algorithm,
+    pub proof_paths: Option<(PathBuf, PathBuf)>,
 }
 
 pub enum Algorithm {
@@ -537,8 +454,6 @@ pub enum Algorithm {
         Option<CoreBoostingOptions>,
     ),
     LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
-    #[cfg(feature = "div-con")]
-    DivCon(DivConOptions),
 }
 
 impl fmt::Display for Algorithm {
@@ -547,8 +462,6 @@ impl fmt::Display for Algorithm {
             Algorithm::PMinimal(..) => write!(f, "p-pminimal"),
             Algorithm::BiOptSat(..) => write!(f, "bioptsat"),
             Algorithm::LowerBounding(..) => write!(f, "lower-bounding"),
-            #[cfg(feature = "div-con")]
-            Algorithm::DivCon(..) => write!(f, "div-con"),
         }
     }
 }
@@ -601,9 +514,22 @@ impl Cli {
             core_exhaustion: shared.core_exhaustion.into(),
             store_cnf,
         };
-        let cli = match CliArgs::parse().command {
+        let proof_paths = |shared: &SharedArgs| {
+            shared.proof.proof_path.clone().map(|pp| {
+                (
+                    pp,
+                    shared
+                        .proof
+                        .veripb_input_path
+                        .clone()
+                        .unwrap_or(PathBuf::from("scuttle-veripb-input.opb")),
+                )
+            })
+        };
+        match CliArgs::parse().command {
             AlgorithmCommand::PMinimal { shared, cb } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
+                let proof_paths = proof_paths(&shared);
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -625,6 +551,7 @@ impl Cli {
                     color: shared.log.color,
                     logger_config: (&shared.log).into(),
                     alg: Algorithm::PMinimal(kernel_opts(shared, store_cnf), cb),
+                    proof_paths,
                 }
             }
             AlgorithmCommand::Bioptsat {
@@ -633,6 +560,7 @@ impl Cli {
                 cb,
             } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
+                let proof_paths = proof_paths(&shared);
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -659,6 +587,7 @@ impl Cli {
                         obj_encs.obj_card_encoding,
                         cb,
                     ),
+                    proof_paths,
                 }
             }
             AlgorithmCommand::LowerBounding {
@@ -667,6 +596,7 @@ impl Cli {
                 cb,
             } => {
                 let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
+                let proof_paths = proof_paths(&shared);
                 Cli {
                     limits: (&shared.limits).into(),
                     file_format: shared.file.file_format,
@@ -691,95 +621,10 @@ impl Cli {
                         ..(&shared.log).into()
                     },
                     alg: Algorithm::LowerBounding(kernel_opts(shared, store_cnf), cb),
-                }
-            }
-            #[cfg(feature = "div-con")]
-            AlgorithmCommand::DivCon {
-                shared,
-                anchor,
-                build_encodings,
-                rebase_encodings,
-                reset_after_cb,
-                inprocessing,
-                #[cfg(feature = "data-helpers")]
-                enc_clauses_summary,
-            } => {
-                let inpro = if inprocessing.into() {
-                    Some(shared.prepro.maxpre_techniques.clone())
-                } else {
-                    None
-                };
-                Cli {
-                    limits: (&shared.limits).into(),
-                    file_format: shared.file.file_format,
-                    opb_options: fio::opb::Options {
-                        first_var_idx: shared.file.first_var_idx,
-                        ..Default::default()
-                    },
-                    inst_path: shared.file.inst_path.clone(),
-                    preprocessing: shared.prepro.preprocessing.into(),
-                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                    reindexing: shared.prepro.reindexing.into(),
-                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                    cadical_config: shared.cadical_config.into(),
-                    stdout: stdout(shared.log.color),
-                    stderr: stderr(shared.log.color),
-                    print_solver_config: shared.log.print_solver_config,
-                    print_solutions: shared.log.print_solutions,
-                    print_stats: !shared.log.no_print_stats,
-                    color: shared.log.color,
-                    logger_config: LoggerConfig {
-                        ..(&shared.log).into()
-                    },
-                    alg: Algorithm::DivCon(DivConOptions {
-                        kernel: kernel_opts(shared),
-                        anchor: match anchor {
-                            DivConAnchor::LinSu => options::DivConAnchor::LinSu,
-                            DivConAnchor::Bioptsat => options::DivConAnchor::BiOptSat,
-                            DivConAnchor::PMinimal => {
-                                options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(0))
-                            }
-                            DivConAnchor::LowerBounding => options::DivConAnchor::LowerBounding(
-                                options::SubProblemSize::Smaller(0),
-                            ),
-                            DivConAnchor::NMinusOne => options::DivConAnchor::NMinus(1),
-                            DivConAnchor::PMinNMinusOne => {
-                                options::DivConAnchor::PMinimal(options::SubProblemSize::Smaller(1))
-                            }
-                        },
-                        build_encodings,
-                        rebase_encodings: rebase_encodings.into(),
-                        reset_after_global_ideal: reset_after_cb.into(),
-                        inpro,
-                        #[cfg(feature = "data-helpers")]
-                        enc_clauses_summary,
-                    }),
-                }
-            }
-        };
-        #[cfg(any(not(feature = "sol-tightening"), not(feature = "phasing")))]
-        match &cli.alg {
-            Algorithm::PMinimal(opts)
-            | Algorithm::BiOptSat(opts, ..)
-            | Algorithm::LowerBounding(opts)
-            | Algorithm::DivCon(DivConOptions { kernel: opts, .. }) => {
-                #[cfg(not(feature = "sol-tightening"))]
-                if opts.heuristic_improvements.solution_tightening != HeurImprWhen::Never {
-                    cli.warning(
-                        "requested solution tightening but solver is built without this feature",
-                    )
-                    .expect("IO error during CLI initialization");
-                }
-                #[cfg(not(feature = "phasing"))]
-                if opts.solution_guided_search {
-                    cli.warning(
-                        "requested solution guided search but solver is built without this feature",
-                    )
-                    .expect("IO error during CLI initialization");
+                    proof_paths,
                 }
             }
         }
-        cli
     }
 
     pub fn new_cli_logger(&self) -> CliLogger {
@@ -841,11 +686,7 @@ impl Cli {
 
     pub fn log_termination(&self, term: &Termination) -> Result<(), IOError> {
         let msg = &format!("{}", term);
-        if term.is_error() {
-            self.error(msg)
-        } else {
-            self.warning(msg)
-        }
+        self.warning(msg)
     }
 
     pub fn print_header(&self) -> Result<(), IOError> {
@@ -899,20 +740,6 @@ impl Cli {
                     Self::print_parameter(&mut buffer, "obj-pb-encoding", pb_enc)?;
                     Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
-                }
-                #[cfg(feature = "div-con")]
-                Algorithm::DivCon(opts) => {
-                    Self::print_parameter(
-                        &mut buffer,
-                        "enumeration",
-                        EnumPrinter::new(opts.kernel.enumeration),
-                    )?;
-                    Self::print_parameter(
-                        &mut buffer,
-                        "reserve-enc-vars",
-                        opts.kernel.reserve_enc_vars,
-                    )?;
-                    Self::print_parameter(&mut buffer, "anchor", opts.anchor)?;
                 }
             }
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;
@@ -1157,6 +984,7 @@ struct LoggerConfig {
     log_solutions: bool,
     log_non_dom: bool,
     log_oracle_calls: bool,
+    #[cfg(feature = "sol-tightening")]
     log_heuristic_obj_improvement: bool,
     log_fence: bool,
     log_routines: usize,
@@ -1172,7 +1000,7 @@ pub struct CliLogger {
 }
 
 impl WriteSolverLog for CliLogger {
-    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> Result<(), LoggerError> {
+    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> anyhow::Result<()> {
         if self.config.log_candidates {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1190,7 +1018,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_oracle_call(&mut self, result: SolverResult) -> Result<(), LoggerError> {
+    fn log_oracle_call(&mut self, result: SolverResult) -> anyhow::Result<()> {
         if self.config.log_oracle_calls {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1207,7 +1035,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_solution(&mut self) -> Result<(), LoggerError> {
+    fn log_solution(&mut self) -> anyhow::Result<()> {
         if self.config.log_solutions {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1223,7 +1051,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> Result<(), LoggerError> {
+    fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> anyhow::Result<()> {
         if self.config.log_non_dom {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1241,12 +1069,13 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
+    #[cfg(feature = "sol-tightening")]
     fn log_heuristic_obj_improvement(
         &mut self,
         obj_idx: usize,
         apparent_cost: usize,
         improved_cost: usize,
-    ) -> Result<(), LoggerError> {
+    ) -> anyhow::Result<()> {
         if self.config.log_heuristic_obj_improvement {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1265,7 +1094,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_fence(&mut self, fence: &[usize]) -> Result<(), LoggerError> {
+    fn log_fence(&mut self, fence: &[usize]) -> anyhow::Result<()> {
         if self.config.log_fence {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1277,7 +1106,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_routine_start(&mut self, desc: &'static str) -> Result<(), LoggerError> {
+    fn log_routine_start(&mut self, desc: &'static str) -> anyhow::Result<()> {
         self.routine_stack.push((desc, ProcessTime::now()));
 
         if self.config.log_routines >= self.routine_stack.len() {
@@ -1291,7 +1120,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_routine_end(&mut self) -> Result<(), LoggerError> {
+    fn log_routine_end(&mut self) -> anyhow::Result<()> {
         let (desc, start) = self.routine_stack.pop().expect("routine stack out of sync");
 
         if self.config.log_routines > self.routine_stack.len() {
@@ -1312,14 +1141,14 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_end_solve(&mut self) -> Result<(), LoggerError> {
+    fn log_end_solve(&mut self) -> anyhow::Result<()> {
         while !self.routine_stack.is_empty() {
             self.log_routine_end()?;
         }
         Ok(())
     }
 
-    fn log_ideal(&mut self, ideal: &[usize]) -> Result<(), LoggerError> {
+    fn log_ideal(&mut self, ideal: &[usize]) -> anyhow::Result<()> {
         if self.config.log_bound_points {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -1336,7 +1165,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_nadir(&mut self, nadir: &[usize]) -> Result<(), LoggerError> {
+    fn log_nadir(&mut self, nadir: &[usize]) -> anyhow::Result<()> {
         if self.config.log_bound_points {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -1353,7 +1182,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_core(&mut self, weight: usize, len: usize, red_len: usize) -> Result<(), LoggerError> {
+    fn log_core(&mut self, weight: usize, len: usize, red_len: usize) -> anyhow::Result<()> {
         if self.config.log_cores {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1369,7 +1198,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_core_exhaustion(&mut self, exhausted: usize, weight: usize) -> Result<(), LoggerError> {
+    fn log_core_exhaustion(&mut self, exhausted: usize, weight: usize) -> anyhow::Result<()> {
         if self.config.log_cores {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1386,7 +1215,7 @@ impl WriteSolverLog for CliLogger {
         cls_before_after: (usize, usize),
         fixed_lits: usize,
         obj_range_before_after: Vec<(usize, usize)>,
-    ) -> Result<(), LoggerError> {
+    ) -> anyhow::Result<()> {
         if self.config.log_inpro {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -1419,7 +1248,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_message(&mut self, msg: &str) -> Result<(), LoggerError> {
+    fn log_message(&mut self, msg: &str) -> anyhow::Result<()> {
         let mut buffer = self.stdout.buffer();
         writeln!(buffer, "{}", msg)?;
         self.stdout.print(&buffer)?;

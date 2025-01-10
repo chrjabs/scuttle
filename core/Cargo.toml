@@ -1,0 +1,30 @@
+[package]
+name = "scuttle-core"
+version = "0.4.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+cadical-veripb-tracer.workspace = true
+clap = { workspace = true, optional = true }
+itertools.workspace = true
+maxpre.workspace = true
+pidgeons.workspace = true
+rustsat.workspace = true
+rustsat-cadical.workspace = true
+scuttle-proc.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[features]
+default = ["phasing", "interrupt-oracle", "limit-conflicts"]
+interrupt-oracle = ["scuttle-proc/interrupt-oracle"]
+phasing = ["scuttle-proc/phasing"]
+sol-tightening = ["scuttle-proc/sol-tightening"]
+coarse-convergence = []
+limit-conflicts = ["scuttle-proc/limit-conflicts"]
+check-non-dominance = []
+verbose-proofs = ["cadical-veripb-tracer/verbose", "rustsat/verbose-proofs"]
+clap = ["dep:clap"]
