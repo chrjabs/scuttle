@@ -4,11 +4,16 @@ This is the artefact description to go with the paper "Certifying
 Pareto-Optimality in Multi-Objective Maximum Satisfiabillity" for voluntary
 evaluation at TACAS 2025.
 
+The artefact is designed to be executed in the [TACAS artefact evaluation
+VM](https://doi.org/10.5281/zenodo.7113223) (Ubuntu 22.04 LTS). Building the
+software requires internet access, so the network adapter has to be enabled in
+the VirtualBox settings of the VM.
+
 ## Download Artefact
 
 The artefact can be downloaded from
-[Zenodo](https://doi.org/10.5281/zenodo.14626701) and it has the following DOI:
-`10.5281/zenodo.14626701`. In the following we assume that the artefact is
+[Zenodo](https://doi.org/10.5281/zenodo.14731485) and it has the following DOI:
+`10.5281/zenodo.14731485`. In the following we assume that the artefact is
 unpacked at the location `${ARTEFACT}`.
 
 ## Installation
@@ -79,6 +84,21 @@ Furthermore, all solver and proof checking logs, as well as the proof files will
 be written into `${ARTEFACT}/results/`. Note that the read/write speed into
 this folder can have a significant impact on the experiment runtime and the
 proofs can get quite large (especially when running all experiments).
+
+To compute the average proof-logging overhead in percent for the run
+experiments, the following command can be used:
+```bash
+tail -n+2 ${ARTEFACT}/results.csv | awk -F',' '{sum+=($3/$2)-1;}END{print sum/NR*100;}'
+```
+Note however, that the write speed of the filesystem for `${ARTEFACT}` can have
+a significant impact on the proof-logging overhead, especially for the
+instances used here, where running times are relatively low.
+
+Similarly, to compute how much longer proof checking takes, compared to proof
+generation, the following command can be used:
+```bash
+tail -n+2 ${ARTEFACT}/results.csv | awk -F',' '{sum+=($4/$3)-1;}END{print sum/NR*100;}'
+```
 
 ## Benchmarks
 
