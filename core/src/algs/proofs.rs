@@ -11,7 +11,7 @@ use std::{
 use std::sync::Mutex;
 
 use cadical_veripb_tracer::{CadicalCertCollector, CadicalTracer};
-use pidgeons::{
+use pigeons::{
     AbsConstraintId, Axiom, ConstraintId, ConstraintLike, Derivation, OperationLike,
     OperationSequence, Order, OrderVar, Proof, ProofGoal, ProofGoalId, ProofOnlyVar, Substitution,
     VarLike,
@@ -965,7 +965,7 @@ mod tests {
         process::Command,
     };
 
-    use pidgeons::{Conclusion, ConstraintId, OutputGuarantee};
+    use pigeons::{Conclusion, ConstraintId, OutputGuarantee};
     use rustsat::lit;
 
     use crate::types::Objective;
@@ -995,9 +995,9 @@ mod tests {
     fn new_proof(
         num_constraints: usize,
         optimization: bool,
-    ) -> pidgeons::Proof<tempfile::NamedTempFile> {
+    ) -> pigeons::Proof<tempfile::NamedTempFile> {
         let file = tempfile::NamedTempFile::new().expect("failed to create temporary proof file");
-        pidgeons::Proof::new_with_conclusion(
+        pigeons::Proof::new_with_conclusion(
             file,
             num_constraints,
             optimization,
@@ -1102,8 +1102,8 @@ end"#;
 
         let proof_file = proof
             .conclude(
-                pidgeons::OutputGuarantee::None,
-                &pidgeons::Conclusion::<&str>::None,
+                pigeons::OutputGuarantee::None,
+                &pigeons::Conclusion::<&str>::None,
             )
             .unwrap();
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();

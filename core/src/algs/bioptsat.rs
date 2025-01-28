@@ -8,7 +8,7 @@
 use std::{fs, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;
-use pidgeons::{ConstraintId, OperationLike, OperationSequence, VarLike};
+use pigeons::{ConstraintId, OperationLike, OperationSequence, VarLike};
 use rustsat::{
     clause,
     encodings::{
@@ -143,7 +143,7 @@ where
         objs: Objs,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: pidgeons::Proof<Self::ProofWriter>,
+        proof: pigeons::Proof<Self::ProofWriter>,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
@@ -456,8 +456,8 @@ where
                                 if encodings[0].is_buffer_empty() {
                                     let (olit, _) = encodings[0].output_proof_details(inc_cost);
                                     proof.equals(
-                                        &pidgeons::Axiom::from(olit),
-                                        Some(pidgeons::ConstraintId::from(lb_id)),
+                                        &pigeons::Axiom::from(olit),
+                                        Some(pigeons::ConstraintId::from(lb_id)),
                                     )?;
                                 }
                                 // otherwise, this should equal the proof-only variable
@@ -474,7 +474,7 @@ where
                     {
                         proof.equals(
                             &rustsat::clause![],
-                            Some(pidgeons::ConstraintId::from(_cut_id)),
+                            Some(pigeons::ConstraintId::from(_cut_id)),
                         )?;
                     }
                 }
@@ -625,8 +625,8 @@ where
                                 let (olit, _) = encodings[0].output_proof_details(inc_cost);
                                 proof.comment(&"here")?;
                                 proof.equals(
-                                    &pidgeons::Axiom::from(olit),
-                                    Some(pidgeons::ConstraintId::from(lb_id)),
+                                    &pigeons::Axiom::from(olit),
+                                    Some(pigeons::ConstraintId::from(lb_id)),
                                 )?;
                             }
                         }
@@ -641,8 +641,8 @@ where
                     if encodings[1].is_buffer_empty() {
                         let (olit, _) = encodings[1].output_proof_details(dec_cost);
                         proof.equals(
-                            &pidgeons::Axiom::from(!olit),
-                            Some(pidgeons::ConstraintId::from(cut_id)),
+                            &pigeons::Axiom::from(!olit),
+                            Some(pigeons::ConstraintId::from(cut_id)),
                         )?;
                     }
                 }
@@ -676,7 +676,7 @@ where
                         #[cfg(feature = "verbose-proofs")]
                         proof.equals(
                             &clause![!olit, first_olit],
-                            Some(pidgeons::ConstraintId::from(implication)),
+                            Some(pigeons::ConstraintId::from(implication)),
                         )?;
                         let id = proof
                             .operations::<Var>(&(OperationSequence::from(cut_id) + implication))?;

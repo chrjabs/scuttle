@@ -11,7 +11,7 @@
 use std::{fs, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;
-use pidgeons::ConstraintId;
+use pigeons::ConstraintId;
 use rustsat::{
     clause,
     encodings::{
@@ -162,7 +162,7 @@ where
         objs: Objs,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: pidgeons::Proof<Self::ProofWriter>,
+        proof: pigeons::Proof<Self::ProofWriter>,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
@@ -502,7 +502,7 @@ where
             // Block last Pareto point, if temporarily blocked
             if let Some((block_lit, ids)) = block_switch {
                 if let Some(proof_stuff) = &mut self.proof_stuff {
-                    use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
+                    use pigeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
                     use rustsat::encodings::CollectCertClauses;
 
                     let (reified_cut, reified_assump_ids) = ids.unwrap();

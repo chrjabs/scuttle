@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 cfg-if.workspace = true
 itertools = { workspace = true, optional = true }
-pidgeons.workspace = true
+pigeons.workspace = true
 rustsat.workspace = true
 rustsat-cadical.workspace = true
 

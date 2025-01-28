@@ -760,7 +760,7 @@ where
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
         collector: &mut Col,
-    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pidgeons::AbsConstraintId>)>>
+    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pigeons::AbsConstraintId>)>>
     where
         Col: Extend<NonDomPoint>,
     {
@@ -821,7 +821,7 @@ where
         base_assumps: &[Lit],
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
-    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pidgeons::AbsConstraintId>)>> {
+    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pigeons::AbsConstraintId>)>> {
         use rustsat::solvers::Solve;
 
         self.log_routine_start("linsu")?;

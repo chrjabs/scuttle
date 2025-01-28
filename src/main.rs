@@ -165,12 +165,12 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
             .map(|cl| fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
         fio::opb::write_opb_lines(&mut writer, iter, fio::opb::Options::default())?;
         // Initialize proof
-        Some(pidgeons::Proof::new_with_conclusion(
+        Some(pigeons::Proof::new_with_conclusion(
             io::BufWriter::new(fs::File::create(proof_path)?),
             inst.n_clauses(),
             false,
-            pidgeons::OutputGuarantee::None,
-            &pidgeons::Conclusion::<&str>::Unsat(Some(pidgeons::ConstraintId::last(1))),
+            pigeons::OutputGuarantee::None,
+            &pigeons::Conclusion::<&str>::Unsat(Some(pigeons::ConstraintId::last(1))),
         )?)
     } else {
         None
@@ -239,7 +239,7 @@ fn setup_alg_cert<Alg>(
     cli: &Cli,
     inst: Instance,
     opts: KernelOptions,
-    proof: pidgeons::Proof<Alg::ProofWriter>,
+    proof: pigeons::Proof<Alg::ProofWriter>,
 ) -> anyhow::Result<Alg>
 where
     Alg: InitCertDefaultBlock + KernelFunctions,

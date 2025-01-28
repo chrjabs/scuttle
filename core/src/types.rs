@@ -225,7 +225,7 @@ pub(crate) enum Objective {
         lits: RsHashMap<Lit, usize>,
         idx: usize,
         lower_bound: usize,
-        reform_id: Option<pidgeons::AbsConstraintId>,
+        reform_id: Option<pigeons::AbsConstraintId>,
     },
     Unweighted {
         offset: isize,
@@ -233,13 +233,13 @@ pub(crate) enum Objective {
         lits: Vec<Lit>,
         idx: usize,
         lower_bound: usize,
-        reform_id: Option<pidgeons::AbsConstraintId>,
+        reform_id: Option<pigeons::AbsConstraintId>,
     },
     Constant {
         offset: isize,
         idx: usize,
         lower_bound: usize,
-        reform_id: Option<pidgeons::AbsConstraintId>,
+        reform_id: Option<pigeons::AbsConstraintId>,
     },
 }
 
@@ -329,7 +329,7 @@ impl Objective {
     }
 
     /// Gets the reformulation ID of the objective
-    pub fn reform_id(&self) -> Option<pidgeons::AbsConstraintId> {
+    pub fn reform_id(&self) -> Option<pigeons::AbsConstraintId> {
         match self {
             Objective::Weighted { reform_id, .. }
             | Objective::Unweighted { reform_id, .. }
@@ -356,7 +356,7 @@ impl Objective {
     }
 
     /// Sets the objective reformulation ID
-    pub fn set_reform_id(&mut self, new_reform_id: Option<pidgeons::AbsConstraintId>) {
+    pub fn set_reform_id(&mut self, new_reform_id: Option<pigeons::AbsConstraintId>) {
         match self {
             Objective::Weighted { reform_id, .. }
             | Objective::Unweighted { reform_id, .. }
@@ -541,7 +541,7 @@ where
         range: Range<usize>,
         collector: &mut Col,
         var_manager: &mut dyn ManageVars,
-        proof: &mut pidgeons::Proof<ProofW>,
+        proof: &mut pigeons::Proof<ProofW>,
     ) -> anyhow::Result<()>
     where
         Col: CollectCertClauses,

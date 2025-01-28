@@ -18,7 +18,7 @@
 use std::{fs, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;
-use pidgeons::{AbsConstraintId, ConstraintId};
+use pigeons::{AbsConstraintId, ConstraintId};
 use rustsat::{
     clause,
     encodings::{
@@ -152,7 +152,7 @@ where
         objs: Objs,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: pidgeons::Proof<Self::ProofWriter>,
+        proof: pigeons::Proof<Self::ProofWriter>,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
@@ -288,7 +288,7 @@ where
             // Block last Pareto point, if temporarily blocked
             if let Some((block_lit, ids)) = block_switch {
                 if let Some(proof_stuff) = &mut self.kernel.proof_stuff {
-                    use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
+                    use pigeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
                     use rustsat::encodings::CollectCertClauses;
 
                     let (reified_cut, reified_assump_ids) = ids.unwrap();
@@ -473,7 +473,7 @@ where
                 // Permanently block last cadidate
                 if let Some((block_lit, ids)) = block_switch {
                     if let Some(proof_stuff) = &mut self.proof_stuff {
-                        use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
+                        use pigeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
                         use rustsat::encodings::CollectCertClauses;
 
                         let (reified_cut, reified_assump_ids) = ids.unwrap();
@@ -648,7 +648,7 @@ where
         costs: &[usize],
         obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
     ) -> anyhow::Result<(Lit, Option<(AbsConstraintId, Vec<AbsConstraintId>)>)> {
-        use pidgeons::VarLike;
+        use pigeons::VarLike;
 
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         let (mut clause, reification_ids) = self.dominated_block_clause(costs, obj_encs)?;

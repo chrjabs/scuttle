@@ -624,18 +624,18 @@ fn new_proof(
     num_constraints: usize,
     optimization: bool,
 ) -> (
-    pidgeons::Proof<std::io::BufWriter<std::fs::File>>,
+    pigeons::Proof<std::io::BufWriter<std::fs::File>>,
     tempfile::TempPath,
 ) {
     let file = tempfile::NamedTempFile::new().expect("failed to create temporary proof file");
     let (file, path) = file.into_parts();
     (
-        pidgeons::Proof::new_with_conclusion(
+        pigeons::Proof::new_with_conclusion(
             std::io::BufWriter::new(file),
             num_constraints,
             optimization,
-            pidgeons::OutputGuarantee::None,
-            &pidgeons::Conclusion::<&str>::Unsat(Some(pidgeons::ConstraintId::last(1))),
+            pigeons::OutputGuarantee::None,
+            &pigeons::Conclusion::<&str>::Unsat(Some(pigeons::ConstraintId::last(1))),
         )
         .expect("failed to start proof"),
         path,
