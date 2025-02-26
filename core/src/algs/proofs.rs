@@ -45,7 +45,7 @@ pub trait InitCert: super::Init {
         block_clause_gen: <Self as super::Init>::BlockClauseGen,
     ) -> anyhow::Result<Self>
     where
-        Cls: IntoIterator<Item = Clause>,
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter;
 
@@ -56,7 +56,14 @@ pub trait InitCert: super::Init {
         proof: Proof<Self::ProofWriter>,
         block_clause_gen: <Self as super::Init>::BlockClauseGen,
     ) -> anyhow::Result<Self> {
-        Self::new_cert(inst.cnf, inst.objs, inst.vm, opts, proof, block_clause_gen)
+        Self::new_cert(
+            inst.clauses.into_iter().map(|(cl, id)| (cl, id.unwrap())),
+            inst.objs,
+            inst.vm,
+            opts,
+            proof,
+            block_clause_gen,
+        )
     }
 }
 
@@ -70,7 +77,7 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
         proof: Proof<Self::ProofWriter>,
     ) -> anyhow::Result<Self>
     where
-        Cls: IntoIterator<Item = Clause>,
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
@@ -92,7 +99,7 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
         proof: Proof<Self::ProofWriter>,
     ) -> anyhow::Result<Self> {
         Self::new_cert(
-            inst.cnf,
+            inst.clauses.into_iter().map(|(cl, id)| (cl, id.unwrap())),
             inst.objs,
             inst.vm,
             opts,

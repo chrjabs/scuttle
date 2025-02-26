@@ -9,8 +9,10 @@ use std::{
 
 use rustsat::{
     encodings::{card, pb, totdb, CollectCertClauses, CollectClauses},
-    instances::{Cnf, ManageVars, ReindexVars},
-    types::{Assignment, Clause, Lit, LitIter, RsHashMap, Var, WLitIter},
+    instances::{ManageVars, ReindexVars},
+    types::{
+        constraints::PbConstraint, Assignment, Clause, Lit, LitIter, RsHashMap, Var, WLitIter,
+    },
 };
 
 /// The Pareto front of an instance. This is the return type of the solver.
@@ -819,28 +821,28 @@ impl ManageVars for Reindexer {
 
 #[derive(Debug, Clone)]
 pub struct Parsed {
-    pub(crate) cnf: Cnf,
+    pub(crate) constraints: Vec<PbConstraint>,
     pub(crate) objs: Vec<rustsat::instances::Objective>,
     pub(crate) vm: VarManager,
 }
 
 #[derive(Debug, Clone)]
 pub struct Instance {
-    pub(crate) cnf: Cnf,
+    pub(crate) clauses: Vec<(Clause, Option<pigeons::AbsConstraintId>)>,
     pub(crate) objs: Vec<(Vec<(Lit, usize)>, isize)>,
     pub(crate) vm: VarManager,
 }
 
 impl Instance {
     pub fn n_clauses(&self) -> usize {
-        self.cnf.n_clauses()
+        self.clauses.len()
     }
 
     pub fn n_objs(&self) -> usize {
         self.objs.len()
     }
 
-    pub fn iter_clauses(&self) -> std::slice::Iter<'_, Clause> {
-        self.cnf.iter()
+    pub fn iter_clauses(&self) -> impl Iterator<Item = &Clause> {
+        self.clauses.iter().map(|(cl, _)| cl)
     }
 }

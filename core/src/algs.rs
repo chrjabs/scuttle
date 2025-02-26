@@ -70,7 +70,13 @@ pub trait Init: Sized {
         opts: KernelOptions,
         block_clause_gen: Self::BlockClauseGen,
     ) -> anyhow::Result<Self> {
-        Self::new(inst.cnf, inst.objs, inst.vm, opts, block_clause_gen)
+        Self::new(
+            inst.clauses.into_iter().map(|(cl, _)| cl),
+            inst.objs,
+            inst.vm,
+            opts,
+            block_clause_gen,
+        )
     }
 }
 
@@ -93,7 +99,13 @@ pub trait InitDefaultBlock: Init<BlockClauseGen = fn(Assignment) -> Clause> {
     /// Initializes the algorithm using an [`Instance`] rather than iterators with the default
     /// blocking clause generator
     fn from_instance_default_blocking(inst: Instance, opts: KernelOptions) -> anyhow::Result<Self> {
-        Self::new(inst.cnf, inst.objs, inst.vm, opts, default_blocking_clause)
+        Self::new(
+            inst.clauses.into_iter().map(|(cl, _)| cl),
+            inst.objs,
+            inst.vm,
+            opts,
+            default_blocking_clause,
+        )
     }
 }
 

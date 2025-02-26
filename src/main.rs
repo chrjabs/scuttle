@@ -144,7 +144,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
         let (prepro, inst) = prepro::max_pre(parsed, &cli.maxpre_techniques, cli.maxpre_reindexing);
         (Some(prepro), inst)
     } else {
-        (None, prepro::handle_soft_clauses(parsed))
+        (None, prepro::to_clausal(parsed))
     };
 
     // Reindexing
