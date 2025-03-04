@@ -1,10 +1,19 @@
 //! # Instance Processing Happening _Before_ It's Being Passed To The Actual Solver
 
-use std::{cmp, ffi::OsString, fmt, path::Path};
+use std::{
+    cmp,
+    ffi::OsString,
+    fmt, fs, io,
+    path::{Path, PathBuf},
+};
 
 use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
-    instances::{fio, ManageVars, MultiOptInstance, Objective, ReindexVars},
+    encodings::{
+        pb::{self, default_encode_pb_constraint},
+        CollectCertClauses, CollectClauses,
+    },
+    instances::{fio, Cnf, ManageVars, MultiOptInstance, Objective, ReindexVars},
     types::{constraints::PbConstraint, Clause, Lit, RsHashMap, Var},
 };
 
@@ -86,13 +95,20 @@ pub fn parse<P: AsRef<Path>>(
 /// Processes a clausal input file, and optionally dumps an OPB file of the constraints for VeriPB
 /// to use as input
 fn clausal<P: AsRef<Path>>(input_path: P) -> anyhow::Result<Parsed> {
-    // Note, for clausal files the constraint order is preserved
     let (mut constr, objs) =
         MultiOptInstance::<VarManager>::from_dimacs_path(input_path)?.decompose();
     constr.var_manager_mut().mark_max_orig_var();
-    let (cnf, mut vm) = constr.into_cnf();
-    vm.mark_max_enc_var();
-    let constraints = cnf.into_iter().map(Into::into).collect();
+    debug_assert_eq!(
+        constr.n_pbs(),
+        0,
+        "parsing should not convert constraint types yet"
+    );
+    debug_assert_eq!(
+        constr.n_cards(),
+        0,
+        "parsing should not convert constraint types yet"
+    );
+    let (constraints, vm) = constr.into_pbs();
     Ok(Parsed {
         constraints,
         objs,
@@ -106,11 +122,50 @@ fn pseudo_boolean<P: AsRef<Path>>(
     input_path: P,
     opb_opts: fio::opb::Options,
 ) -> anyhow::Result<Parsed> {
-    todo!()
+    let (mut constr, objs) =
+        MultiOptInstance::<VarManager>::from_opb_path(input_path, opb_opts)?.decompose();
+    constr.var_manager_mut().mark_max_orig_var();
+    debug_assert_eq!(
+        constr.n_clauses(),
+        0,
+        "parsing should not convert constraint types yet"
+    );
+    debug_assert_eq!(
+        constr.n_cards(),
+        0,
+        "parsing should not convert constraint types yet"
+    );
+    let (constraints, vm) = constr.into_pbs();
+    Ok(Parsed {
+        constraints,
+        objs,
+        vm,
+    })
 }
 
-pub fn max_pre(parsed: Parsed, techniques: &str, reindexing: bool) -> (MaxPre, Instance) {
-    let Parsed { cnf, objs, .. } = parsed;
+fn constraints_to_clausal(
+    constraints: Vec<PbConstraint>,
+    vm: &mut VarManager,
+) -> Result<Cnf, rustsat::OutOfMemory> {
+    let mut cnf = Cnf::new();
+    for constr in constraints {
+        default_encode_pb_constraint(constr, &mut cnf, vm)?;
+    }
+    Ok(cnf)
+}
+
+pub fn max_pre(
+    parsed: Parsed,
+    techniques: &str,
+    reindexing: bool,
+) -> Result<(MaxPre, Instance), rustsat::OutOfMemory> {
+    let Parsed {
+        constraints,
+        objs,
+        mut vm,
+        ..
+    } = parsed;
+    let cnf = constraints_to_clausal(constraints, &mut vm)?;
     let mut prepro = MaxPre::new(
         cnf,
         objs.into_iter().map(|o| o.into_soft_cls()).collect(),
@@ -137,23 +192,115 @@ pub fn max_pre(parsed: Parsed, techniques: &str, reindexing: bool) -> (MaxPre, I
         cl.iter().fold(max, |max, l| cmp::max(max, l.var()))
     });
     let vm = VarManager::new(max_var, max_var);
-    (prepro, Instance { cnf, objs, vm })
+    Ok((
+        prepro,
+        Instance {
+            clauses: cnf.into_iter().map(|cl| (cl, None)).collect(),
+            objs,
+            vm,
+        },
+    ))
 }
 
-pub fn to_clausal(parsed: Parsed) -> Instance {
+struct Collector(Vec<(Clause, Option<pigeons::AbsConstraintId>)>);
+
+impl CollectClauses for Collector {
+    fn n_clauses(&self) -> usize {
+        self.0.len()
+    }
+
+    fn extend_clauses<T>(&mut self, cl_iter: T) -> Result<(), rustsat::OutOfMemory>
+    where
+        T: IntoIterator<Item = Clause>,
+    {
+        self.0.extend(cl_iter.into_iter().map(|cl| (cl, None)));
+        Ok(())
+    }
+}
+
+impl CollectCertClauses for Collector {
+    fn extend_cert_clauses<T>(&mut self, cl_iter: T) -> Result<(), rustsat::OutOfMemory>
+    where
+        T: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
+    {
+        self.0
+            .extend(cl_iter.into_iter().map(|(cl, id)| (cl, Some(id))));
+        Ok(())
+    }
+}
+
+pub fn to_clausal(
+    parsed: Parsed,
+    proof_paths: &Option<(PathBuf, Option<PathBuf>)>,
+) -> anyhow::Result<(Option<pigeons::Proof<io::BufWriter<fs::File>>>, Instance)> {
     let Parsed {
         mut constraints,
         objs,
         mut vm,
+        ..
     } = parsed;
     let mut blits = RsHashMap::default();
+    // NOTE: soft clause to objective conversion is not certified
     let objs: Vec<_> = objs
         .into_iter()
         .map(|o| process_objective(o, &mut constraints, &mut blits, &mut vm))
         .collect();
+    let mut proof = None;
+    // (certified) PB -> CNF conversion
+    let mut collector = Collector(vec![]);
+    if let Some((proof_path, veripb_input_path)) = proof_paths {
+        let n_constraints = constraints.iter().fold(0, |s, c| {
+            if matches!(c, PbConstraint::Eq(_)) {
+                s + 2
+            } else {
+                s + 1
+            }
+        });
+
+        if let Some(veripb_input_path) = veripb_input_path {
+            // dump constraints into OPB file for VeriPB to read
+            let mut writer = io::BufWriter::new(fs::File::create(veripb_input_path)?);
+            let iter = constraints
+                .iter()
+                .map(|c| fio::opb::FileLine::<Option<_>>::Pb(c.clone()));
+            fio::opb::write_opb_lines(&mut writer, iter, fio::opb::Options::default())?;
+        }
+
+        let mut the_proof = pigeons::Proof::new_with_conclusion(
+            io::BufWriter::new(fs::File::create(proof_path)?),
+            n_constraints,
+            false,
+            pigeons::OutputGuarantee::None,
+            &pigeons::Conclusion::<&str>::Unsat(Some(pigeons::ConstraintId::last(1))),
+        )?;
+        let mut id = pigeons::AbsConstraintId::new(1);
+        for constr in constraints {
+            let eq = matches!(constr, PbConstraint::Eq(_));
+            pb::cert::default_encode_pb_constraint(
+                (constr, id),
+                &mut collector,
+                &mut vm,
+                &mut the_proof,
+            )?;
+            id += 1 + usize::from(eq);
+        }
+        #[cfg(feature = "verbose-proofs")]
+        the_proof.comment(&"end OPB translation")?;
+        proof = Some(the_proof);
+    } else {
+        for constr in constraints {
+            pb::default_encode_pb_constraint(constr, &mut collector, &mut vm)?;
+        }
+    }
     vm.mark_max_enc_var();
-    // TODO
-    Instance { cnf, objs, vm }
+    Ok((
+        proof,
+        Instance {
+            clauses: collector.0,
+            objs,
+            vm,
+        },
+    ))
 }
 
 fn process_objective<VM: ManageVars>(
@@ -188,7 +335,7 @@ fn process_objective<VM: ManageVars>(
 
 pub fn reindexing(inst: Instance) -> (Reindexer, Instance) {
     let Instance {
-        mut cnf,
+        mut clauses,
         mut objs,
         vm,
         ..
@@ -199,12 +346,12 @@ pub fn reindexing(inst: Instance) -> (Reindexer, Instance) {
             *l = reindexer.reindex_lit(*l);
         }
     }
-    for cl in &mut cnf {
+    for (cl, _) in &mut clauses {
         for l in cl {
             *l = reindexer.reindex_lit(*l);
         }
     }
     let max_var = reindexer.max_var().unwrap();
     let vm = VarManager::new(max_var, max_var);
-    (reindexer, Instance { cnf, objs, vm })
+    (reindexer, Instance { clauses, objs, vm })
 }

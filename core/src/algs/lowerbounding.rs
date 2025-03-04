@@ -166,7 +166,7 @@ where
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
-        Cls: IntoIterator<Item = Clause>,
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {

@@ -274,8 +274,7 @@ struct LogArgs {
 struct ProofArgs {
     /// The path to write the VeriPB proof to. If not provided, will not write a proof.
     proof_path: Option<PathBuf>,
-    /// The path to output the VeriPB input to. If not provided, will write to
-    /// `scuttle-veripb-input.opb`.
+    /// The path to output the VeriPB input to.
     ///
     /// VeriPB does not natively understand multi-objective input files, so Scuttle will write only
     /// the constraints to a separate OPB file for VeriPB to use as input, while the objectives are
@@ -442,7 +441,7 @@ pub struct Cli {
     color: concolor_clap::Color,
     logger_config: LoggerConfig,
     pub alg: Algorithm,
-    pub proof_paths: Option<(PathBuf, PathBuf)>,
+    pub proof_paths: Option<(PathBuf, Option<PathBuf>)>,
 }
 
 pub enum Algorithm {
@@ -515,16 +514,11 @@ impl Cli {
             store_cnf,
         };
         let proof_paths = |shared: &SharedArgs| {
-            shared.proof.proof_path.clone().map(|pp| {
-                (
-                    pp,
-                    shared
-                        .proof
-                        .veripb_input_path
-                        .clone()
-                        .unwrap_or(PathBuf::from("scuttle-veripb-input.opb")),
-                )
-            })
+            shared
+                .proof
+                .proof_path
+                .clone()
+                .map(|pp| (pp, shared.proof.veripb_input_path.clone()))
         };
         match CliArgs::parse().command {
             AlgorithmCommand::PMinimal { shared, cb } => {

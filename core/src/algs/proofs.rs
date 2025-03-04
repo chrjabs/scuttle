@@ -18,7 +18,7 @@ use pigeons::{
 };
 use rustsat::{
     encodings::{atomics, card::DbTotalizer, pb::DbGte, CollectCertClauses},
-    instances::{Cnf, ManageVars},
+    instances::ManageVars,
     solvers::Initialize,
     types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var, WLitIter},
 };
@@ -834,7 +834,7 @@ where
     ) -> anyhow::Result<Self>
     where
         ProofW: io::Write + 'static,
-        Cls: IntoIterator<Item = Clause>,
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
         Objs: IntoIterator<Item = (Obj, isize)>,
         Obj: WLitIter,
     {
@@ -849,9 +849,9 @@ where
         let mut oracle = OInit::init();
         let pt_handle = oracle.connect_proof_tracer(CadicalTracer::new(proof), true);
         oracle.reserve(var_manager.max_var().unwrap())?;
-        let clauses: Cnf = clauses.into_iter().collect();
+        let clauses: Vec<_> = clauses.into_iter().collect();
         let orig_cnf = if opts.store_cnf {
-            Some(clauses.clone())
+            Some(clauses.iter().map(|(cl, _)| cl.clone()).collect())
         } else {
             None
         };
@@ -859,12 +859,7 @@ where
 
         // Add clauses to solver
         let mut collector = CadicalCertCollector::new(&mut oracle, &pt_handle);
-        collector.extend_cert_clauses(
-            clauses
-                .into_iter()
-                .enumerate()
-                .map(|(idx, cl)| (cl, AbsConstraintId::new(idx + 1))),
-        )?;
+        collector.extend_cert_clauses(clauses)?;
 
         let objs: Vec<_> = objs
             .into_iter()

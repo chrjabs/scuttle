@@ -3,7 +3,7 @@ use std::{fs, io, thread};
 use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::{card, pb},
-    instances::{fio, ReindexVars},
+    instances::ReindexVars,
     solvers::{DefaultInitializer, Initialize},
     types::Assignment,
 };
@@ -140,40 +140,29 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
     let parsed = prepro::parse(cli.inst_path.clone(), cli.file_format, cli.opb_options)?;
 
     // MaxPre Preprocessing
-    let (prepro, inst) = if cli.preprocessing {
-        let (prepro, inst) = prepro::max_pre(parsed, &cli.maxpre_techniques, cli.maxpre_reindexing);
-        (Some(prepro), inst)
+    let (prepro, proof, inst) = if cli.preprocessing {
+        anyhow::ensure!(
+            cli.proof_paths.is_none(),
+            "proof logging not supported with MaxPre preprocessing"
+        );
+        let (prepro, inst) =
+            prepro::max_pre(parsed, &cli.maxpre_techniques, cli.maxpre_reindexing)?;
+        (Some(prepro), None, inst)
     } else {
-        (None, prepro::to_clausal(parsed))
+        let (proof, inst) = prepro::to_clausal(parsed, &cli.proof_paths)?;
+        (None, proof, inst)
     };
 
     // Reindexing
     let (inst, reindexer) = if cli.reindexing {
+        anyhow::ensure!(
+            cli.proof_paths.is_none(),
+            "proof logging not supported with reindexing"
+        );
         let (reind, inst) = prepro::reindexing(inst);
         (inst, Some(reind))
     } else {
         (inst, None)
-    };
-
-    let proof = if let Some((proof_path, veripb_input_path)) = &cli.proof_paths {
-        // Write constraints out for VeriPB
-        // FIXME: When receiving an OPB input file, we should certify the translation to CNF and
-        // simply strip the objectives for the VeriPB input
-        let mut writer = io::BufWriter::new(fs::File::create(veripb_input_path)?);
-        let iter = inst
-            .iter_clauses()
-            .map(|cl| fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
-        fio::opb::write_opb_lines(&mut writer, iter, fio::opb::Options::default())?;
-        // Initialize proof
-        Some(pigeons::Proof::new_with_conclusion(
-            io::BufWriter::new(fs::File::create(proof_path)?),
-            inst.n_clauses(),
-            false,
-            pigeons::OutputGuarantee::None,
-            &pigeons::Conclusion::<&str>::Unsat(Some(pigeons::ConstraintId::last(1))),
-        )?)
-    } else {
-        None
     };
 
     match cli.alg {
