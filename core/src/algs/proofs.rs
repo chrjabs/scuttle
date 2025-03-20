@@ -20,7 +20,7 @@ use rustsat::{
     encodings::{atomics, card::DbTotalizer, pb::DbGte, CollectCertClauses},
     instances::ManageVars,
     solvers::Initialize,
-    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var, WLitIter},
+    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var},
 };
 use rustsat_cadical::CaDiCaL;
 
@@ -36,18 +36,16 @@ pub trait InitCert: super::Init {
     type ProofWriter: io::Write;
 
     /// Initialization of the algorithm providing all optional input
-    fn new_cert<Cls, Objs, Obj>(
+    fn new_cert<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         proof: Proof<Self::ProofWriter>,
         block_clause_gen: <Self as super::Init>::BlockClauseGen,
     ) -> anyhow::Result<Self>
     where
-        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter;
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>;
 
     /// Initialization of the algorithm using an [`Instance`] rather than iterators
     fn from_instance_cert(
@@ -69,17 +67,15 @@ pub trait InitCert: super::Init {
 
 pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clause> {
     /// Initializes the algorithm with the default blocking clause generator
-    fn new_default_blocking_cert<Cls, Objs, Obj>(
+    fn new_default_blocking_cert<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         proof: Proof<Self::ProofWriter>,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
     {
         Self::new_cert(
             clauses,
@@ -126,6 +122,27 @@ pub struct ProofStuff<ProofW: io::Write> {
 pub enum Value {
     Identical(Lit),
     ObjAtLeast(usize, usize),
+}
+
+pub fn init_proof<W>(
+    writer: W,
+    n_constraints: usize,
+    objs: &[Objective],
+) -> io::Result<pigeons::Proof<W>>
+where
+    W: io::Write,
+{
+    let mut proof = pigeons::Proof::new_with_conclusion(
+        writer,
+        n_constraints,
+        false,
+        pigeons::OutputGuarantee::None,
+        &pigeons::Conclusion::<&str>::Unsat(Some(pigeons::ConstraintId::last(1))),
+    )?;
+    let order = crate::algs::proofs::objectives_as_order(&objs);
+    proof.define_order(&order)?;
+    proof.load_order(order.name(), order.used_vars())?;
+    Ok(proof)
 }
 
 fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<Var>>> {
@@ -824,9 +841,11 @@ where
     OInit: Initialize<rustsat_cadical::CaDiCaL<'term, 'learn>>,
     BCG: Fn(Assignment) -> Clause,
 {
-    pub fn new_cert<Cls, Objs, Obj>(
+    /// **NOTE**: the order must be already loaded in the proof, e.g., through calling
+    /// [`init_proof`]
+    pub fn new_cert<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         bcg: BCG,
         proof: Proof<ProofW>,
@@ -835,8 +854,6 @@ where
     where
         ProofW: io::Write + 'static,
         Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
     {
         use rustsat::{encodings::CollectCertClauses, solvers::Solve};
 
@@ -861,11 +878,6 @@ where
         let mut collector = CadicalCertCollector::new(&mut oracle, &pt_handle);
         collector.extend_cert_clauses(clauses)?;
 
-        let objs: Vec<_> = objs
-            .into_iter()
-            .enumerate()
-            .map(|(idx, (wlits, offset))| Objective::new(wlits, offset, idx))
-            .collect();
         stats.n_objs = objs.len();
         stats.n_real_objs = objs.iter().fold(0, |cnt, o| {
             if matches!(o, Objective::Constant { .. }) {
@@ -925,12 +937,6 @@ where
             use rustsat::solvers::Interrupt;
             oracle.interrupter()
         };
-
-        // Proof logging: write order to proof
-        let order = objectives_as_order(&objs);
-        let proof = oracle.proof_tracer_mut(&pt_handle).proof_mut();
-        proof.define_order(&order)?;
-        proof.load_order(order.name(), order.used_vars())?;
 
         Ok(Self {
             oracle,

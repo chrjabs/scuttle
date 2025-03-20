@@ -13,11 +13,11 @@ use rustsat::{
         pb::{self, default_encode_pb_constraint},
         CollectCertClauses, CollectClauses,
     },
-    instances::{fio, Cnf, ManageVars, MultiOptInstance, Objective, ReindexVars},
+    instances::{fio, Cnf, ManageVars, MultiOptInstance, Objective as RsObjective, ReindexVars},
     types::{constraints::PbConstraint, Clause, Lit, RsHashMap, Var},
 };
 
-use crate::types::{Instance, Parsed, Reindexer, VarManager};
+use crate::types::{Instance, Objective, Parsed, Reindexer, VarManager};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
@@ -173,18 +173,17 @@ pub fn max_pre(
     );
     prepro.preprocess(techniques, 0, 1e9);
     let (cnf, objs) = prepro.prepro_instance();
-    let objs: Vec<(Vec<_>, _)> = objs
+    let objs: Vec<_> = objs
         .into_iter()
-        .map(|(softs, offset)| {
-            (
-                softs
-                    .into_iter()
-                    .map(|(cl, w)| {
-                        debug_assert_eq!(cl.len(), 1);
-                        (!cl[0], w)
-                    })
-                    .collect(),
+        .enumerate()
+        .map(|(idx, (softs, offset))| {
+            Objective::new(
+                softs.into_iter().map(|(cl, w)| {
+                    debug_assert_eq!(cl.len(), 1);
+                    (!cl[0], w)
+                }),
                 offset,
+                idx,
             )
         })
         .collect();
@@ -243,7 +242,8 @@ pub fn to_clausal(
     // NOTE: soft clause to objective conversion is not certified
     let objs: Vec<_> = objs
         .into_iter()
-        .map(|o| process_objective(o, &mut constraints, &mut blits, &mut vm))
+        .enumerate()
+        .map(|(idx, o)| process_objective(o, idx, &mut constraints, &mut blits, &mut vm))
         .collect();
     let mut proof = None;
     // (certified) PB -> CNF conversion
@@ -266,13 +266,12 @@ pub fn to_clausal(
             fio::opb::write_opb_lines(&mut writer, iter, fio::opb::Options::default())?;
         }
 
-        let mut the_proof = pigeons::Proof::new_with_conclusion(
+        let mut the_proof = crate::algs::proofs::init_proof(
             io::BufWriter::new(fs::File::create(proof_path)?),
             n_constraints,
-            false,
-            pigeons::OutputGuarantee::None,
-            &pigeons::Conclusion::<&str>::Unsat(Some(pigeons::ConstraintId::last(1))),
+            &objs,
         )?;
+
         let mut id = pigeons::AbsConstraintId::new(1);
         for constr in constraints {
             let eq = matches!(constr, PbConstraint::Eq(_));
@@ -304,33 +303,34 @@ pub fn to_clausal(
 }
 
 fn process_objective<VM: ManageVars>(
-    obj: Objective,
+    obj: RsObjective,
+    idx: usize,
     constrs: &mut Vec<PbConstraint>,
     blits: &mut RsHashMap<Clause, Lit>,
     vm: &mut VM,
-) -> (Vec<(Lit, usize)>, isize) {
+) -> Objective {
     let (soft_cls, offset) = obj.into_soft_cls();
-    let mut soft_lits = Vec::new();
-    for (mut cl, w) in soft_cls.into_iter() {
-        debug_assert!(cl.len() > 0);
-        if cl.len() == 1 {
-            soft_lits.push((!cl[0], w));
-            continue;
-        }
-        if let Some(&blit) = blits.get(&cl) {
-            soft_lits.push((blit, w));
-            continue;
-        }
-        let blit = vm.new_var().pos_lit();
-        // Save blit in case same soft clause reappears
-        // TODO: find way to not have to clone the clause here
-        blits.insert(cl.clone(), blit);
-        soft_lits.push((blit, w));
-        // Relax clause and add it to the CNF
-        cl.add(blit);
-        constrs.push(cl.into());
-    }
-    (soft_lits, offset)
+    Objective::new(
+        soft_cls.into_iter().map(|(mut cl, w)| {
+            debug_assert!(cl.len() > 0);
+            if cl.len() == 1 {
+                return (!cl[0], w);
+            }
+            if let Some(&blit) = blits.get(&cl) {
+                return (blit, w);
+            }
+            let blit = vm.new_var().pos_lit();
+            // Save blit in case same soft clause reappears
+            // TODO: find way to not have to clone the clause here
+            blits.insert(cl.clone(), blit);
+            // Relax clause and add it to the CNF
+            cl.add(blit);
+            constrs.push(cl.into());
+            (blit, w)
+        }),
+        offset,
+        idx,
+    )
 }
 
 pub fn reindexing(inst: Instance) -> (Reindexer, Instance) {
@@ -341,10 +341,13 @@ pub fn reindexing(inst: Instance) -> (Reindexer, Instance) {
         ..
     } = inst;
     let mut reindexer = Reindexer::new(vm.max_orig_var());
-    for (softs, _) in &mut objs {
-        for (l, _) in softs {
-            *l = reindexer.reindex_lit(*l);
-        }
+    for obj in &mut objs {
+        let new_obj = Objective::new(
+            obj.iter().map(|(l, w)| (reindexer.reindex_lit(l), w)),
+            obj.offset(),
+            obj.idx(),
+        );
+        *obj = new_obj;
     }
     for (cl, _) in &mut clauses {
         for l in cl {

@@ -221,7 +221,7 @@ where
 
 /// Data regarding an objective
 #[derive(Debug, Clone)]
-pub(crate) enum Objective {
+pub enum Objective {
     Weighted {
         offset: isize,
         lits: RsHashMap<Lit, usize>,
@@ -367,7 +367,7 @@ impl Objective {
     }
 }
 
-pub(crate) enum ObjIter<'a> {
+pub enum ObjIter<'a> {
     Weighted(std::collections::hash_map::Iter<'a, Lit, usize>),
     Unweighted(std::slice::Iter<'a, Lit>),
     Constant,
@@ -829,7 +829,7 @@ pub struct Parsed {
 #[derive(Debug, Clone)]
 pub struct Instance {
     pub(crate) clauses: Vec<(Clause, Option<pigeons::AbsConstraintId>)>,
-    pub(crate) objs: Vec<(Vec<(Lit, usize)>, isize)>,
+    pub(crate) objs: Vec<Objective>,
     pub(crate) vm: VarManager,
 }
 

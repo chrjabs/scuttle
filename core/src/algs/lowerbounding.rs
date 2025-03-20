@@ -23,7 +23,7 @@ use rustsat::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Clause, Lit, Var, WLitIter},
+    types::{Assignment, Clause, Lit, Var},
 };
 use scuttle_proc::KernelFunctions;
 
@@ -122,17 +122,15 @@ where
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
-    fn new<Cls, Objs, Obj>(
+    fn new<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
     {
         let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, opts)?;
         Self::init(kernel)
@@ -157,9 +155,9 @@ where
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
-    fn new_cert<Cls, Objs, Obj>(
+    fn new_cert<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         proof: pigeons::Proof<Self::ProofWriter>,
@@ -167,8 +165,6 @@ where
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
     {
         let kernel = Kernel::new_cert(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
         Self::init(kernel)
