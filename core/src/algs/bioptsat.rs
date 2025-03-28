@@ -437,7 +437,7 @@ where
                         .proof_tracer_mut(&proof_stuff.pt_handle)
                         .proof_mut();
                     // derive cut that will be added
-                    let _cut_id = if inc_cost <= encodings[0].offset() {
+                    let cut_id = if inc_cost <= encodings[0].offset() {
                         pmin_cut_id
                     } else {
                         // global lower bound on increasing objective in proof
@@ -470,9 +470,13 @@ where
                     {
                         proof.equals(
                             &rustsat::clause![],
-                            Some(pigeons::ConstraintId::from(_cut_id)),
+                            Some(pigeons::ConstraintId::from(cut_id)),
                         )?;
                     }
+                    proof.update_default_conclusion::<Var>(
+                        pigeons::OutputGuarantee::None,
+                        &pigeons::Conclusion::Unsat(Some(ConstraintId::from(cut_id))),
+                    );
                 }
                 break;
             }
