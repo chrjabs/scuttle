@@ -13,9 +13,9 @@ use rustsat::{
     clause,
     encodings::{
         self, atomics,
-        card::{self, DbTotalizer},
-        pb::{self, DbGte},
-        CollectCertClauses,
+        card::{self, Totalizer},
+        cert::CollectClauses,
+        pb::{self, GeneralizedTotalizer},
     },
     instances::ManageVars,
     solvers::{
@@ -49,8 +49,8 @@ use super::{coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, O
 #[derive(KernelFunctions)]
 pub struct BiOptSat<
     O,
-    PBE = DbGte,
-    CE = DbTotalizer,
+    PBE = GeneralizedTotalizer,
+    CE = Totalizer,
     ProofW = io::BufWriter<fs::File>,
     OInit = DefaultInitializer,
     BCG = fn(Assignment) -> Clause,
@@ -66,7 +66,14 @@ pub struct BiOptSat<
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG> super::Solve
-    for BiOptSat<rustsat_cadical::CaDiCaL<'term, 'learn>, DbGte, DbTotalizer, ProofW, OInit, BCG>
+    for BiOptSat<
+        rustsat_cadical::CaDiCaL<'term, 'learn>,
+        GeneralizedTotalizer,
+        Totalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
 where
     BCG: Fn(Assignment) -> Clause,
     ProofW: io::Write + 'static,
@@ -239,7 +246,14 @@ where
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG>
-    BiOptSat<rustsat_cadical::CaDiCaL<'learn, 'term>, DbGte, DbTotalizer, ProofW, OInit, BCG>
+    BiOptSat<
+        rustsat_cadical::CaDiCaL<'learn, 'term>,
+        GeneralizedTotalizer,
+        Totalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
 where
     ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
@@ -345,7 +359,7 @@ where
     pub fn bioptsat<Lookup, Col>(
         &mut self,
         (inc_obj, dec_obj): (usize, usize),
-        encodings: &mut [ObjEncoding<DbGte, DbTotalizer>],
+        encodings: &mut [ObjEncoding<GeneralizedTotalizer, Totalizer>],
         base_assumps: &[Lit],
         starting_point: Option<(usize, Assignment)>,
         (inc_lb, dec_lb): (Option<usize>, Option<usize>),

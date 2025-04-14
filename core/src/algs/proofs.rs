@@ -17,7 +17,7 @@ use pigeons::{
     VarLike,
 };
 use rustsat::{
-    encodings::{atomics, card::DbTotalizer, pb::DbGte, CollectCertClauses},
+    encodings::{atomics, card::Totalizer, cert::CollectClauses, pb::GeneralizedTotalizer},
     instances::ManageVars,
     solvers::Initialize,
     types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var},
@@ -180,10 +180,7 @@ fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<V
 }
 
 pub fn certify_pmin_cut<ProofW>(
-    obj_encs: &[ObjEncoding<
-        rustsat::encodings::pb::DbGte,
-        rustsat::encodings::card::DbTotalizer,
-    >],
+    obj_encs: &[ObjEncoding<GeneralizedTotalizer, Totalizer>],
     objs: &[Objective],
     costs: &[usize],
     witness: &Assignment,
@@ -341,13 +338,16 @@ where
                     (None, Some(reform_id)) => {
                         // Cost is lower bound derived in core boosting
                         debug_assert!(*cst <= obj.lower_bound());
-                        Some(ProofGoal::new(
-                            ProofGoalId::specific(idx + 2),
-                            [Derivation::from(
-                                OperationSequence::from(ConstraintId::from(reform_id))
-                                    + ConstraintId::last(1),
-                            )],
-                        ))
+                        Some(
+                            ProofGoal::new(
+                                ProofGoalId::specific(idx + 2),
+                                [Derivation::from(
+                                    OperationSequence::from(ConstraintId::from(reform_id))
+                                        + ConstraintId::last(1),
+                                )],
+                            )
+                            .into(),
+                        )
                     }
                     (Some(lit), Some(def)) => {
                         // Prove that the witness dominates
@@ -359,13 +359,19 @@ where
                         }
                         conf_deriv *= obj.unit_weight();
                         conf_deriv += ConstraintId::last(2);
-                        Some(ProofGoal::new(
-                            ProofGoalId::specific(idx + 2),
-                            [
-                                Derivation::Rup(LbConstraint::clause([!lit]), vec![negation_id]),
-                                Derivation::from(conf_deriv),
-                            ],
-                        ))
+                        Some(
+                            ProofGoal::new(
+                                ProofGoalId::specific(idx + 2),
+                                [
+                                    Derivation::Rup(
+                                        LbConstraint::clause([!lit]),
+                                        vec![negation_id],
+                                    ),
+                                    Derivation::from(conf_deriv),
+                                ],
+                            )
+                            .into(),
+                        )
                     }
                     (_, None) => {
                         // Cost is trivial lower bound of objective or objective is trivial
@@ -407,7 +413,8 @@ where
                 Clause::default(),
                 vec![ConstraintId::last(1), cut_id.into()],
             )],
-        )],
+        )
+        .into()],
     )?;
 
     Ok(cut_id)
@@ -423,7 +430,7 @@ pub fn certify_assump_reification<ProofW>(
     oracle: &mut CaDiCaL<'_, '_>,
     proof_stuff: &mut ProofStuff<ProofW>,
     obj: &Objective,
-    enc: &ObjEncoding<DbGte, DbTotalizer>,
+    enc: &ObjEncoding<GeneralizedTotalizer, Totalizer>,
     value: usize,
     reif_lit: Lit,
     assumps: &[Lit],
@@ -557,7 +564,7 @@ pub fn linsu_certify_lower_bound<ProofW>(
     cost: usize,
     core: &[Lit],
     obj: &Objective,
-    encoding: &ObjEncoding<DbGte, DbTotalizer>,
+    encoding: &ObjEncoding<GeneralizedTotalizer, Totalizer>,
     proof_stuff: &mut ProofStuff<ProofW>,
     oracle: &mut rustsat_cadical::CaDiCaL<'_, '_>,
 ) -> io::Result<AbsConstraintId>
@@ -855,7 +862,7 @@ where
         ProofW: io::Write + 'static,
         Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
     {
-        use rustsat::{encodings::CollectCertClauses, solvers::Solve};
+        use rustsat::{encodings::cert::CollectClauses, solvers::Solve};
 
         let mut stats = Stats {
             n_objs: 0,
@@ -1046,8 +1053,8 @@ mod tests {
         let formatted = format!("{order}");
         let expected = r#"def_order pareto
   vars
-    left u_x1 u_x2 u_x4 u_x43 u_x5 u_x3
-    right v_x1 v_x2 v_x4 v_x43 v_x5 v_x3
+    left u_x1 u_x43 u_x4 u_x2 u_x5 u_x3
+    right v_x1 v_x43 v_x4 v_x2 v_x5 v_x3
     aux
   end
   def
@@ -1057,7 +1064,7 @@ mod tests {
   end
   transitivity
     vars
-      fresh_right w_x1 w_x2 w_x4 w_x43 w_x5 w_x3
+      fresh_right w_x1 w_x43 w_x4 w_x2 w_x5 w_x3
     end
     proof
       proofgoal #1

@@ -16,8 +16,8 @@ use rustsat::{
     clause,
     encodings::{
         self,
-        card::{self, DbTotalizer},
-        pb::{self, DbGte},
+        card::{self, Totalizer},
+        pb::{self, GeneralizedTotalizer},
     },
     solvers::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
@@ -51,8 +51,8 @@ use super::{coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, O
 #[derive(KernelFunctions)]
 pub struct LowerBounding<
     O,
-    PBE = DbGte,
-    CE = DbTotalizer,
+    PBE = GeneralizedTotalizer,
+    CE = Totalizer,
     ProofW = io::BufWriter<fs::File>,
     OInit = DefaultInitializer,
     BCG = fn(Assignment) -> Clause,
@@ -72,8 +72,8 @@ pub struct LowerBounding<
 impl<'learn, 'term, ProofW, OInit, BCG> super::Solve
     for LowerBounding<
         rustsat_cadical::CaDiCaL<'term, 'learn>,
-        DbGte,
-        DbTotalizer,
+        GeneralizedTotalizer,
+        Totalizer,
         ProofW,
         OInit,
         BCG,
@@ -106,8 +106,8 @@ where
 impl<'learn, 'term, ProofW, OInit, BCG> super::Init
     for LowerBounding<
         rustsat_cadical::CaDiCaL<'learn, 'term>,
-        DbGte,
-        DbTotalizer,
+        GeneralizedTotalizer,
+        Totalizer,
         ProofW,
         OInit,
         BCG,
@@ -140,8 +140,8 @@ where
 impl<'term, 'learn, ProofW, OInit, BCG> super::InitCert
     for LowerBounding<
         rustsat_cadical::CaDiCaL<'term, 'learn>,
-        DbGte,
-        DbTotalizer,
+        GeneralizedTotalizer,
+        Totalizer,
         ProofW,
         OInit,
         BCG,
@@ -250,7 +250,14 @@ where
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG>
-    LowerBounding<rustsat_cadical::CaDiCaL<'learn, 'term>, DbGte, DbTotalizer, ProofW, OInit, BCG>
+    LowerBounding<
+        rustsat_cadical::CaDiCaL<'learn, 'term>,
+        GeneralizedTotalizer,
+        Totalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
 where
     ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
@@ -414,7 +421,7 @@ where
         &mut self,
         fence: &mut Fence,
         core: Vec<Lit>,
-        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
+        obj_encs: &mut [ObjEncoding<GeneralizedTotalizer, Totalizer>],
     ) -> MaybeTerminatedError {
         let mut found = vec![false; fence.data.len()];
         'core: for clit in core {
@@ -458,7 +465,7 @@ where
     pub fn harvest<Col>(
         &mut self,
         fence: &Fence,
-        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
+        obj_encs: &mut [ObjEncoding<GeneralizedTotalizer, Totalizer>],
         base_assumps: &[Lit],
         collector: &mut Col,
     ) -> MaybeTerminatedError
@@ -499,7 +506,7 @@ where
             if let Some((block_lit, ids)) = block_switch {
                 if let Some(proof_stuff) = &mut self.proof_stuff {
                     use pigeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
-                    use rustsat::encodings::CollectCertClauses;
+                    use rustsat::encodings::cert::CollectClauses;
 
                     let (reified_cut, reified_assump_ids) = ids.unwrap();
                     let id = proofs::certify_pmin_cut(
@@ -525,7 +532,8 @@ where
                         [ProofGoal::new(
                             ProofGoalId::from(ConstraintId::from(reified_cut)),
                             [Derivation::Rup(clause![], hints.collect())],
-                        )],
+                        )
+                        .into()],
                     )?;
                     cadical_veripb_tracer::CadicalCertCollector::new(
                         &mut self.oracle,

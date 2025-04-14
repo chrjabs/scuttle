@@ -23,13 +23,18 @@ type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
 type PMin<OInit = CaDiCaLDefaultInit> =
-    PMinimal<Oracle, pb::DbGte, card::DbTotalizer, io::BufWriter<fs::File>, OInit>;
+    PMinimal<Oracle, pb::GeneralizedTotalizer, card::Totalizer, io::BufWriter<fs::File>, OInit>;
 /// BiOptSat Instantiation used
 type Bos<PBE, CE, OInit = CaDiCaLDefaultInit> =
     BiOptSat<Oracle, PBE, CE, io::BufWriter<fs::File>, OInit>;
 /// Lower-bounding instantiation used
-type Lb<OInit = CaDiCaLDefaultInit> =
-    LowerBounding<Oracle, pb::DbGte, card::DbTotalizer, io::BufWriter<fs::File>, OInit>;
+type Lb<OInit = CaDiCaLDefaultInit> = LowerBounding<
+    Oracle,
+    pb::GeneralizedTotalizer,
+    card::Totalizer,
+    io::BufWriter<fs::File>,
+    OInit,
+>;
 
 // TODO: this macro will potentially need a variant without core boosting
 macro_rules! run {
@@ -182,7 +187,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
                 PbEncoding::Gte => match card_enc {
                     CardEncoding::Tot => {
                         type BosEnc<OInit = DefaultInitializer> =
-                            Bos<pb::DbGte, card::DbTotalizer, OInit>;
+                            Bos<pb::GeneralizedTotalizer, card::Totalizer, OInit>;
                         dispatch_options!(
                             BosEnc, inst, proof, prepro, reindexer, opts, cb_opts, cli
                         )

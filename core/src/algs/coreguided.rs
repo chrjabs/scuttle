@@ -797,8 +797,8 @@ where
                     .comment(&format_args!("extending totalizer {root} to {oidx}"))?;
             }
             let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
-            let mut leafs = vec![rustsat::lit![0]; tot_db[root].n_leafs()];
-            tot_db
+            let mut leafs = vec![rustsat::lit![0]; tot_db[root].n_leaves()];
+            Ok(tot_db
                 .define_unweighted_cert(
                     root,
                     oidx,
@@ -808,7 +808,7 @@ where
                     unsafe { &mut *proof },
                     (&mut leafs, false, false),
                 )
-                .map(|(ol, _)| ol)
+                .map(|(ol, _)| ol)?)
         } else {
             Ok(tot_db.define_unweighted(
                 root,

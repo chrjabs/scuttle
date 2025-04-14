@@ -4,7 +4,7 @@ use std::io;
 
 use pigeons::{AbsConstraintId, Conclusion, ConstraintId, OutputGuarantee, Proof};
 use rustsat::{
-    encodings::{CollectCertClauses, CollectClauses},
+    encodings::{cert::CollectClauses as CollectCertClauses, CollectClauses},
     solvers::SolverResult,
     types::{Clause, Lit, RsHashSet, Var},
 };

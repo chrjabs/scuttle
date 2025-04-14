@@ -17,7 +17,7 @@ use anyhow::Context;
 use cadical_veripb_tracer::CadicalCertCollector;
 use maxpre::MaxPre;
 use rustsat::{
-    encodings::{card::DbTotalizer, pb::DbGte},
+    encodings::{card::Totalizer, pb::GeneralizedTotalizer},
     instances::{Cnf, ManageVars},
     solvers::{
         DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
@@ -756,7 +756,7 @@ where
     fn linsu_yield<Col>(
         &mut self,
         obj_idx: usize,
-        encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
+        encoding: &mut ObjEncoding<GeneralizedTotalizer, Totalizer>,
         base_assumps: &[Lit],
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
@@ -818,7 +818,7 @@ where
     fn linsu(
         &mut self,
         obj_idx: usize,
-        encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
+        encoding: &mut ObjEncoding<GeneralizedTotalizer, Totalizer>,
         base_assumps: &[Lit],
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
@@ -917,7 +917,7 @@ where
 
     fn extend_encoding(
         &mut self,
-        encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
+        encoding: &mut ObjEncoding<GeneralizedTotalizer, Totalizer>,
         range: Range<usize>,
     ) -> anyhow::Result<()> {
         if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {

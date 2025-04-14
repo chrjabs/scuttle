@@ -8,7 +8,7 @@ use std::{
 };
 
 use rustsat::{
-    encodings::{card, pb, totdb, CollectCertClauses, CollectClauses},
+    encodings::{card, cert::CollectClauses as CollectCertClauses, pb, totdb, CollectClauses},
     instances::{ManageVars, ReindexVars},
     types::{
         constraints::PbConstraint, Assignment, Clause, Lit, LitIter, RsHashMap, Var, WLitIter,
@@ -496,20 +496,20 @@ where
     }
 
     /// Enforces the given upper bound
-    pub fn enforce_ub(&self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::Error> {
+    pub fn enforce_ub(&self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::EnforceError> {
         match self {
             ObjEncoding::Weighted(enc, offset) => {
                 if ub >= *offset {
                     enc.enforce_ub(ub - *offset)
                 } else {
-                    Err(rustsat::encodings::Error::Unsat)
+                    Err(rustsat::encodings::EnforceError::Unsat)
                 }
             }
             ObjEncoding::Unweighted(enc, offset) => {
                 if ub >= *offset {
-                    enc.enforce_ub(ub - *offset)
+                    Ok(enc.enforce_ub(ub - *offset)?)
                 } else {
-                    Err(rustsat::encodings::Error::Unsat)
+                    Err(rustsat::encodings::EnforceError::Unsat)
                 }
             }
             ObjEncoding::Constant => Ok(vec![]),
@@ -592,7 +592,7 @@ where
     }
 }
 
-impl ObjEncoding<pb::DbGte, card::DbTotalizer> {
+impl ObjEncoding<pb::GeneralizedTotalizer, card::Totalizer> {
     pub fn output_proof_details(&self, value: usize) -> (Lit, totdb::cert::SemDefs) {
         match self {
             ObjEncoding::Weighted(enc, offset) => {

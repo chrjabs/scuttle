@@ -5,6 +5,9 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
     systems.url = "github:nix-systems/default-linux";
 
+    nix-config.url = "github:chrjabs/nix-config";
+    nix-config.inputs.nixpkgs.follows = "nixpkgs";
+
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -14,11 +17,12 @@
     nixpkgs,
     systems,
     rust-overlay,
+    nix-config,
   }: let
     lib = nixpkgs.lib;
     pkgsFor = lib.genAttrs (import systems) (system: (import nixpkgs {
       inherit system;
-      overlays = [(import rust-overlay)];
+      overlays = [(import rust-overlay)] ++ builtins.attrValues nix-config.overlays;
     }));
     forEachSystem = f: lib.genAttrs (import systems) (system: f pkgsFor.${system});
   in {
@@ -34,11 +38,13 @@
             cmake
             (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
             cargo-nextest
+            veripb
           ];
           buildInputs = libs;
           LIBCLANG_PATH = lib.makeLibraryPath [pkgs.llvmPackages_12.libclang.lib];
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath libs;
           PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig/";
+          VERIPB_CHECKER = lib.getExe pkgs.veripb;
         };
     });
 

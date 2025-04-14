@@ -10,8 +10,9 @@ use std::{
 use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::{
+        cert::CollectClauses as CollectCertClauses,
         pb::{self, default_encode_pb_constraint},
-        CollectCertClauses, CollectClauses,
+        CollectClauses,
     },
     instances::{fio, Cnf, ManageVars, MultiOptInstance, Objective as RsObjective, ReindexVars},
     types::{constraints::PbConstraint, Clause, Lit, RsHashMap, Var},
