@@ -40,61 +40,33 @@ macro_rules! none_if_zero {
 struct CliArgs {
     #[command(subcommand)]
     command: AlgorithmCommand,
-}
-
-#[derive(Subcommand)]
-enum AlgorithmCommand {
-    /// P-Minimal model enumeration - Soh et al. CP'17
-    PMinimal {
-        #[command(flatten)]
-        shared: SharedArgs,
-        #[command(flatten)]
-        cb: CoreBoostingArgs,
-    },
-    /// BiOptSat Linear Sat-Unsat - Jabs et al. SAT'22
-    Bioptsat {
-        #[command(flatten)]
-        shared: SharedArgs,
-        #[command(flatten)]
-        obj_encs: ObjEncArgs,
-        #[command(flatten)]
-        cb: CoreBoostingArgs,
-    },
-    /// Lower-bounding search - Cortes et al. TACAS'23
-    LowerBounding {
-        #[command(flatten)]
-        shared: SharedArgs,
-        #[command(flatten)]
-        cb: CoreBoostingArgs,
-        /// Log fence updates
-        #[arg(long)]
-        log_fence: bool,
-    },
-}
-
-#[derive(Args)]
-struct SharedArgs {
+    #[command(flatten)]
+    file: FileArgs,
+    #[command(flatten)]
+    proof: ProofArgs,
     /// Reserve variables for the encodings in advance
-    #[arg(long, default_value_t = Bool::from(KernelOptions::default().reserve_enc_vars))]
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().reserve_enc_vars), global = true)]
     reserve_encoding_vars: Bool,
     /// Use solution-guided search, aka phasing literals according to found solutions
-    #[arg(long, default_value_t = Bool::from(KernelOptions::default().solution_guided_search))]
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().solution_guided_search), global = true)]
     solution_guided_search: Bool,
     /// When to perform solution tightening
-    #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening)]
+    #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening, global = true)]
     solution_tightening: HeurImprWhen,
     /// Whether to perform core trimming in core-guided algorithms
-    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_trimming))]
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_trimming), global = true)]
     core_trimming: Bool,
     /// Whether to perform core trimming in core-guided algorithms
-    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_minimization))]
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_minimization), global = true)]
     core_minimization: Bool,
     /// Whether to perform core exhaustion in OLL
-    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_exhaustion))]
+    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_exhaustion), global = true)]
     core_exhaustion: Bool,
     /// The CaDiCaL profile to use
-    #[arg(long, default_value_t = CadicalConfig::Default)]
+    #[arg(long, default_value_t = CadicalConfig::Default, global = true)]
     cadical_config: CadicalConfig,
+    #[command(flatten)]
+    cb: CoreBoostingArgs,
     #[command(flatten)]
     enumeration: EnumArgs,
     #[command(flatten)]
@@ -102,14 +74,55 @@ struct SharedArgs {
     #[command(flatten)]
     limits: LimitArgs,
     #[command(flatten)]
-    file: FileArgs,
-    #[command(flatten)]
     log: LogArgs,
-    #[command(flatten)]
-    proof: ProofArgs,
+}
+
+impl CliArgs {
+    fn kernel_opts(&self, store_cnf: bool) -> KernelOptions {
+        KernelOptions {
+            enumeration: match self.enumeration.enumeration {
+                EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
+                EnumOptionsArg::Solutions => {
+                    EnumOptions::Solutions(none_if_zero!(self.enumeration.enumeration_limit))
+                }
+                EnumOptionsArg::ParetoMCS => {
+                    EnumOptions::PMCSs(none_if_zero!(self.enumeration.enumeration_limit))
+                }
+            },
+            reserve_enc_vars: self.reserve_encoding_vars.into(),
+            heuristic_improvements: HeurImprOptions {
+                solution_tightening: self.solution_tightening,
+            },
+            solution_guided_search: self.solution_guided_search.into(),
+            core_trimming: self.core_trimming.into(),
+            core_minimization: self.core_minimization.into(),
+            core_exhaustion: self.core_exhaustion.into(),
+            store_cnf,
+        }
+    }
+}
+
+#[derive(Subcommand, Copy, Clone)]
+enum AlgorithmCommand {
+    /// P-Minimal model enumeration - Soh et al. CP'17
+    PMinimal,
+    /// BiOptSat Linear Sat-Unsat - Jabs et al. SAT'22
+    Bioptsat {
+        #[command(flatten)]
+        obj_encs: ObjEncArgs,
+    },
+    /// Lower-bounding search - Cortes et al. TACAS'23
+    LowerBounding {
+        /// Log fence updates
+        #[arg(long)]
+        log_fence: bool,
+    },
 }
 
 #[derive(Args)]
+struct SharedArgs {}
+
+#[derive(Args, Copy, Clone)]
 struct ObjEncArgs {
     /// The encoding to use for weighted objectives
     #[arg(long, default_value_t = PbEncoding::default())]
@@ -119,7 +132,8 @@ struct ObjEncArgs {
     obj_card_encoding: CardEncoding,
 }
 
-#[derive(Args)]
+#[derive(Args, Copy, Clone)]
+#[command(next_help_heading = "Core-boosting options")]
 struct CoreBoostingArgs {
     /// Whether to perform core boosting before running the algorithm
     #[arg(long, default_value_t = Bool::True)]
@@ -157,50 +171,53 @@ impl CoreBoostingArgs {
     }
 }
 
-#[derive(Args)]
+#[derive(Args, Copy, Clone)]
+#[command(next_help_heading = "Enumeration options")]
 struct EnumArgs {
     /// The type of enumeration to perform at each non-dominated point
-    #[arg(long, default_value_t = EnumOptionsArg::NoEnum)]
+    #[arg(long, default_value_t = EnumOptionsArg::NoEnum, global = true)]
     enumeration: EnumOptionsArg,
     /// The limit for enumeration at each non-dominated point (0 for no limit)
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, global = true)]
     enumeration_limit: usize,
 }
 
 #[derive(Args)]
+#[command(next_help_heading = "Preprocessing options")]
 struct PreproArgs {
     /// Reindex the variables in the instance before solving
-    #[arg(long, default_value_t = Bool::from(false))]
+    #[arg(long, default_value_t = Bool::from(false), global = true)]
     reindexing: Bool,
     /// Preprocess the instance with MaxPre before solving
-    #[arg(long, default_value_t = Bool::from(false))]
+    #[arg(long, default_value_t = Bool::from(false), global = true)]
     preprocessing: Bool,
     /// The preprocessing technique string to use
-    #[arg(long, default_value_t = String::from("[[uvsrgc]VRTG]"))]
+    #[arg(long, default_value_t = String::from("[[uvsrgc]VRTG]"), global = true)]
     maxpre_techniques: String,
     /// Reindex the variables in MaxPre
-    #[arg(long, default_value_t = Bool::from(false))]
+    #[arg(long, default_value_t = Bool::from(false), global = true)]
     maxpre_reindexing: Bool,
 }
 
-#[derive(Args)]
+#[derive(Args, Copy, Clone)]
+#[command(next_help_heading = "Solver limits")]
 struct LimitArgs {
     /// Limit the number of non-dominated points to enumerate (0 is no limit)
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, global = true)]
     pp_limit: usize,
     /// Limit the number of solutions to enumerate (0 is no limit)
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, global = true)]
     sol_limit: usize,
     /// Limit the number of candidates to consider (0 is not limit)
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, global = true)]
     candidate_limit: usize,
     /// Limit the number of SAT oracle calls (0 is not limit)
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, global = true)]
     oracle_call_limit: usize,
 }
 
-impl From<&LimitArgs> for Limits {
-    fn from(value: &LimitArgs) -> Self {
+impl From<LimitArgs> for Limits {
+    fn from(value: LimitArgs) -> Self {
         Limits {
             pps: none_if_zero!(value.pp_limit),
             sols: none_if_zero!(value.sol_limit),
@@ -214,76 +231,65 @@ impl From<&LimitArgs> for Limits {
 struct FileArgs {
     /// The file format of the input file. With infer, the file format is
     /// inferred from the file extension.
-    #[arg(long, value_enum, default_value_t = FileFormat::Infer)]
+    #[arg(long, value_enum, default_value_t = FileFormat::Infer, global=true)]
     file_format: FileFormat,
     /// The index in the OPB file to treat as the lowest variable
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, global = true)]
     first_var_idx: u32,
     /// The path to the instance file to load. Compressed files with an
     /// extension like `.bz2` or `.gz` can be read.
     inst_path: PathBuf,
 }
 
-#[derive(Args)]
+#[derive(Args, Copy, Clone)]
+#[command(next_help_heading = "Printing options")]
 struct LogArgs {
     #[command(flatten)]
     color: concolor_clap::Color,
     /// Print the solver configuration
-    #[arg(long)]
+    #[arg(long, global = true)]
     print_solver_config: bool,
     /// Print solutions as binary assignments
-    #[arg(long)]
+    #[arg(long, global = true)]
     print_solutions: bool,
     /// Don't print statistics
-    #[arg(long)]
+    #[arg(long, global = true)]
     no_print_stats: bool,
     /// Verbosity of the solver output
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(short, long, default_value_t = 0, global = true)]
     verbosity: u8,
     /// Log candidates along the search trace
-    #[arg(long)]
+    #[arg(long, global = true)]
     log_candidates: bool,
     /// Log found solutions as they are discovered
-    #[arg(long)]
+    #[arg(long, global = true)]
     log_solutions: bool,
     /// Log non-dominated points as they are discovered
-    #[arg(long)]
+    #[arg(long, global = true)]
     log_non_dom: bool,
     /// Log SAT oracle calls
-    #[arg(long)]
+    #[arg(long, global = true)]
     log_oracle_calls: bool,
     /// Log heuristic objective improvement
     #[cfg(feature = "sol-tightening")]
-    #[arg(long)]
+    #[arg(long, global = true)]
     log_heuristic_obj_improvement: bool,
     /// Log extracted cores
-    #[arg(long)]
+    #[arg(long, global = true)]
     log_cores: bool,
     /// Log routine starts and ends till a given depth
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, global = true)]
     log_routines: usize,
     /// Log ideal and nadir points
-    #[arg(long)]
+    #[arg(long, global = true)]
     log_bound_points: bool,
     /// Log inprocessing
-    #[arg(long)]
+    #[arg(long, global = true)]
     log_inprocessing: bool,
 }
 
-#[derive(Args)]
-struct ProofArgs {
-    /// The path to write the VeriPB proof to. If not provided, will not write a proof.
-    proof_path: Option<PathBuf>,
-    /// The path to output the VeriPB input to.
-    ///
-    /// VeriPB does not natively understand multi-objective input files, so Scuttle will write only
-    /// the constraints to a separate OPB file for VeriPB to use as input, while the objectives are
-    /// written to the proof as an order.
-    veripb_input_path: Option<PathBuf>,
-}
-
-impl From<&LogArgs> for LoggerConfig {
-    fn from(value: &LogArgs) -> Self {
+impl From<LogArgs> for LoggerConfig {
+    fn from(value: LogArgs) -> Self {
         LoggerConfig {
             log_candidates: value.log_candidates || value.verbosity >= 2,
             log_solutions: value.log_solutions,
@@ -298,6 +304,24 @@ impl From<&LogArgs> for LoggerConfig {
             log_cores: value.log_cores || value.verbosity >= 2,
             log_inpro: value.log_inprocessing || value.verbosity >= 1,
         }
+    }
+}
+
+#[derive(Args)]
+struct ProofArgs {
+    /// The path to write the VeriPB proof to. If not provided, will not write a proof.
+    proof_path: Option<PathBuf>,
+    /// The path to output the VeriPB input to.
+    ///
+    /// VeriPB does not natively understand multi-objective input files, so Scuttle will write only
+    /// the constraints to a separate OPB file for VeriPB to use as input, while the objectives are
+    /// written to the proof as an order.
+    veripb_input_path: Option<PathBuf>,
+}
+
+impl ProofArgs {
+    fn proof_paths(self) -> Option<(PathBuf, Option<PathBuf>)> {
+        self.proof_path.map(|pp| (pp, self.veripb_input_path))
     }
 }
 
@@ -493,90 +517,62 @@ impl Cli {
                 }
             })
         };
-        let kernel_opts = |shared: SharedArgs, store_cnf: bool| KernelOptions {
-            enumeration: match shared.enumeration.enumeration {
-                EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
-                EnumOptionsArg::Solutions => {
-                    EnumOptions::Solutions(none_if_zero!(shared.enumeration.enumeration_limit))
-                }
-                EnumOptionsArg::ParetoMCS => {
-                    EnumOptions::PMCSs(none_if_zero!(shared.enumeration.enumeration_limit))
-                }
-            },
-            reserve_enc_vars: shared.reserve_encoding_vars.into(),
-            heuristic_improvements: HeurImprOptions {
-                solution_tightening: shared.solution_tightening,
-            },
-            solution_guided_search: shared.solution_guided_search.into(),
-            core_trimming: shared.core_trimming.into(),
-            core_minimization: shared.core_minimization.into(),
-            core_exhaustion: shared.core_exhaustion.into(),
-            store_cnf,
-        };
-        let proof_paths = |shared: &SharedArgs| {
-            shared
-                .proof
-                .proof_path
-                .clone()
-                .map(|pp| (pp, shared.proof.veripb_input_path.clone()))
-        };
-        match CliArgs::parse().command {
-            AlgorithmCommand::PMinimal { shared, cb } => {
-                let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
-                let proof_paths = proof_paths(&shared);
+        let args = CliArgs::parse();
+        match args.command {
+            AlgorithmCommand::PMinimal => {
+                let (cb, store_cnf) = args.cb.parse(args.prepro.maxpre_techniques.clone());
+                let kernel_opts = args.kernel_opts(store_cnf);
+                let proof_paths = args.proof.proof_paths();
                 Cli {
-                    limits: (&shared.limits).into(),
-                    file_format: shared.file.file_format,
+                    limits: args.limits.into(),
+                    file_format: args.file.file_format,
                     opb_options: fio::opb::Options {
-                        first_var_idx: shared.file.first_var_idx,
+                        first_var_idx: args.file.first_var_idx,
                         ..Default::default()
                     },
-                    inst_path: shared.file.inst_path.clone(),
-                    preprocessing: shared.prepro.preprocessing.into(),
-                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                    reindexing: shared.prepro.reindexing.into(),
-                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                    cadical_config: shared.cadical_config.into(),
-                    stdout: stdout(shared.log.color),
-                    stderr: stderr(shared.log.color),
-                    print_solver_config: shared.log.print_solver_config,
-                    print_solutions: shared.log.print_solutions,
-                    print_stats: !shared.log.no_print_stats,
-                    color: shared.log.color,
-                    logger_config: (&shared.log).into(),
-                    alg: Algorithm::PMinimal(kernel_opts(shared, store_cnf), cb),
+                    inst_path: args.file.inst_path.clone(),
+                    preprocessing: args.prepro.preprocessing.into(),
+                    maxpre_techniques: args.prepro.maxpre_techniques.clone(),
+                    reindexing: args.prepro.reindexing.into(),
+                    maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
+                    cadical_config: args.cadical_config.into(),
+                    stdout: stdout(args.log.color),
+                    stderr: stderr(args.log.color),
+                    print_solver_config: args.log.print_solver_config,
+                    print_solutions: args.log.print_solutions,
+                    print_stats: !args.log.no_print_stats,
+                    color: args.log.color,
+                    logger_config: args.log.into(),
+                    alg: Algorithm::PMinimal(kernel_opts, cb),
                     proof_paths,
                 }
             }
-            AlgorithmCommand::Bioptsat {
-                shared,
-                obj_encs,
-                cb,
-            } => {
-                let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
-                let proof_paths = proof_paths(&shared);
+            AlgorithmCommand::Bioptsat { obj_encs } => {
+                let (cb, store_cnf) = args.cb.parse(args.prepro.maxpre_techniques.clone());
+                let kernel_opts = args.kernel_opts(store_cnf);
+                let proof_paths = args.proof.proof_paths();
                 Cli {
-                    limits: (&shared.limits).into(),
-                    file_format: shared.file.file_format,
+                    limits: args.limits.into(),
+                    file_format: args.file.file_format,
                     opb_options: fio::opb::Options {
-                        first_var_idx: shared.file.first_var_idx,
+                        first_var_idx: args.file.first_var_idx,
                         ..Default::default()
                     },
-                    inst_path: shared.file.inst_path.clone(),
-                    preprocessing: shared.prepro.preprocessing.into(),
-                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                    reindexing: shared.prepro.reindexing.into(),
-                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                    cadical_config: shared.cadical_config.into(),
-                    stdout: stdout(shared.log.color),
-                    stderr: stderr(shared.log.color),
-                    print_solver_config: shared.log.print_solver_config,
-                    print_solutions: shared.log.print_solutions,
-                    print_stats: !shared.log.no_print_stats,
-                    color: shared.log.color,
-                    logger_config: (&shared.log).into(),
+                    inst_path: args.file.inst_path.clone(),
+                    preprocessing: args.prepro.preprocessing.into(),
+                    maxpre_techniques: args.prepro.maxpre_techniques.clone(),
+                    reindexing: args.prepro.reindexing.into(),
+                    maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
+                    cadical_config: args.cadical_config.into(),
+                    stdout: stdout(args.log.color),
+                    stderr: stderr(args.log.color),
+                    print_solver_config: args.log.print_solver_config,
+                    print_solutions: args.log.print_solutions,
+                    print_stats: !args.log.no_print_stats,
+                    color: args.log.color,
+                    logger_config: args.log.into(),
                     alg: Algorithm::BiOptSat(
-                        kernel_opts(shared, store_cnf),
+                        kernel_opts,
                         obj_encs.obj_pb_encoding,
                         obj_encs.obj_card_encoding,
                         cb,
@@ -584,37 +580,34 @@ impl Cli {
                     proof_paths,
                 }
             }
-            AlgorithmCommand::LowerBounding {
-                shared,
-                log_fence,
-                cb,
-            } => {
-                let (cb, store_cnf) = cb.parse(shared.prepro.maxpre_techniques.clone());
-                let proof_paths = proof_paths(&shared);
+            AlgorithmCommand::LowerBounding { log_fence } => {
+                let (cb, store_cnf) = args.cb.parse(args.prepro.maxpre_techniques.clone());
+                let kernel_opts = args.kernel_opts(store_cnf);
+                let proof_paths = args.proof.proof_paths();
                 Cli {
-                    limits: (&shared.limits).into(),
-                    file_format: shared.file.file_format,
+                    limits: args.limits.into(),
+                    file_format: args.file.file_format,
                     opb_options: fio::opb::Options {
-                        first_var_idx: shared.file.first_var_idx,
+                        first_var_idx: args.file.first_var_idx,
                         ..Default::default()
                     },
-                    inst_path: shared.file.inst_path.clone(),
-                    preprocessing: shared.prepro.preprocessing.into(),
-                    maxpre_techniques: shared.prepro.maxpre_techniques.clone(),
-                    reindexing: shared.prepro.reindexing.into(),
-                    maxpre_reindexing: shared.prepro.maxpre_reindexing.into(),
-                    cadical_config: shared.cadical_config.into(),
-                    stdout: stdout(shared.log.color),
-                    stderr: stderr(shared.log.color),
-                    print_solver_config: shared.log.print_solver_config,
-                    print_solutions: shared.log.print_solutions,
-                    print_stats: !shared.log.no_print_stats,
-                    color: shared.log.color,
+                    inst_path: args.file.inst_path.clone(),
+                    preprocessing: args.prepro.preprocessing.into(),
+                    maxpre_techniques: args.prepro.maxpre_techniques.clone(),
+                    reindexing: args.prepro.reindexing.into(),
+                    maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
+                    cadical_config: args.cadical_config.into(),
+                    stdout: stdout(args.log.color),
+                    stderr: stderr(args.log.color),
+                    print_solver_config: args.log.print_solver_config,
+                    print_solutions: args.log.print_solutions,
+                    print_stats: !args.log.no_print_stats,
+                    color: args.log.color,
                     logger_config: LoggerConfig {
-                        log_fence: log_fence || shared.log.verbosity >= 2,
-                        ..(&shared.log).into()
+                        log_fence: log_fence || args.log.verbosity >= 2,
+                        ..args.log.into()
                     },
-                    alg: Algorithm::LowerBounding(kernel_opts(shared, store_cnf), cb),
+                    alg: Algorithm::LowerBounding(kernel_opts, cb),
                     proof_paths,
                 }
             }
