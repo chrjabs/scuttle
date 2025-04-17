@@ -1,2 +1,3 @@
 [env]
-CADICAL_PATCHES = { value = "patches/0001-perf-disable-finalize.patch", relative = true }
+# Both issues fixed in CaDiCaL v2.1.1
+# CADICAL_PATCHES = { value = "patches/0001-perf-disable-finalize.patch", relative = true }

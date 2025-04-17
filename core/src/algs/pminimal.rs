@@ -18,20 +18,20 @@
 use std::{fs, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;
-use pidgeons::{AbsConstraintId, ConstraintId};
+use pigeons::{AbsConstraintId, ConstraintId};
 use rustsat::{
     clause,
     encodings::{
         self, atomics,
-        card::{self, DbTotalizer},
-        pb::{self, DbGte},
+        card::{self, Totalizer},
+        pb::{self, GeneralizedTotalizer},
     },
     instances::ManageVars,
     solvers::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Clause, Lit, Var, WLitIter},
+    types::{Assignment, Clause, Lit, Var},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
@@ -59,8 +59,8 @@ use super::{coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, O
 #[derive(KernelFunctions)]
 pub struct PMinimal<
     O,
-    PBE = DbGte,
-    CE = DbTotalizer,
+    PBE = GeneralizedTotalizer,
+    CE = Totalizer,
     ProofW = io::BufWriter<fs::File>,
     OInit = DefaultInitializer,
     BCG = fn(Assignment) -> Clause,
@@ -76,7 +76,14 @@ pub struct PMinimal<
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG> super::Solve
-    for PMinimal<rustsat_cadical::CaDiCaL<'term, 'learn>, DbGte, DbTotalizer, ProofW, OInit, BCG>
+    for PMinimal<
+        rustsat_cadical::CaDiCaL<'term, 'learn>,
+        GeneralizedTotalizer,
+        Totalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
 where
     BCG: Fn(Assignment) -> Clause,
     ProofW: io::Write + 'static,
@@ -117,17 +124,15 @@ where
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
-    fn new<Cls, Objs, Obj>(
+    fn new<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
     {
         let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, opts)?;
         Ok(Self::init(kernel))
@@ -147,18 +152,16 @@ where
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
-    fn new_cert<Cls, Objs, Obj>(
+    fn new_cert<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: pidgeons::Proof<Self::ProofWriter>,
+        proof: pigeons::Proof<Self::ProofWriter>,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
-        Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
     {
         let kernel = Kernel::new_cert(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
         Ok(Self::init(kernel))
@@ -241,7 +244,14 @@ where
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG>
-    PMinimal<rustsat_cadical::CaDiCaL<'learn, 'term>, DbGte, DbTotalizer, ProofW, OInit, BCG>
+    PMinimal<
+        rustsat_cadical::CaDiCaL<'learn, 'term>,
+        GeneralizedTotalizer,
+        Totalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
 where
     BCG: Fn(Assignment) -> Clause,
     ProofW: io::Write + 'static,
@@ -288,8 +298,8 @@ where
             // Block last Pareto point, if temporarily blocked
             if let Some((block_lit, ids)) = block_switch {
                 if let Some(proof_stuff) = &mut self.kernel.proof_stuff {
-                    use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
-                    use rustsat::encodings::CollectCertClauses;
+                    use pigeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
+                    use rustsat::encodings::cert::CollectClauses;
 
                     let (reified_cut, reified_assump_ids) = ids.unwrap();
                     let id = proofs::certify_pmin_cut(
@@ -316,7 +326,8 @@ where
                         [ProofGoal::new(
                             ProofGoalId::from(ConstraintId::from(reified_cut)),
                             [Derivation::Rup(clause![], hints.collect())],
-                        )],
+                        )
+                        .into()],
                     )?;
                     cadical_veripb_tracer::CadicalCertCollector::new(
                         &mut self.kernel.oracle,
@@ -405,7 +416,7 @@ where
         mut costs: Vec<usize>,
         mut solution: Assignment,
         base_assumps: &[Lit],
-        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
+        obj_encs: &mut [ObjEncoding<GeneralizedTotalizer, Totalizer>],
     ) -> MaybeTerminatedError<(
         Vec<usize>,
         Assignment,
@@ -436,7 +447,7 @@ where
                 let (block_clause, reification_ids) =
                     self.dominated_block_clause(&costs, obj_encs)?;
                 if let Some(proof_stuff) = &mut self.proof_stuff {
-                    use rustsat::encodings::CollectCertClauses;
+                    use rustsat::encodings::cert::CollectClauses;
 
                     // this adds the "ideal cut"
                     let cut_id = proofs::certify_pmin_cut(
@@ -473,8 +484,8 @@ where
                 // Permanently block last cadidate
                 if let Some((block_lit, ids)) = block_switch {
                     if let Some(proof_stuff) = &mut self.proof_stuff {
-                        use pidgeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
-                        use rustsat::encodings::CollectCertClauses;
+                        use pigeons::{ConstraintId, Derivation, ProofGoal, ProofGoalId};
+                        use rustsat::encodings::cert::CollectClauses;
 
                         let (reified_cut, reified_assump_ids) = ids.unwrap();
                         let id = proofs::certify_pmin_cut(
@@ -500,7 +511,8 @@ where
                             [ProofGoal::new(
                                 ProofGoalId::from(ConstraintId::from(reified_cut)),
                                 [Derivation::Rup(clause![], hints.collect())],
-                            )],
+                            )
+                            .into()],
                         )?;
                         cadical_veripb_tracer::CadicalCertCollector::new(
                             &mut self.oracle,
@@ -555,7 +567,7 @@ where
     pub fn enforce_dominating<'a>(
         &'a mut self,
         costs: &'a [usize],
-        obj_encs: &'a mut [ObjEncoding<DbGte, DbTotalizer>],
+        obj_encs: &'a mut [ObjEncoding<GeneralizedTotalizer, Totalizer>],
     ) -> anyhow::Result<impl Iterator<Item = Lit> + 'a> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
@@ -596,7 +608,7 @@ where
     pub fn dominated_block_clause(
         &mut self,
         costs: &[usize],
-        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
+        obj_encs: &mut [ObjEncoding<GeneralizedTotalizer, Totalizer>],
     ) -> anyhow::Result<(Clause, Vec<AbsConstraintId>)> {
         debug_assert_eq!(costs.len(), obj_encs.len());
         let mut reification_ids = Vec::new();
@@ -646,9 +658,9 @@ where
     pub fn tmp_block_dominated(
         &mut self,
         costs: &[usize],
-        obj_encs: &mut [ObjEncoding<DbGte, DbTotalizer>],
+        obj_encs: &mut [ObjEncoding<GeneralizedTotalizer, Totalizer>],
     ) -> anyhow::Result<(Lit, Option<(AbsConstraintId, Vec<AbsConstraintId>)>)> {
-        use pidgeons::VarLike;
+        use pigeons::VarLike;
 
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         let (mut clause, reification_ids) = self.dominated_block_clause(costs, obj_encs)?;

@@ -17,12 +17,12 @@ use anyhow::Context;
 use cadical_veripb_tracer::CadicalCertCollector;
 use maxpre::MaxPre;
 use rustsat::{
-    encodings::{card::DbTotalizer, pb::DbGte},
+    encodings::{card::Totalizer, pb::GeneralizedTotalizer},
     instances::{Cnf, ManageVars},
     solvers::{
         DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
     },
-    types::{Assignment, Clause, Lit, TernaryVal, WLitIter},
+    types::{Assignment, Clause, Lit, TernaryVal},
 };
 use scuttle_proc::oracle_bounds;
 
@@ -43,7 +43,7 @@ pub mod pminimal;
 
 mod coreboosting;
 mod coreguided;
-mod proofs;
+pub(crate) mod proofs;
 pub use proofs::{InitCert, InitCertDefaultBlock};
 
 /// Trait for initializing algorithms
@@ -52,17 +52,15 @@ pub trait Init: Sized {
     type BlockClauseGen: Fn(Assignment) -> Clause;
 
     /// Initialization of the algorithm providing all optional input
-    fn new<Cls, Objs, Obj>(
+    fn new<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         block_clause_gen: Self::BlockClauseGen,
     ) -> anyhow::Result<Self>
     where
-        Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter;
+        Cls: IntoIterator<Item = Clause>;
 
     /// Initialization of the algorithm using an [`Instance`] rather than iterators
     fn from_instance(
@@ -70,22 +68,26 @@ pub trait Init: Sized {
         opts: KernelOptions,
         block_clause_gen: Self::BlockClauseGen,
     ) -> anyhow::Result<Self> {
-        Self::new(inst.cnf, inst.objs, inst.vm, opts, block_clause_gen)
+        Self::new(
+            inst.clauses.into_iter().map(|(cl, _)| cl),
+            inst.objs,
+            inst.vm,
+            opts,
+            block_clause_gen,
+        )
     }
 }
 
 pub trait InitDefaultBlock: Init<BlockClauseGen = fn(Assignment) -> Clause> {
     /// Initializes the algorithm with the default blocking clause generator
-    fn new_default_blocking<Cls, Objs, Obj>(
+    fn new_default_blocking<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
     {
         Self::new(clauses, objs, var_manager, opts, default_blocking_clause)
     }
@@ -93,7 +95,13 @@ pub trait InitDefaultBlock: Init<BlockClauseGen = fn(Assignment) -> Clause> {
     /// Initializes the algorithm using an [`Instance`] rather than iterators with the default
     /// blocking clause generator
     fn from_instance_default_blocking(inst: Instance, opts: KernelOptions) -> anyhow::Result<Self> {
-        Self::new(inst.cnf, inst.objs, inst.vm, opts, default_blocking_clause)
+        Self::new(
+            inst.clauses.into_iter().map(|(cl, _)| cl),
+            inst.objs,
+            inst.vm,
+            opts,
+            default_blocking_clause,
+        )
     }
 }
 
@@ -207,17 +215,15 @@ where
     OInit: Initialize<O>,
     BCG: Fn(Assignment) -> Clause,
 {
-    pub fn new<Cls, Objs, Obj>(
+    pub fn new<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         bcg: BCG,
         opts: KernelOptions,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
     {
         let mut stats = Stats {
             n_objs: 0,
@@ -239,11 +245,6 @@ where
             }
             None
         };
-        let objs: Vec<_> = objs
-            .into_iter()
-            .enumerate()
-            .map(|(idx, (wlits, offset))| Objective::new(wlits, offset, idx))
-            .collect();
         stats.n_objs = objs.len();
         stats.n_real_objs = objs.iter().fold(0, |cnt, o| {
             if matches!(o, Objective::Constant { .. }) {
@@ -755,12 +756,12 @@ where
     fn linsu_yield<Col>(
         &mut self,
         obj_idx: usize,
-        encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
+        encoding: &mut ObjEncoding<GeneralizedTotalizer, Totalizer>,
         base_assumps: &[Lit],
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
         collector: &mut Col,
-    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pidgeons::AbsConstraintId>)>>
+    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pigeons::AbsConstraintId>)>>
     where
         Col: Extend<NonDomPoint>,
     {
@@ -817,11 +818,11 @@ where
     fn linsu(
         &mut self,
         obj_idx: usize,
-        encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
+        encoding: &mut ObjEncoding<GeneralizedTotalizer, Totalizer>,
         base_assumps: &[Lit],
         upper_bound: Option<(usize, Option<Assignment>)>,
         lower_bound: Option<usize>,
-    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pidgeons::AbsConstraintId>)>> {
+    ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pigeons::AbsConstraintId>)>> {
         use rustsat::solvers::Solve;
 
         self.log_routine_start("linsu")?;
@@ -916,7 +917,7 @@ where
 
     fn extend_encoding(
         &mut self,
-        encoding: &mut ObjEncoding<DbGte, DbTotalizer>,
+        encoding: &mut ObjEncoding<GeneralizedTotalizer, Totalizer>,
         range: Range<usize>,
     ) -> anyhow::Result<()> {
         if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {

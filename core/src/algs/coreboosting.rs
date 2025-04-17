@@ -6,9 +6,9 @@ use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     clause,
     encodings::{
-        card::{self, DbTotalizer},
+        card::{self, Totalizer},
         nodedb::{NodeById, NodeCon, NodeId, NodeLike},
-        pb::{self, DbGte},
+        pb::{self, GeneralizedTotalizer},
         totdb::{Db as TotDb, Node, Semantics},
     },
     instances::ManageVars,
@@ -49,9 +49,9 @@ pub(super) trait MergeOllRef {
     ) -> ObjEncoding<Self::PBE, Self::CE>;
 }
 
-impl MergeOllRef for (DbGte, DbTotalizer) {
-    type PBE = DbGte;
-    type CE = DbTotalizer;
+impl MergeOllRef for (GeneralizedTotalizer, Totalizer) {
+    type PBE = GeneralizedTotalizer;
+    type CE = Totalizer;
 
     fn merge_cons(
         mut cons: Vec<NodeCon>,
@@ -63,17 +63,23 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
         if root.multiplier() == 1 {
             match &tot_db[root.id] {
                 Node::Leaf(_) | Node::Unit(_) => ObjEncoding::Unweighted(
-                    DbTotalizer::from_raw(root.id, root.offset(), tot_db),
+                    Totalizer::from_raw(root.id, root.offset(), tot_db),
                     offset,
                 ),
                 Node::General(_) => {
                     debug_assert!(root.offset() == 0);
-                    ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
+                    ObjEncoding::Weighted(
+                        GeneralizedTotalizer::from_raw(root, tot_db, max_leaf_weight),
+                        offset,
+                    )
                 }
                 Node::Dummy => unreachable!(),
             }
         } else {
-            ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
+            ObjEncoding::Weighted(
+                GeneralizedTotalizer::from_raw(root, tot_db, max_leaf_weight),
+                offset,
+            )
         }
     }
 
@@ -188,7 +194,7 @@ where
                                 )),
                             isize::try_from(reform.offset).unwrap(),
                         ),
-                        Some(pidgeons::ConstraintId::from(reform_id)),
+                        Some(pigeons::ConstraintId::from(reform_id)),
                     )?;
                 }
 

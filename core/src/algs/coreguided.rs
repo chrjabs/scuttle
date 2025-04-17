@@ -3,7 +3,7 @@
 use std::io;
 
 use cadical_veripb_tracer::CadicalCertCollector;
-use pidgeons::{AbsConstraintId, ConstraintId, OperationSequence};
+use pigeons::{AbsConstraintId, ConstraintId, OperationSequence};
 use rustsat::{
     encodings::{
         nodedb::{NodeById, NodeCon, NodeId, NodeLike},
@@ -29,7 +29,7 @@ pub struct ReformData {
     pub root: NodeId,
     pub oidx: usize,
     pub tot_weight: usize,
-    pub proof_id: Option<pidgeons::AbsConstraintId>,
+    pub proof_id: Option<pigeons::AbsConstraintId>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -219,7 +219,7 @@ struct CoreData {
     idx: usize,
     len: usize,
     weight: usize,
-    proof_id: Option<pidgeons::AbsConstraintId>,
+    proof_id: Option<pigeons::AbsConstraintId>,
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG>
@@ -567,8 +567,8 @@ where
         root: NodeId,
         base_assumps: &[Lit],
         tot_db: &mut TotDb,
-        core_id: Option<pidgeons::AbsConstraintId>,
-    ) -> MaybeTerminatedError<(Lit, usize, Option<pidgeons::AbsConstraintId>)> {
+        core_id: Option<pigeons::AbsConstraintId>,
+    ) -> MaybeTerminatedError<(Lit, usize, Option<pigeons::AbsConstraintId>)> {
         let mut proof_reform = core_id.map(OperationSequence::from);
 
         if !self.opts.core_exhaustion {
@@ -660,8 +660,8 @@ where
         &mut self,
         mut core: Vec<Lit>,
         base_assumps: &[Lit],
-        mut proof_id: Option<pidgeons::AbsConstraintId>,
-    ) -> MaybeTerminatedError<(Vec<Lit>, Option<pidgeons::AbsConstraintId>)> {
+        mut proof_id: Option<pigeons::AbsConstraintId>,
+    ) -> MaybeTerminatedError<(Vec<Lit>, Option<pigeons::AbsConstraintId>)> {
         if !self.opts.core_minimization {
             return Done((core, proof_id));
         }
@@ -729,8 +729,8 @@ where
         &mut self,
         mut core: Vec<Lit>,
         base_assumps: &[Lit],
-        mut proof_id: Option<pidgeons::AbsConstraintId>,
-    ) -> MaybeTerminatedError<(Vec<Lit>, Option<pidgeons::AbsConstraintId>)> {
+        mut proof_id: Option<pigeons::AbsConstraintId>,
+    ) -> MaybeTerminatedError<(Vec<Lit>, Option<pigeons::AbsConstraintId>)> {
         if !self.opts.core_trimming {
             return Done((core, proof_id));
         }
@@ -797,8 +797,8 @@ where
                     .comment(&format_args!("extending totalizer {root} to {oidx}"))?;
             }
             let mut collector = CadicalCertCollector::new(&mut self.oracle, pt_handle);
-            let mut leafs = vec![rustsat::lit![0]; tot_db[root].n_leafs()];
-            tot_db
+            let mut leafs = vec![rustsat::lit![0]; tot_db[root].n_leaves()];
+            Ok(tot_db
                 .define_unweighted_cert(
                     root,
                     oidx,
@@ -808,7 +808,7 @@ where
                     unsafe { &mut *proof },
                     (&mut leafs, false, false),
                 )
-                .map(|(ol, _)| ol)
+                .map(|(ol, _)| ol)?)
         } else {
             Ok(tot_db.define_unweighted(
                 root,

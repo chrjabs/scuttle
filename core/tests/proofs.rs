@@ -12,64 +12,44 @@ macro_rules! check_pf_shape {
 macro_rules! test_instance {
     ($s:ty, $o:expr, $i:expr, $t:expr) => {{
         use scuttle_core::{prepro, InitCertDefaultBlock, KernelFunctions, Solve};
-        let inst = prepro::handle_soft_clauses(
+        let proof_path = crate::new_temp_path();
+        let input_path = crate::new_temp_path();
+        let (proof, inst) = prepro::to_clausal(
             prepro::parse(
                 $i,
                 prepro::FileFormat::Infer,
                 rustsat::instances::fio::opb::Options::default(),
             )
             .unwrap(),
-        );
-        let vpb_input =
-            tempfile::NamedTempFile::new().expect("failed to create temporary proof file");
-        let (vpb_input, vpb_input_path) = vpb_input.into_parts();
-        let mut writer = std::io::BufWriter::new(vpb_input);
-        let iter = inst
-            .iter_clauses()
-            .map(|cl| rustsat::instances::fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
-        rustsat::instances::fio::opb::write_opb_lines(
-            &mut writer,
-            iter,
-            rustsat::instances::fio::opb::Options::default(),
+            &Some((proof_path.to_path_buf(), Some(input_path.to_path_buf()))),
         )
         .unwrap();
-        drop(writer);
-        crate::print_file(&vpb_input_path);
-        let (proof, path) = crate::new_proof(inst.n_clauses(), false);
+        let proof = proof.unwrap();
+        crate::print_file(&input_path);
         let mut solver = <$s>::from_instance_default_blocking_cert(inst, $o, proof).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver.pareto_front();
         drop(solver); // ensure proof is concluded
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
-        crate::verify_proof(vpb_input_path, path);
+        crate::verify_proof(input_path, proof_path);
     }};
     ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
         use scuttle_core::{prepro, CoreBoost, InitCertDefaultBlock, KernelFunctions, Solve};
-        let inst = prepro::handle_soft_clauses(
+        let proof_path = crate::new_temp_path();
+        let input_path = crate::new_temp_path();
+        let (proof, inst) = prepro::to_clausal(
             prepro::parse(
                 $i,
                 prepro::FileFormat::Infer,
                 rustsat::instances::fio::opb::Options::default(),
             )
             .unwrap(),
-        );
-        let vpb_input =
-            tempfile::NamedTempFile::new().expect("failed to create temporary proof file");
-        let (vpb_input, vpb_input_path) = vpb_input.into_parts();
-        let mut writer = std::io::BufWriter::new(vpb_input);
-        let iter = inst
-            .iter_clauses()
-            .map(|cl| rustsat::instances::fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
-        rustsat::instances::fio::opb::write_opb_lines(
-            &mut writer,
-            iter,
-            rustsat::instances::fio::opb::Options::default(),
+            &Some((proof_path.to_path_buf(), Some(input_path.to_path_buf()))),
         )
         .unwrap();
-        drop(writer);
-        crate::print_file(&vpb_input_path);
-        let (proof, path) = crate::new_proof(inst.n_clauses(), false);
+        let proof = proof.unwrap();
+        crate::print_file(&input_path);
         let mut solver = <$s>::from_instance_default_blocking_cert(inst, $o, proof).unwrap();
         let cont = solver.core_boost($cbo).unwrap();
         if cont {
@@ -79,7 +59,7 @@ macro_rules! test_instance {
         drop(solver); // ensure proof is concluded
         assert_eq!(pf.len(), $t.len());
         check_pf_shape!(pf, $t);
-        crate::verify_proof(vpb_input_path, path);
+        crate::verify_proof(input_path, proof_path);
     }};
 }
 
@@ -620,26 +600,9 @@ macro_rules! generate_biobj_tests {
     };
 }
 
-fn new_proof(
-    num_constraints: usize,
-    optimization: bool,
-) -> (
-    pidgeons::Proof<std::io::BufWriter<std::fs::File>>,
-    tempfile::TempPath,
-) {
-    let file = tempfile::NamedTempFile::new().expect("failed to create temporary proof file");
-    let (file, path) = file.into_parts();
-    (
-        pidgeons::Proof::new_with_conclusion(
-            std::io::BufWriter::new(file),
-            num_constraints,
-            optimization,
-            pidgeons::OutputGuarantee::None,
-            &pidgeons::Conclusion::<&str>::Unsat(Some(pidgeons::ConstraintId::last(1))),
-        )
-        .expect("failed to start proof"),
-        path,
-    )
+fn new_temp_path() -> tempfile::TempPath {
+    let file = tempfile::NamedTempFile::new().expect("failed to create temporary file");
+    file.into_temp_path()
 }
 
 fn print_file<P: AsRef<std::path::Path>>(path: P) {

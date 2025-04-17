@@ -9,7 +9,7 @@ cadical-veripb-tracer.workspace = true
 clap = { workspace = true, optional = true }
 itertools.workspace = true
 maxpre.workspace = true
-pidgeons.workspace = true
+pigeons.workspace = true
 rustsat.workspace = true
 rustsat-cadical.workspace = true
 scuttle-proc.workspace = true

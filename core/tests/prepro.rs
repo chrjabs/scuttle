@@ -22,7 +22,8 @@ macro_rules! test_instance {
             .unwrap(),
             $tech,
             true,
-        );
+        )
+        .unwrap();
         let mut solver = <$s>::from_instance_default_blocking(inst, $o).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver
