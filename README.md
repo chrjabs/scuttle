@@ -6,13 +6,15 @@ Scuttle is a multi-objective MaxSAT solver written in Rust and based on the
 
 ## Publications
 
-This solver was used in our CP'23 paper on preprocessing for multi-objective
-optimization \[5\], our CPAIOR'24 paper on core boosting \[6\], and our
-TACAS'25 paper on proof-logging for multi-objective MaxSAT \[7\]. Additional
-material for the CP'23 paper can be found
-[here](https://bitbucket.org/coreo-group/mo-prepro), material for the
-CPAIOR'24 paper is available in the `cpaior24/` directory, and for the TACAS'25
-paper in the `tacas25/` directory in this repository.
+This solver was used in the following publications.
+For each publication, a tag (specified in brackets) marks the exact revision used:
+- CP'23 (`cp23`): "Preprocessing in SAT-Based Multi-Objective Combinatorial
+  Optimization" \[5\]. Additional material
+  [here](https://bitbucket.org/coreo-group/mo-prepro).
+- CPAIOR'24 (`cpaior24`): "Core Boosting in SAT-Based Multi-Objective
+  Optimization" \[6\]. Additional material in `cpaior24/`.
+- TACAS'25 (`tacas25`): "Certifying Pareto-Optimality in Multi-Objective
+  Maximum Satisfiability" \[7\]. Additional material in `tacas25/`.
 
 ## Algorithms
 
@@ -32,6 +34,9 @@ If you simply want a binary of the solver, you can install it from
 To build the project from source, make sure to initialize the git submodules
 with `git submodule update --init --recursive`. You can then build `scuttle` by
 running `cargo +nightly build`.
+
+By default, MaxPre preprocessing is not included in the build anymore. To
+include preprocessing with MaxPre, add `--features=maxpre`.
 
 ### Features
 
