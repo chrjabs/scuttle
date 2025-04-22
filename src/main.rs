@@ -1,6 +1,5 @@
 use std::{fs, io, thread};
 
-use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::{card, pb},
     instances::ReindexVars,
@@ -145,6 +144,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
     let parsed = prepro::parse(cli.inst_path.clone(), cli.file_format, cli.opb_options)?;
 
     // MaxPre Preprocessing
+    #[cfg(feature = "maxpre")]
     let (prepro, proof, inst) = if cli.preprocessing {
         anyhow::ensure!(
             cli.proof_paths.is_none(),
@@ -157,6 +157,8 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
         let (proof, inst) = prepro::to_clausal(parsed, &cli.proof_paths)?;
         (None, proof, inst)
     };
+    #[cfg(not(feature = "maxpre"))]
+    let (prepro, (proof, inst)) = ((), prepro::to_clausal(parsed, &cli.proof_paths)?);
 
     // Reindexing
     let (inst, reindexer) = if cli.reindexing {
@@ -264,7 +266,8 @@ where
 fn post_solve<Alg>(
     alg: Alg,
     cli: &Cli,
-    mut prepro: Option<MaxPre>,
+    #[cfg(feature = "maxpre")] mut prepro: Option<maxpre::MaxPre>,
+    #[cfg(not(feature = "maxpre"))] _: (),
     reindexer: Option<Reindexer>,
 ) -> io::Result<()>
 where
@@ -284,7 +287,9 @@ where
     };
 
     // Solution reconstruction
+    #[cfg(feature = "maxpre")]
     let pareto_front = if let Some(ref mut prepro) = prepro {
+        use maxpre::PreproClauses;
         pareto_front.convert_solutions(&mut |s| prepro.reconstruct(s))
     } else {
         pareto_front
@@ -301,7 +306,9 @@ where
     if let Some(stats) = estats {
         cli.print_encoding_stats(stats)?;
     }
+    #[cfg(feature = "maxpre")]
     if let Some(prepro) = prepro {
+        use maxpre::PreproClauses;
         cli.print_maxpre_stats(prepro.stats())?;
     }
 

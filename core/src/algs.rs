@@ -15,7 +15,6 @@ use std::sync::Mutex;
 
 use anyhow::Context;
 use cadical_veripb_tracer::CadicalCertCollector;
-use maxpre::MaxPre;
 use rustsat::{
     encodings::{card::Totalizer, pb::GeneralizedTotalizer},
     instances::{Cnf, ManageVars},
@@ -193,7 +192,8 @@ where
     /// Limits for the current solving run
     lims: Limits,
     /// An optional inprocessor that has been run at some stage
-    inpro: Option<MaxPre>,
+    #[cfg(feature = "maxpre")]
+    inpro: Option<maxpre::MaxPre>,
     /// Logger to log with
     logger: Option<Box<dyn WriteSolverLog>>,
     /// Termination flag
@@ -306,6 +306,7 @@ where
             opts,
             stats,
             lims: Limits::none(),
+            #[cfg(feature = "maxpre")]
             inpro: None,
             logger: None,
             term_flag: Arc::new(AtomicBool::new(false)),

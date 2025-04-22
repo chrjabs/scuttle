@@ -354,6 +354,7 @@ where
                 self.kernel.check_termination()?;
                 true
             }
+            #[cfg(feature = "maxpre")]
             AfterCbOptions::Inpro(techs) => {
                 self.obj_encs = self.kernel.inprocess(techs, cb_res)?;
                 self.kernel.check_termination()?;

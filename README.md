@@ -33,6 +33,11 @@ To build the project from source, make sure to initialize the git submodules
 with `git submodule update --init --recursive`. You can then build `scuttle` by
 running `cargo +nightly build`.
 
+### Features
+
+- `sol-tightening`: includes heuristic tightening of solutions after they are found in the build
+- `maxpre`: includes preprocessing with MaxPre in the build
+
 ## What's The Name
 
 [Apparently](https://crabbingzone.com/what-is-group-of-crabs-called/) "scuttle"

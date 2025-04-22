@@ -1,3 +1,5 @@
+#![cfg(feature = "maxpre")]
+
 macro_rules! check_pf_shape {
     ($pf:expr, $t:expr) => {{
         let pps_set: rustsat::types::RsHashSet<(Vec<isize>, usize)> = $pf

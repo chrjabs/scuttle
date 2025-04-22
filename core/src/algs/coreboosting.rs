@@ -2,25 +2,18 @@
 
 use std::io;
 
-use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
-    clause,
     encodings::{
         card::{self, Totalizer},
-        nodedb::{NodeById, NodeCon, NodeId, NodeLike},
+        nodedb::{NodeById, NodeCon, NodeLike},
         pb::{self, GeneralizedTotalizer},
-        totdb::{Db as TotDb, Node, Semantics},
+        totdb::{Db as TotDb, Node},
     },
-    instances::ManageVars,
     solvers::{Initialize, SolveIncremental, SolveStats},
-    types::RsHashMap,
 };
 use scuttle_proc::oracle_bounds;
 
-use crate::{
-    termination::ensure,
-    MaybeTerminatedError::{self, Done},
-};
+use crate::MaybeTerminatedError::{self, Done};
 
 use super::{
     coreguided::{Inactives, OllReformulation, ReformData},
@@ -240,6 +233,7 @@ where
     OInit: Initialize<O>,
 {
     /// Performs inprocessing, i.e., preprocessing with MaxPre after core boosting.
+    #[cfg(feature = "maxpre")]
     pub fn inprocess<PBE, CE>(
         &mut self,
         techniques: &str,
@@ -248,6 +242,16 @@ where
     where
         (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     {
+        use maxpre::{MaxPre, PreproClauses};
+        use rustsat::{
+            clause,
+            encodings::{nodedb::NodeId, totdb::Semantics},
+            instances::ManageVars,
+            types::RsHashMap,
+        };
+
+        use crate::termination::ensure;
+
         debug_assert!(self.proof_stuff.is_none());
 
         ensure!(

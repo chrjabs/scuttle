@@ -1,21 +1,15 @@
 //! # Instance Processing Happening _Before_ It's Being Passed To The Actual Solver
 
 use std::{
-    cmp,
     ffi::OsString,
     fmt, fs, io,
     path::{Path, PathBuf},
 };
 
-use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
-    encodings::{
-        cert::CollectClauses as CollectCertClauses,
-        pb::{self, default_encode_pb_constraint},
-        CollectClauses,
-    },
-    instances::{fio, Cnf, ManageVars, MultiOptInstance, Objective as RsObjective, ReindexVars},
-    types::{constraints::PbConstraint, Clause, Lit, RsHashMap, Var},
+    encodings::{cert::CollectClauses as CollectCertClauses, pb, CollectClauses},
+    instances::{fio, ManageVars, MultiOptInstance, Objective as RsObjective, ReindexVars},
+    types::{constraints::PbConstraint, Clause, Lit, RsHashMap},
 };
 
 use crate::types::{Instance, Objective, Parsed, Reindexer, VarManager};
@@ -144,10 +138,13 @@ fn pseudo_boolean<P: AsRef<Path>>(
     })
 }
 
+#[cfg(feature = "maxpre")]
 fn constraints_to_clausal(
     constraints: Vec<PbConstraint>,
     vm: &mut VarManager,
-) -> Result<Cnf, rustsat::OutOfMemory> {
+) -> Result<rustsat::instances::Cnf, rustsat::OutOfMemory> {
+    use rustsat::{encodings::pb::default_encode_pb_constraint, instances::Cnf};
+
     let mut cnf = Cnf::new();
     for constr in constraints {
         default_encode_pb_constraint(constr, &mut cnf, vm)?;
@@ -155,11 +152,13 @@ fn constraints_to_clausal(
     Ok(cnf)
 }
 
+#[cfg(feature = "maxpre")]
 pub fn max_pre(
     parsed: Parsed,
     techniques: &str,
     reindexing: bool,
-) -> Result<(MaxPre, Instance), rustsat::OutOfMemory> {
+) -> Result<(maxpre::MaxPre, Instance), rustsat::OutOfMemory> {
+    use maxpre::PreproClauses;
     let Parsed {
         constraints,
         objs,
@@ -167,7 +166,7 @@ pub fn max_pre(
         ..
     } = parsed;
     let cnf = constraints_to_clausal(constraints, &mut vm)?;
-    let mut prepro = MaxPre::new(
+    let mut prepro = maxpre::MaxPre::new(
         cnf,
         objs.into_iter().map(|o| o.into_soft_cls()).collect(),
         !reindexing,
@@ -188,8 +187,8 @@ pub fn max_pre(
             )
         })
         .collect();
-    let max_var = cnf.iter().fold(Var::new(0), |max, cl| {
-        cl.iter().fold(max, |max, l| cmp::max(max, l.var()))
+    let max_var = cnf.iter().fold(rustsat::types::Var::new(0), |max, cl| {
+        cl.iter().fold(max, |max, l| std::cmp::max(max, l.var()))
     });
     let vm = VarManager::new(max_var, max_var);
     Ok((

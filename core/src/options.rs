@@ -64,6 +64,7 @@ pub enum AfterCbOptions {
     /// Reset the SAT oracle after core boosting
     Reset,
     /// Perform MaxPre "inprocessing" after core boosting
+    #[cfg(feature = "maxpre")]
     Inpro(String),
 }
 

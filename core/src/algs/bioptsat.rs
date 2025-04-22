@@ -295,6 +295,7 @@ where
                 self.kernel.check_termination()?;
                 true
             }
+            #[cfg(feature = "maxpre")]
             AfterCbOptions::Inpro(techs) => {
                 let mut encs = self.kernel.inprocess(techs, cb_res)?;
                 self.obj_encs[1] = encs.pop().unwrap();

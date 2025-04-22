@@ -146,25 +146,38 @@ struct CoreBoostingArgs {
     reset_after_cb: Bool,
     /// Whether to perform inprocessing, i.e., preprocessing after core boosting
     #[arg(long, default_value_t = matches!(CoreBoostingOptions::default().after, AfterCbOptions::Inpro(_)).into())]
+    #[cfg(feature = "maxpre")]
     inprocessing: Bool,
+    /// [Disabled at compile time] Whether to perform inprocessing, i.e., preprocessing after core boosting
+    #[arg(long, default_value_t = Disabled::False)]
+    #[cfg(not(feature = "maxpre"))]
+    inprocessing: Disabled,
 }
 
 impl CoreBoostingArgs {
-    fn parse(self, prepro_techs: String) -> (Option<CoreBoostingOptions>, bool) {
+    fn parse(
+        self,
+        #[cfg(feature = "maxpre")] prepro_techs: String,
+    ) -> (Option<CoreBoostingOptions>, bool) {
         if self.core_boosting == Bool::False {
             return (None, false);
         }
+        let after = if self.reset_after_cb.into() {
+            AfterCbOptions::Reset
+        } else {
+            AfterCbOptions::Nothing
+        };
+        #[cfg(feature = "maxpre")]
+        let after = if self.inprocessing.into() {
+            AfterCbOptions::Inpro(prepro_techs)
+        } else {
+            after
+        };
         let store_cnf = self.inprocessing.into() || self.reset_after_cb.into();
         (
             Some(CoreBoostingOptions {
                 rebase: self.rebase_encodings.into(),
-                after: if self.inprocessing.into() {
-                    AfterCbOptions::Inpro(prepro_techs)
-                } else if self.reset_after_cb.into() {
-                    AfterCbOptions::Reset
-                } else {
-                    AfterCbOptions::Nothing
-                },
+                after,
             }),
             store_cnf,
         )
@@ -190,13 +203,23 @@ struct PreproArgs {
     reindexing: Bool,
     /// Preprocess the instance with MaxPre before solving
     #[arg(long, default_value_t = Bool::from(false), global = true)]
+    #[cfg(feature = "maxpre")]
     preprocessing: Bool,
+    /// [Disabled at compile time] Preprocess the instance with MaxPre before solving
+    #[arg(long, default_value_t = Disabled::False, global = true)]
+    #[cfg(not(feature = "maxpre"))]
+    preprocessing: Disabled,
     /// The preprocessing technique string to use
     #[arg(long, default_value_t = String::from("[[uvsrgc]VRTG]"), global = true)]
     maxpre_techniques: String,
     /// Reindex the variables in MaxPre
     #[arg(long, default_value_t = Bool::from(false), global = true)]
+    #[cfg(feature = "maxpre")]
     maxpre_reindexing: Bool,
+    /// [Disabled at compile time] Reindex the variables in MaxPre
+    #[arg(long, default_value_t = Disabled::False, global = true)]
+    #[cfg(not(feature = "maxpre"))]
+    maxpre_reindexing: Disabled,
 }
 
 #[derive(Args, Copy, Clone)]
@@ -271,7 +294,6 @@ struct LogArgs {
     #[arg(long, global = true)]
     log_oracle_calls: bool,
     /// Log heuristic objective improvement
-    #[cfg(feature = "sol-tightening")]
     #[arg(long, global = true)]
     log_heuristic_obj_improvement: bool,
     /// Log extracted cores
@@ -362,7 +384,7 @@ impl fmt::Display for CardEncoding {
 pub enum Bool {
     /// Turn on feature
     True,
-    /// Torn off feature
+    /// Turn off feature
     False,
 }
 
@@ -387,6 +409,26 @@ impl From<bool> for Bool {
             Bool::True
         } else {
             Bool::False
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+enum Disabled {
+    /// Turn off feature
+    False,
+}
+
+impl From<Disabled> for bool {
+    fn from(_: Disabled) -> Self {
+        false
+    }
+}
+
+impl fmt::Display for Disabled {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Disabled::False => write!(f, "false"),
         }
     }
 }
@@ -452,9 +494,12 @@ pub struct Cli {
     pub file_format: FileFormat,
     pub opb_options: fio::opb::Options,
     pub inst_path: PathBuf,
+    #[cfg(feature = "maxpre")]
     pub preprocessing: bool,
+    #[cfg(feature = "maxpre")]
     pub maxpre_techniques: String,
     pub reindexing: bool,
+    #[cfg(feature = "maxpre")]
     pub maxpre_reindexing: bool,
     pub cadical_config: CadicalConfig,
     stdout: BufferWriter,
@@ -520,7 +565,10 @@ impl Cli {
         let args = CliArgs::parse();
         match args.command {
             AlgorithmCommand::PMinimal => {
-                let (cb, store_cnf) = args.cb.parse(args.prepro.maxpre_techniques.clone());
+                let (cb, store_cnf) = args.cb.parse(
+                    #[cfg(feature = "maxpre")]
+                    args.prepro.maxpre_techniques.clone(),
+                );
                 let kernel_opts = args.kernel_opts(store_cnf);
                 let proof_paths = args.proof.proof_paths();
                 Cli {
@@ -531,9 +579,12 @@ impl Cli {
                         ..Default::default()
                     },
                     inst_path: args.file.inst_path.clone(),
+                    #[cfg(feature = "maxpre")]
                     preprocessing: args.prepro.preprocessing.into(),
+                    #[cfg(feature = "maxpre")]
                     maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                     reindexing: args.prepro.reindexing.into(),
+                    #[cfg(feature = "maxpre")]
                     maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
                     cadical_config: args.cadical_config.into(),
                     stdout: stdout(args.log.color),
@@ -548,7 +599,10 @@ impl Cli {
                 }
             }
             AlgorithmCommand::Bioptsat { obj_encs } => {
-                let (cb, store_cnf) = args.cb.parse(args.prepro.maxpre_techniques.clone());
+                let (cb, store_cnf) = args.cb.parse(
+                    #[cfg(feature = "maxpre")]
+                    args.prepro.maxpre_techniques.clone(),
+                );
                 let kernel_opts = args.kernel_opts(store_cnf);
                 let proof_paths = args.proof.proof_paths();
                 Cli {
@@ -559,9 +613,12 @@ impl Cli {
                         ..Default::default()
                     },
                     inst_path: args.file.inst_path.clone(),
+                    #[cfg(feature = "maxpre")]
                     preprocessing: args.prepro.preprocessing.into(),
+                    #[cfg(feature = "maxpre")]
                     maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                     reindexing: args.prepro.reindexing.into(),
+                    #[cfg(feature = "maxpre")]
                     maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
                     cadical_config: args.cadical_config.into(),
                     stdout: stdout(args.log.color),
@@ -581,7 +638,10 @@ impl Cli {
                 }
             }
             AlgorithmCommand::LowerBounding { log_fence } => {
-                let (cb, store_cnf) = args.cb.parse(args.prepro.maxpre_techniques.clone());
+                let (cb, store_cnf) = args.cb.parse(
+                    #[cfg(feature = "maxpre")]
+                    args.prepro.maxpre_techniques.clone(),
+                );
                 let kernel_opts = args.kernel_opts(store_cnf);
                 let proof_paths = args.proof.proof_paths();
                 Cli {
@@ -592,9 +652,12 @@ impl Cli {
                         ..Default::default()
                     },
                     inst_path: args.file.inst_path.clone(),
+                    #[cfg(feature = "maxpre")]
                     preprocessing: args.prepro.preprocessing.into(),
+                    #[cfg(feature = "maxpre")]
                     maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                     reindexing: args.prepro.reindexing.into(),
+                    #[cfg(feature = "maxpre")]
                     maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
                     cadical_config: args.cadical_config.into(),
                     stdout: stdout(args.log.color),
@@ -836,6 +899,7 @@ impl Cli {
         Ok(())
     }
 
+    #[cfg(feature = "maxpre")]
     pub fn print_maxpre_stats(&self, stats: maxpre::Stats) -> Result<(), IOError> {
         if self.print_stats {
             let mut buffer = self.stdout.buffer();

@@ -8,7 +8,7 @@ anyhow.workspace = true
 cadical-veripb-tracer.workspace = true
 clap = { workspace = true, optional = true }
 itertools.workspace = true
-maxpre.workspace = true
+maxpre = { workspace = true, optional = true }
 pigeons.workspace = true
 rustsat.workspace = true
 rustsat-cadical.workspace = true
@@ -28,3 +28,4 @@ limit-conflicts = ["scuttle-proc/limit-conflicts"]
 check-non-dominance = []
 verbose-proofs = ["cadical-veripb-tracer/verbose", "rustsat/verbose-proofs"]
 clap = ["dep:clap"]
+maxpre = ["dep:maxpre"]
