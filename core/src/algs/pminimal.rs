@@ -25,6 +25,7 @@ use rustsat::{
         self, atomics,
         card::{self, Totalizer},
         pb::{self, GeneralizedTotalizer},
+        Monotone,
     },
     instances::ManageVars,
     solvers::{
@@ -114,8 +115,8 @@ impl<O, PBE, CE, ProofW, OInit, BCG> super::Init for PMinimal<O, PBE, CE, ProofW
 where
     O: SolveIncremental,
     ProofW: io::Write,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)> + Monotone,
+    CE: card::BoundUpperIncremental + FromIterator<Lit> + Monotone,
     OInit: Initialize<O>,
     BCG: Fn(Assignment) -> Clause,
 {
@@ -142,8 +143,8 @@ where
 impl<'term, 'learn, PBE, CE, ProofW, OInit, BCG> super::InitCert
     for PMinimal<rustsat_cadical::CaDiCaL<'term, 'learn>, PBE, CE, ProofW, OInit, BCG>
 where
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)> + Monotone,
+    CE: card::BoundUpperIncremental + FromIterator<Lit> + Monotone,
     OInit: Initialize<rustsat_cadical::CaDiCaL<'term, 'learn>>,
     ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
@@ -212,8 +213,8 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> PMinimal<O, PBE, CE, ProofW, OInit, BCG>
 where
     ProofW: io::Write,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)> + Monotone,
+    CE: card::BoundUpperIncremental + FromIterator<Lit> + Monotone,
 {
     /// Initializes the solver
     fn init(mut kernel: Kernel<O, ProofW, OInit, BCG>) -> Self {

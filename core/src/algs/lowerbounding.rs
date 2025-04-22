@@ -18,6 +18,7 @@ use rustsat::{
         self,
         card::{self, Totalizer},
         pb::{self, GeneralizedTotalizer},
+        Monotone,
     },
     solvers::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
@@ -216,8 +217,8 @@ where
 impl<O, PBE, CE, ProofW, OInit, BCG> LowerBounding<O, PBE, CE, ProofW, OInit, BCG>
 where
     ProofW: io::Write + 'static,
-    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)>,
-    CE: card::BoundUpperIncremental + FromIterator<Lit>,
+    PBE: pb::BoundUpperIncremental + FromIterator<(Lit, usize)> + Monotone,
+    CE: card::BoundUpperIncremental + FromIterator<Lit> + Monotone,
 {
     /// Initializes the solver
     fn init(mut kernel: Kernel<O, ProofW, OInit, BCG>) -> anyhow::Result<Self> {
