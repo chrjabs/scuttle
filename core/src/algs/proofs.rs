@@ -139,7 +139,7 @@ where
         pigeons::OutputGuarantee::None,
         &pigeons::Conclusion::<&str>::Unsat(Some(pigeons::ConstraintId::last(1))),
     )?;
-    let order = crate::algs::proofs::objectives_as_order(&objs);
+    let order = crate::algs::proofs::objectives_as_order(objs);
     proof.define_order(&order)?;
     proof.load_order(order.name(), order.used_vars())?;
     Ok(proof)

@@ -8,6 +8,7 @@ use crate::Phase;
 
 /// Solver-wide configuration options
 #[derive(Clone, Copy)]
+#[derive(Default)]
 pub struct KernelOptions {
     /// The Pareto point enumeration mode
     pub enumeration: EnumOptions,
@@ -27,20 +28,6 @@ pub struct KernelOptions {
     pub store_cnf: bool,
 }
 
-impl Default for KernelOptions {
-    fn default() -> Self {
-        KernelOptions {
-            enumeration: Default::default(),
-            reserve_enc_vars: false,
-            heuristic_improvements: Default::default(),
-            solution_guided_search: false,
-            core_trimming: false,
-            core_minimization: false,
-            core_exhaustion: false,
-            store_cnf: false,
-        }
-    }
-}
 
 impl KernelOptions {
     pub fn set_enumeration(&mut self, enumeration: EnumOptions) {

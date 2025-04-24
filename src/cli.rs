@@ -586,7 +586,7 @@ impl Cli {
                     reindexing: args.prepro.reindexing.into(),
                     #[cfg(feature = "maxpre")]
                     maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
-                    cadical_config: args.cadical_config.into(),
+                    cadical_config: args.cadical_config,
                     stdout: stdout(args.log.color),
                     stderr: stderr(args.log.color),
                     print_solver_config: args.log.print_solver_config,
@@ -620,7 +620,7 @@ impl Cli {
                     reindexing: args.prepro.reindexing.into(),
                     #[cfg(feature = "maxpre")]
                     maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
-                    cadical_config: args.cadical_config.into(),
+                    cadical_config: args.cadical_config,
                     stdout: stdout(args.log.color),
                     stderr: stderr(args.log.color),
                     print_solver_config: args.log.print_solver_config,
@@ -659,7 +659,7 @@ impl Cli {
                     reindexing: args.prepro.reindexing.into(),
                     #[cfg(feature = "maxpre")]
                     maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
-                    cadical_config: args.cadical_config.into(),
+                    cadical_config: args.cadical_config,
                     stdout: stdout(args.log.color),
                     stderr: stderr(args.log.color),
                     print_solver_config: args.log.print_solver_config,
