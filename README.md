@@ -18,11 +18,11 @@ For each publication, a tag (specified in brackets) marks the exact revision use
 
 ## Algorithms
 
-| First argument   | Description                                                               |
-| ---------------- | ------------------------------------------------------------------------- |
-| `p-minimal`      | P-Minimal model enumeration as described in \[1\] and \[2\]               |
-| `lower-bounding` | Lower-bounding search as described in \[3\] (called "core-guiding" there) |
-| `bioptsat`       | Sat-Unsat variant of the BiOptSat algorithm described in \[4\]            |
+| First argument   | Description                                                              |
+| ---------------- | ------------------------------------------------------------------------ |
+| `p-minimal`      | P-Minimal model enumeration as described in \[1\] and \[2\]              |
+| `lower-bounding` | Lower-bounding search as described in \[3\] (called "core-guided" there) |
+| `bioptsat`       | Sat-Unsat variant of the BiOptSat algorithm described in \[4\]           |
 
 ## Building
 
