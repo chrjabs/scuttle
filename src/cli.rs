@@ -40,10 +40,6 @@ macro_rules! none_if_zero {
 struct CliArgs {
     #[command(subcommand)]
     command: AlgorithmCommand,
-    #[command(flatten)]
-    file: FileArgs,
-    #[command(flatten)]
-    proof: ProofArgs,
     /// Reserve variables for the encodings in advance
     #[arg(long, default_value_t = Bool::from(KernelOptions::default().reserve_enc_vars), global = true)]
     reserve_encoding_vars: Bool,
@@ -102,20 +98,33 @@ impl CliArgs {
     }
 }
 
-#[derive(Subcommand, Copy, Clone)]
+#[derive(Subcommand, Clone)]
 enum AlgorithmCommand {
     /// P-Minimal model enumeration - Soh et al. CP'17
-    PMinimal,
+    PMinimal {
+        #[command(flatten)]
+        file: FileArgs,
+        #[command(flatten)]
+        proof: ProofArgs,
+    },
     /// BiOptSat Linear Sat-Unsat - Jabs et al. SAT'22
     Bioptsat {
         #[command(flatten)]
         obj_encs: ObjEncArgs,
+        #[command(flatten)]
+        file: FileArgs,
+        #[command(flatten)]
+        proof: ProofArgs,
     },
     /// Lower-bounding search - Cortes et al. TACAS'23
     LowerBounding {
         /// Log fence updates
         #[arg(long)]
         log_fence: bool,
+        #[command(flatten)]
+        file: FileArgs,
+        #[command(flatten)]
+        proof: ProofArgs,
     },
 }
 
@@ -136,20 +145,20 @@ struct ObjEncArgs {
 #[command(next_help_heading = "Core-boosting options")]
 struct CoreBoostingArgs {
     /// Whether to perform core boosting before running the algorithm
-    #[arg(long, default_value_t = Bool::True)]
+    #[arg(long, default_value_t = Bool::True, global = true)]
     core_boosting: Bool,
     /// If true, don't merge OLL totalizers into GTE but ignore the totalizer structure.
-    #[arg(long, default_value_t = CoreBoostingOptions::default().rebase.into())]
+    #[arg(long, default_value_t = CoreBoostingOptions::default().rebase.into(), global = true)]
     rebase_encodings: Bool,
     /// Whether to reset the oracle after finding a global ideal point, i.e., core boosting
-    #[arg(long, default_value_t = matches!(CoreBoostingOptions::default().after, AfterCbOptions::Reset).into())]
+    #[arg(long, default_value_t = matches!(CoreBoostingOptions::default().after, AfterCbOptions::Reset).into(), global = true)]
     reset_after_cb: Bool,
     /// Whether to perform inprocessing, i.e., preprocessing after core boosting
     #[arg(long, default_value_t = matches!(CoreBoostingOptions::default().after, AfterCbOptions::Inpro(_)).into())]
     #[cfg(feature = "maxpre")]
     inprocessing: Bool,
     /// [Disabled at compile time] Whether to perform inprocessing, i.e., preprocessing after core boosting
-    #[arg(long, default_value_t = Disabled::False)]
+    #[arg(long, default_value_t = Disabled::False, global = true)]
     #[cfg(not(feature = "maxpre"))]
     inprocessing: Disabled,
 }
@@ -250,7 +259,7 @@ impl From<LimitArgs> for Limits {
     }
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 struct FileArgs {
     /// The file format of the input file. With infer, the file format is
     /// inferred from the file extension.
@@ -329,7 +338,7 @@ impl From<LogArgs> for LoggerConfig {
     }
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 struct ProofArgs {
     /// The path to write the VeriPB proof to. If not provided, will not write a proof.
     proof_path: Option<PathBuf>,
@@ -563,22 +572,22 @@ impl Cli {
             })
         };
         let args = CliArgs::parse();
+        let (cb, store_cnf) = args.cb.parse(
+            #[cfg(feature = "maxpre")]
+            args.prepro.maxpre_techniques.clone(),
+        );
+        let kernel_opts = args.kernel_opts(store_cnf);
         match args.command {
-            AlgorithmCommand::PMinimal => {
-                let (cb, store_cnf) = args.cb.parse(
-                    #[cfg(feature = "maxpre")]
-                    args.prepro.maxpre_techniques.clone(),
-                );
-                let kernel_opts = args.kernel_opts(store_cnf);
-                let proof_paths = args.proof.proof_paths();
+            AlgorithmCommand::PMinimal { file, proof } => {
+                let proof_paths = proof.proof_paths();
                 Cli {
                     limits: args.limits.into(),
-                    file_format: args.file.file_format,
+                    file_format: file.file_format,
                     opb_options: fio::opb::Options {
-                        first_var_idx: args.file.first_var_idx,
+                        first_var_idx: file.first_var_idx,
                         ..Default::default()
                     },
-                    inst_path: args.file.inst_path.clone(),
+                    inst_path: file.inst_path.clone(),
                     #[cfg(feature = "maxpre")]
                     preprocessing: args.prepro.preprocessing.into(),
                     #[cfg(feature = "maxpre")]
@@ -598,21 +607,20 @@ impl Cli {
                     proof_paths,
                 }
             }
-            AlgorithmCommand::Bioptsat { obj_encs } => {
-                let (cb, store_cnf) = args.cb.parse(
-                    #[cfg(feature = "maxpre")]
-                    args.prepro.maxpre_techniques.clone(),
-                );
-                let kernel_opts = args.kernel_opts(store_cnf);
-                let proof_paths = args.proof.proof_paths();
+            AlgorithmCommand::Bioptsat {
+                file,
+                proof,
+                obj_encs,
+            } => {
+                let proof_paths = proof.proof_paths();
                 Cli {
                     limits: args.limits.into(),
-                    file_format: args.file.file_format,
+                    file_format: file.file_format,
                     opb_options: fio::opb::Options {
-                        first_var_idx: args.file.first_var_idx,
+                        first_var_idx: file.first_var_idx,
                         ..Default::default()
                     },
-                    inst_path: args.file.inst_path.clone(),
+                    inst_path: file.inst_path.clone(),
                     #[cfg(feature = "maxpre")]
                     preprocessing: args.prepro.preprocessing.into(),
                     #[cfg(feature = "maxpre")]
@@ -637,21 +645,20 @@ impl Cli {
                     proof_paths,
                 }
             }
-            AlgorithmCommand::LowerBounding { log_fence } => {
-                let (cb, store_cnf) = args.cb.parse(
-                    #[cfg(feature = "maxpre")]
-                    args.prepro.maxpre_techniques.clone(),
-                );
-                let kernel_opts = args.kernel_opts(store_cnf);
-                let proof_paths = args.proof.proof_paths();
+            AlgorithmCommand::LowerBounding {
+                file,
+                proof,
+                log_fence,
+            } => {
+                let proof_paths = proof.proof_paths();
                 Cli {
                     limits: args.limits.into(),
-                    file_format: args.file.file_format,
+                    file_format: file.file_format,
                     opb_options: fio::opb::Options {
-                        first_var_idx: args.file.first_var_idx,
+                        first_var_idx: file.first_var_idx,
                         ..Default::default()
                     },
-                    inst_path: args.file.inst_path.clone(),
+                    inst_path: file.inst_path.clone(),
                     #[cfg(feature = "maxpre")]
                     preprocessing: args.prepro.preprocessing.into(),
                     #[cfg(feature = "maxpre")]
