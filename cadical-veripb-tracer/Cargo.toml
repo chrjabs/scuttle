@@ -2,6 +2,10 @@
 name = "cadical-veripb-tracer"
 version = "0.1.0"
 edition = "2021"
+authors = ["Christoph Jabs <christoph.jabs@helsinki.fi>"]
+license = "MIT"
+description = "VeriPB proof tracer for CaDiCaL via RustSAT"
+repository = "https://github.com/chrjabs/scuttle"
 
 [dependencies]
 cfg-if.workspace = true

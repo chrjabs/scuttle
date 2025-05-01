@@ -13,13 +13,13 @@ cpu-time = "1.0.0"
 concolor-clap = "0.1.0"
 itertools = "0.14.0"
 maxpre = { version = "0.2.3", path = "./maxpre-rs", features = ["multiopt"] }
-pigeons = { version = "0.1.0", path = "./rustsat/pigeons" }
-rustsat = { version = "0.7.0", path = "./rustsat", features = [
+pigeons = { version = "0.1.1", path = "./rustsat/pigeons" }
+rustsat = { version = "0.7.1", path = "./rustsat", features = [
   "multiopt",
   "internals",
   "proof-logging",
 ] }
-rustsat-cadical = { version = "0.7.0", path = "./rustsat/cadical", features = [
+rustsat-cadical = { version = "0.7.1", path = "./rustsat/cadical", features = [
   "v2-1-3",
   "pigeons",
 ] }
