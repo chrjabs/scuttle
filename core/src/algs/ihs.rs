@@ -7,7 +7,7 @@ use rustsat::{
     solvers::{
         DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
     },
-    types::{Assignment, Cl, Clause, Lit, RsHashSet, WLitIter},
+    types::{Assignment, Cl, Clause, Lit, RsHashSet},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
@@ -82,34 +82,28 @@ where
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
-    fn new<Cls, Objs, Obj>(
+    fn new<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
     {
         anyhow::ensure!(
             matches!(opts.enumeration, EnumOptions::NoEnum),
             "cannot enumerate with IHS algorithm"
         );
-        let objs: Vec<_> = objs
-            .into_iter()
-            .map(|(obj, off)| (obj.into_iter().collect::<Vec<_>>(), off))
-            .collect();
-        let builder = Hss::Builder::new(objs.iter().map(|(obj, _)| obj.iter().copied()));
+        let builder = Hss::Builder::new(objs.iter().map(|obj| obj.iter()));
         let mut hitting_set_solver = builder.init();
         let clauses: Vec<_> = clauses.into_iter().collect();
 
         // Seed constraints over objective variables
         let obj_vars: RsHashSet<_> = objs
             .iter()
-            .flat_map(|(obj, _)| obj.iter().map(|(lit, _)| lit.var()))
+            .flat_map(|obj| obj.iter().map(|(lit, _)| lit.var()))
             .collect();
         'outer: for cl in &clauses {
             for lit in cl {
@@ -121,7 +115,7 @@ where
         }
         let objective_lits: RsHashSet<_> = objs
             .iter()
-            .flat_map(|(obj, _)| obj.iter().map(|(lit, _)| *lit))
+            .flat_map(|obj| obj.iter().map(|(lit, _)| lit))
             .collect();
 
         let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, opts)?;

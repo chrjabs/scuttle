@@ -8,21 +8,21 @@
 use std::{fs, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;
-use pidgeons::{ConstraintId, OperationLike, OperationSequence, VarLike};
+use pigeons::{ConstraintId, OperationLike, OperationSequence, VarLike};
 use rustsat::{
     clause,
     encodings::{
         self, atomics,
-        card::{self, DbTotalizer},
-        pb::{self, DbGte},
-        CollectCertClauses,
+        card::{self, Totalizer},
+        cert::CollectClauses,
+        pb::{self, GeneralizedTotalizer},
     },
     instances::ManageVars,
     solvers::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Clause, Lit, Var, WLitIter},
+    types::{Assignment, Clause, Lit, Var},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
@@ -49,8 +49,8 @@ use super::{coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, O
 #[derive(KernelFunctions)]
 pub struct BiOptSat<
     O,
-    PBE = DbGte,
-    CE = DbTotalizer,
+    PBE = GeneralizedTotalizer,
+    CE = Totalizer,
     ProofW = io::BufWriter<fs::File>,
     OInit = DefaultInitializer,
     BCG = fn(Assignment) -> Clause,
@@ -66,7 +66,14 @@ pub struct BiOptSat<
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG> super::Solve
-    for BiOptSat<rustsat_cadical::CaDiCaL<'term, 'learn>, DbGte, DbTotalizer, ProofW, OInit, BCG>
+    for BiOptSat<
+        rustsat_cadical::CaDiCaL<'term, 'learn>,
+        GeneralizedTotalizer,
+        Totalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
 where
     BCG: Fn(Assignment) -> Clause,
     ProofW: io::Write + 'static,
@@ -107,17 +114,15 @@ where
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
-    fn new<Cls, Objs, Obj>(
+    fn new<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
     {
         let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, opts)?;
         Ok(Self::init(kernel))
@@ -138,18 +143,16 @@ where
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
-    fn new_cert<Cls, Objs, Obj>(
+    fn new_cert<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
-        proof: pidgeons::Proof<Self::ProofWriter>,
+        proof: pigeons::Proof<Self::ProofWriter>,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
-        Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
     {
         let kernel = Kernel::new_cert(clauses, objs, var_manager, block_clause_gen, proof, opts)?;
         Ok(Self::init(kernel))
@@ -243,7 +246,14 @@ where
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG>
-    BiOptSat<rustsat_cadical::CaDiCaL<'learn, 'term>, DbGte, DbTotalizer, ProofW, OInit, BCG>
+    BiOptSat<
+        rustsat_cadical::CaDiCaL<'learn, 'term>,
+        GeneralizedTotalizer,
+        Totalizer,
+        ProofW,
+        OInit,
+        BCG,
+    >
 where
     ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
@@ -285,6 +295,7 @@ where
                 self.kernel.check_termination()?;
                 true
             }
+            #[cfg(feature = "maxpre")]
             AfterCbOptions::Inpro(techs) => {
                 let mut encs = self.kernel.inprocess(techs, cb_res)?;
                 self.obj_encs[1] = encs.pop().unwrap();
@@ -349,7 +360,7 @@ where
     pub fn bioptsat<Lookup, Col>(
         &mut self,
         (inc_obj, dec_obj): (usize, usize),
-        encodings: &mut [ObjEncoding<DbGte, DbTotalizer>],
+        encodings: &mut [ObjEncoding<GeneralizedTotalizer, Totalizer>],
         base_assumps: &[Lit],
         starting_point: Option<(usize, Assignment)>,
         (inc_lb, dec_lb): (Option<usize>, Option<usize>),
@@ -441,7 +452,7 @@ where
                         .proof_tracer_mut(&proof_stuff.pt_handle)
                         .proof_mut();
                     // derive cut that will be added
-                    let _cut_id = if inc_cost <= encodings[0].offset() {
+                    let cut_id = if inc_cost <= encodings[0].offset() {
                         pmin_cut_id
                     } else {
                         // global lower bound on increasing objective in proof
@@ -456,8 +467,8 @@ where
                                 if encodings[0].is_buffer_empty() {
                                     let (olit, _) = encodings[0].output_proof_details(inc_cost);
                                     proof.equals(
-                                        &pidgeons::Axiom::from(olit),
-                                        Some(pidgeons::ConstraintId::from(lb_id)),
+                                        &pigeons::Axiom::from(olit),
+                                        Some(pigeons::ConstraintId::from(lb_id)),
                                     )?;
                                 }
                                 // otherwise, this should equal the proof-only variable
@@ -474,9 +485,13 @@ where
                     {
                         proof.equals(
                             &rustsat::clause![],
-                            Some(pidgeons::ConstraintId::from(_cut_id)),
+                            Some(pigeons::ConstraintId::from(cut_id)),
                         )?;
                     }
+                    proof.update_default_conclusion::<Var>(
+                        pigeons::OutputGuarantee::None,
+                        &pigeons::Conclusion::Unsat(Some(ConstraintId::from(cut_id))),
+                    );
                 }
                 break;
             }
@@ -625,8 +640,8 @@ where
                                 let (olit, _) = encodings[0].output_proof_details(inc_cost);
                                 proof.comment(&"here")?;
                                 proof.equals(
-                                    &pidgeons::Axiom::from(olit),
-                                    Some(pidgeons::ConstraintId::from(lb_id)),
+                                    &pigeons::Axiom::from(olit),
+                                    Some(pigeons::ConstraintId::from(lb_id)),
                                 )?;
                             }
                         }
@@ -641,8 +656,8 @@ where
                     if encodings[1].is_buffer_empty() {
                         let (olit, _) = encodings[1].output_proof_details(dec_cost);
                         proof.equals(
-                            &pidgeons::Axiom::from(!olit),
-                            Some(pidgeons::ConstraintId::from(cut_id)),
+                            &pigeons::Axiom::from(!olit),
+                            Some(pigeons::ConstraintId::from(cut_id)),
                         )?;
                     }
                 }
@@ -676,7 +691,7 @@ where
                         #[cfg(feature = "verbose-proofs")]
                         proof.equals(
                             &clause![!olit, first_olit],
-                            Some(pidgeons::ConstraintId::from(implication)),
+                            Some(pigeons::ConstraintId::from(implication)),
                         )?;
                         let id = proof
                             .operations::<Var>(&(OperationSequence::from(cut_id) + implication))?;

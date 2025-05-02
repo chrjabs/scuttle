@@ -8,9 +8,11 @@ use std::{
 };
 
 use rustsat::{
-    encodings::{card, pb, totdb, CollectCertClauses, CollectClauses},
-    instances::{Cnf, ManageVars, ReindexVars},
-    types::{Assignment, Clause, Lit, LitIter, RsHashMap, Var, WLitIter},
+    encodings::{card, cert::CollectClauses as CollectCertClauses, pb, totdb, CollectClauses},
+    instances::{ManageVars, ReindexVars},
+    types::{
+        constraints::PbConstraint, Assignment, Clause, Lit, LitIter, RsHashMap, Var, WLitIter,
+    },
 };
 
 /// The Pareto front of an instance. This is the return type of the solver.
@@ -219,13 +221,13 @@ where
 
 /// Data regarding an objective
 #[derive(Debug, Clone)]
-pub(crate) enum Objective {
+pub enum Objective {
     Weighted {
         offset: isize,
         lits: RsHashMap<Lit, usize>,
         idx: usize,
         lower_bound: usize,
-        reform_id: Option<pidgeons::AbsConstraintId>,
+        reform_id: Option<pigeons::AbsConstraintId>,
     },
     Unweighted {
         offset: isize,
@@ -233,13 +235,13 @@ pub(crate) enum Objective {
         lits: Vec<Lit>,
         idx: usize,
         lower_bound: usize,
-        reform_id: Option<pidgeons::AbsConstraintId>,
+        reform_id: Option<pigeons::AbsConstraintId>,
     },
     Constant {
         offset: isize,
         idx: usize,
         lower_bound: usize,
-        reform_id: Option<pidgeons::AbsConstraintId>,
+        reform_id: Option<pigeons::AbsConstraintId>,
     },
 }
 
@@ -329,7 +331,7 @@ impl Objective {
     }
 
     /// Gets the reformulation ID of the objective
-    pub fn reform_id(&self) -> Option<pidgeons::AbsConstraintId> {
+    pub fn reform_id(&self) -> Option<pigeons::AbsConstraintId> {
         match self {
             Objective::Weighted { reform_id, .. }
             | Objective::Unweighted { reform_id, .. }
@@ -356,7 +358,7 @@ impl Objective {
     }
 
     /// Sets the objective reformulation ID
-    pub fn set_reform_id(&mut self, new_reform_id: Option<pidgeons::AbsConstraintId>) {
+    pub fn set_reform_id(&mut self, new_reform_id: Option<pigeons::AbsConstraintId>) {
         match self {
             Objective::Weighted { reform_id, .. }
             | Objective::Unweighted { reform_id, .. }
@@ -365,7 +367,7 @@ impl Objective {
     }
 }
 
-pub(crate) enum ObjIter<'a> {
+pub enum ObjIter<'a> {
     Weighted(std::collections::hash_map::Iter<'a, Lit, usize>),
     Unweighted(std::slice::Iter<'a, Lit>),
     Constant,
@@ -494,20 +496,20 @@ where
     }
 
     /// Enforces the given upper bound
-    pub fn enforce_ub(&self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::Error> {
+    pub fn enforce_ub(&self, ub: usize) -> Result<Vec<Lit>, rustsat::encodings::EnforceError> {
         match self {
             ObjEncoding::Weighted(enc, offset) => {
                 if ub >= *offset {
                     enc.enforce_ub(ub - *offset)
                 } else {
-                    Err(rustsat::encodings::Error::Unsat)
+                    Err(rustsat::encodings::EnforceError::Unsat)
                 }
             }
             ObjEncoding::Unweighted(enc, offset) => {
                 if ub >= *offset {
-                    enc.enforce_ub(ub - *offset)
+                    Ok(enc.enforce_ub(ub - *offset)?)
                 } else {
-                    Err(rustsat::encodings::Error::Unsat)
+                    Err(rustsat::encodings::EnforceError::Unsat)
                 }
             }
             ObjEncoding::Constant => Ok(vec![]),
@@ -541,7 +543,7 @@ where
         range: Range<usize>,
         collector: &mut Col,
         var_manager: &mut dyn ManageVars,
-        proof: &mut pidgeons::Proof<ProofW>,
+        proof: &mut pigeons::Proof<ProofW>,
     ) -> anyhow::Result<()>
     where
         Col: CollectCertClauses,
@@ -590,7 +592,7 @@ where
     }
 }
 
-impl ObjEncoding<pb::DbGte, card::DbTotalizer> {
+impl ObjEncoding<pb::GeneralizedTotalizer, card::Totalizer> {
     pub fn output_proof_details(&self, value: usize) -> (Lit, totdb::cert::SemDefs) {
         match self {
             ObjEncoding::Weighted(enc, offset) => {
@@ -819,28 +821,28 @@ impl ManageVars for Reindexer {
 
 #[derive(Debug, Clone)]
 pub struct Parsed {
-    pub(crate) cnf: Cnf,
+    pub(crate) constraints: Vec<PbConstraint>,
     pub(crate) objs: Vec<rustsat::instances::Objective>,
     pub(crate) vm: VarManager,
 }
 
 #[derive(Debug, Clone)]
 pub struct Instance {
-    pub(crate) cnf: Cnf,
-    pub(crate) objs: Vec<(Vec<(Lit, usize)>, isize)>,
+    pub(crate) clauses: Vec<(Clause, Option<pigeons::AbsConstraintId>)>,
+    pub(crate) objs: Vec<Objective>,
     pub(crate) vm: VarManager,
 }
 
 impl Instance {
     pub fn n_clauses(&self) -> usize {
-        self.cnf.n_clauses()
+        self.clauses.len()
     }
 
     pub fn n_objs(&self) -> usize {
         self.objs.len()
     }
 
-    pub fn iter_clauses(&self) -> std::slice::Iter<'_, Clause> {
-        self.cnf.iter()
+    pub fn iter_clauses(&self) -> impl Iterator<Item = &Clause> {
+        self.clauses.iter().map(|(cl, _)| cl)
     }
 }

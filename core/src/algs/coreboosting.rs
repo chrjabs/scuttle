@@ -2,25 +2,18 @@
 
 use std::io;
 
-use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
-    clause,
     encodings::{
-        card::{self, DbTotalizer},
-        nodedb::{NodeById, NodeCon, NodeId, NodeLike},
-        pb::{self, DbGte},
-        totdb::{Db as TotDb, Node, Semantics},
+        card::{self, Totalizer},
+        nodedb::{NodeById, NodeCon, NodeLike},
+        pb::{self, GeneralizedTotalizer},
+        totdb::{Db as TotDb, Node},
     },
-    instances::ManageVars,
     solvers::{Initialize, SolveIncremental, SolveStats},
-    types::RsHashMap,
 };
 use scuttle_proc::oracle_bounds;
 
-use crate::{
-    termination::ensure,
-    MaybeTerminatedError::{self, Done},
-};
+use crate::MaybeTerminatedError::{self, Done};
 
 use super::{
     coreguided::{Inactives, OllReformulation, ReformData},
@@ -49,9 +42,9 @@ pub(super) trait MergeOllRef {
     ) -> ObjEncoding<Self::PBE, Self::CE>;
 }
 
-impl MergeOllRef for (DbGte, DbTotalizer) {
-    type PBE = DbGte;
-    type CE = DbTotalizer;
+impl MergeOllRef for (GeneralizedTotalizer, Totalizer) {
+    type PBE = GeneralizedTotalizer;
+    type CE = Totalizer;
 
     fn merge_cons(
         mut cons: Vec<NodeCon>,
@@ -63,17 +56,23 @@ impl MergeOllRef for (DbGte, DbTotalizer) {
         if root.multiplier() == 1 {
             match &tot_db[root.id] {
                 Node::Leaf(_) | Node::Unit(_) => ObjEncoding::Unweighted(
-                    DbTotalizer::from_raw(root.id, root.offset(), tot_db),
+                    Totalizer::from_raw(root.id, root.offset(), tot_db),
                     offset,
                 ),
                 Node::General(_) => {
                     debug_assert!(root.offset() == 0);
-                    ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
+                    ObjEncoding::Weighted(
+                        GeneralizedTotalizer::from_raw(root, tot_db, max_leaf_weight),
+                        offset,
+                    )
                 }
                 Node::Dummy => unreachable!(),
             }
         } else {
-            ObjEncoding::Weighted(DbGte::from_raw(root, tot_db, max_leaf_weight), offset)
+            ObjEncoding::Weighted(
+                GeneralizedTotalizer::from_raw(root, tot_db, max_leaf_weight),
+                offset,
+            )
         }
     }
 
@@ -188,7 +187,7 @@ where
                                 )),
                             isize::try_from(reform.offset).unwrap(),
                         ),
-                        Some(pidgeons::ConstraintId::from(reform_id)),
+                        Some(pigeons::ConstraintId::from(reform_id)),
                     )?;
                 }
 
@@ -234,6 +233,7 @@ where
     OInit: Initialize<O>,
 {
     /// Performs inprocessing, i.e., preprocessing with MaxPre after core boosting.
+    #[cfg(feature = "maxpre")]
     pub fn inprocess<PBE, CE>(
         &mut self,
         techniques: &str,
@@ -242,6 +242,16 @@ where
     where
         (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     {
+        use maxpre::{MaxPre, PreproClauses};
+        use rustsat::{
+            clause,
+            encodings::{nodedb::NodeId, totdb::Semantics},
+            instances::ManageVars,
+            types::RsHashMap,
+        };
+
+        use crate::termination::ensure;
+
         debug_assert!(self.proof_stuff.is_none());
 
         ensure!(

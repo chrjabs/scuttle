@@ -1,9 +1,8 @@
 use std::{fs, io, thread};
 
-use maxpre::{MaxPre, PreproClauses};
 use rustsat::{
     encodings::{card, pb},
-    instances::{fio, ReindexVars},
+    instances::ReindexVars,
     solvers::{DefaultInitializer, Initialize},
     types::Assignment,
 };
@@ -23,19 +22,24 @@ type Oracle = CaDiCaL<'static, 'static>;
 
 /// P-Minimal instantiation used
 type PMin<OInit = CaDiCaLDefaultInit> =
-    PMinimal<Oracle, pb::DbGte, card::DbTotalizer, io::BufWriter<fs::File>, OInit>;
+    PMinimal<Oracle, pb::GeneralizedTotalizer, card::Totalizer, io::BufWriter<fs::File>, OInit>;
 /// BiOptSat Instantiation used
 type Bos<PBE, CE, OInit = CaDiCaLDefaultInit> =
     BiOptSat<Oracle, PBE, CE, io::BufWriter<fs::File>, OInit>;
 /// Lower-bounding instantiation used
-type Lb<OInit = CaDiCaLDefaultInit> =
-    LowerBounding<Oracle, pb::DbGte, card::DbTotalizer, io::BufWriter<fs::File>, OInit>;
+type Lb<OInit = CaDiCaLDefaultInit> = LowerBounding<
+    Oracle,
+    pb::GeneralizedTotalizer,
+    card::Totalizer,
+    io::BufWriter<fs::File>,
+    OInit,
+>;
 /// Paretop-k IHS instantiation used
 type Ihs<OInit = CaDiCaLDefaultInit> =
     ParetoIhs<Oracle, hitting_sets::HighsSolver, io::BufWriter<fs::File>, OInit>;
 
 macro_rules! run {
-    // with CB and proof
+    // with proof
     ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {
         if let Some(proof) = $proof {
             let mut alg = setup_alg_cert::<$slv>($cli, $inst, $kernel_opts, proof)?;
@@ -74,16 +78,10 @@ macro_rules! run {
         };
         post_solve(alg, $cli, $prepro, $reindexer)?;
     }};
-    // without CB and proof
-    (no-cb-no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cli:expr) => {{
-        let mut alg = setup_alg::<$slv>($cli, $inst, $kernel_opts)?;
-        handle_termination(alg.solve($cli.limits), $cli)?;
-        post_solve(alg, $cli, $prepro, $reindexer)?;
-    }};
 }
 
 macro_rules! dispatch_options {
-    // with CB and proof
+    // with proof
     ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {
         match $cli.cadical_config {
             CadicalConfig::Default => run!(
@@ -157,26 +155,6 @@ macro_rules! dispatch_options {
             }
         }
     };
-    // without CB and proof
-    (no-cb-no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cli:expr) => {
-        match $cli.cadical_config {
-            CadicalConfig::Default => {
-                run!(no-cb-no-proof: $slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
-            }
-            CadicalConfig::Plain => {
-                type Slv = $slv<CaDiCaLPlainInit>;
-                run!(no-cb-no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
-            }
-            CadicalConfig::Sat => {
-                type Slv = $slv<CaDiCaLSatInit>;
-                run!(no-cb-no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
-            }
-            CadicalConfig::Unsat => {
-                type Slv = $slv<CaDiCaLUnsatInit>;
-                run!(no-cb-no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cli)
-            }
-        }
-    };
 }
 
 fn main() -> anyhow::Result<()> {
@@ -202,40 +180,32 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
     let parsed = prepro::parse(cli.inst_path.clone(), cli.file_format, cli.opb_options)?;
 
     // MaxPre Preprocessing
-    let (prepro, inst) = if cli.preprocessing {
-        let (prepro, inst) = prepro::max_pre(parsed, &cli.maxpre_techniques, cli.maxpre_reindexing);
-        (Some(prepro), inst)
+    #[cfg(feature = "maxpre")]
+    let (prepro, proof, inst) = if cli.preprocessing {
+        anyhow::ensure!(
+            cli.proof_paths.is_none(),
+            "proof logging not supported with MaxPre preprocessing"
+        );
+        let (prepro, inst) =
+            prepro::max_pre(parsed, &cli.maxpre_techniques, cli.maxpre_reindexing)?;
+        (Some(prepro), None, inst)
     } else {
-        (None, prepro::handle_soft_clauses(parsed))
+        let (proof, inst) = prepro::to_clausal(parsed, &cli.proof_paths)?;
+        (None, proof, inst)
     };
+    #[cfg(not(feature = "maxpre"))]
+    let (prepro, (proof, inst)) = ((), prepro::to_clausal(parsed, &cli.proof_paths)?);
 
     // Reindexing
     let (inst, reindexer) = if cli.reindexing {
+        anyhow::ensure!(
+            cli.proof_paths.is_none(),
+            "proof logging not supported with reindexing"
+        );
         let (reind, inst) = prepro::reindexing(inst);
         (inst, Some(reind))
     } else {
         (inst, None)
-    };
-
-    let proof = if let Some((proof_path, veripb_input_path)) = &cli.proof_paths {
-        // Write constraints out for VeriPB
-        // FIXME: When receiving an OPB input file, we should certify the translation to CNF and
-        // simply strip the objectives for the VeriPB input
-        let mut writer = io::BufWriter::new(fs::File::create(veripb_input_path)?);
-        let iter = inst
-            .iter_clauses()
-            .map(|cl| fio::opb::FileLine::<Option<_>>::Clause(cl.clone()));
-        fio::opb::write_opb_lines(&mut writer, iter, fio::opb::Options::default())?;
-        // Initialize proof
-        Some(pidgeons::Proof::new_with_conclusion(
-            io::BufWriter::new(fs::File::create(proof_path)?),
-            inst.n_clauses(),
-            false,
-            pidgeons::OutputGuarantee::None,
-            &pidgeons::Conclusion::<&str>::Unsat(Some(pidgeons::ConstraintId::last(1))),
-        )?)
-    } else {
-        None
     };
 
     match cli.alg {
@@ -255,7 +225,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
                 PbEncoding::Gte => match card_enc {
                     CardEncoding::Tot => {
                         type BosEnc<OInit = DefaultInitializer> =
-                            Bos<pb::DbGte, card::DbTotalizer, OInit>;
+                            Bos<pb::GeneralizedTotalizer, card::Totalizer, OInit>;
                         dispatch_options!(
                             BosEnc, inst, proof, prepro, reindexer, opts, cb_opts, cli
                         )
@@ -304,7 +274,7 @@ fn setup_alg_cert<Alg>(
     cli: &Cli,
     inst: Instance,
     opts: KernelOptions,
-    proof: pidgeons::Proof<Alg::ProofWriter>,
+    proof: pigeons::Proof<Alg::ProofWriter>,
 ) -> anyhow::Result<Alg>
 where
     Alg: InitCertDefaultBlock + KernelFunctions,
@@ -335,7 +305,8 @@ where
 fn post_solve<Alg>(
     alg: Alg,
     cli: &Cli,
-    mut prepro: Option<MaxPre>,
+    #[cfg(feature = "maxpre")] mut prepro: Option<maxpre::MaxPre>,
+    #[cfg(not(feature = "maxpre"))] _: (),
     reindexer: Option<Reindexer>,
 ) -> io::Result<()>
 where
@@ -355,7 +326,9 @@ where
     };
 
     // Solution reconstruction
+    #[cfg(feature = "maxpre")]
     let pareto_front = if let Some(ref mut prepro) = prepro {
+        use maxpre::PreproClauses;
         pareto_front.convert_solutions(&mut |s| prepro.reconstruct(s))
     } else {
         pareto_front
@@ -372,7 +345,9 @@ where
     if let Some(stats) = estats {
         cli.print_encoding_stats(stats)?;
     }
+    #[cfg(feature = "maxpre")]
     if let Some(prepro) = prepro {
+        use maxpre::PreproClauses;
         cli.print_maxpre_stats(prepro.stats())?;
     }
 

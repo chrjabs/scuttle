@@ -1,3 +1,5 @@
+#![cfg(feature = "maxpre")]
+
 macro_rules! check_pf_shape {
     ($pf:expr, $t:expr) => {{
         let pps_set: rustsat::types::RsHashSet<(Vec<isize>, usize)> = $pf
@@ -22,7 +24,8 @@ macro_rules! test_instance {
             .unwrap(),
             $tech,
             true,
-        );
+        )
+        .unwrap();
         let mut solver = <$s>::from_instance_default_blocking(inst, $o).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = solver

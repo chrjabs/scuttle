@@ -2,9 +2,9 @@
 
 use std::io;
 
-use pidgeons::{AbsConstraintId, Conclusion, ConstraintId, OutputGuarantee, Proof};
+use pigeons::{AbsConstraintId, Conclusion, ConstraintId, OutputGuarantee, Proof};
 use rustsat::{
-    encodings::{CollectCertClauses, CollectClauses},
+    encodings::{cert::CollectClauses as CollectCertClauses, CollectClauses},
     solvers::SolverResult,
     types::{Clause, Lit, RsHashSet, Var},
 };
@@ -75,11 +75,11 @@ where
         self.cmap.add_clause_checked(veripb_id, id);
         #[cfg(feature = "verbose")]
         proof
-            .equals(clause, Some(pidgeons::ConstraintId::last(1)))
+            .equals(clause, Some(pigeons::ConstraintId::last(1)))
             .expect("failed to write proof");
         if !redundant {
             proof
-                .move_ids_to_core([pidgeons::ConstraintId::from(veripb_id)])
+                .move_ids_to_core([pigeons::ConstraintId::from(veripb_id)])
                 .expect("failed to write proof");
         }
         veripb_id
@@ -198,7 +198,7 @@ where
                     "[{}]",
                     self.assumptions
                         .iter()
-                        .map(|l| pidgeons::Axiom::from(*l))
+                        .map(|l| pigeons::Axiom::from(*l))
                         .format(", ")
                 ))
                 .expect("failed to write proof");
@@ -242,11 +242,11 @@ where
 {
     cfg_if::cfg_if! {
         if #[cfg(feature = "rup-hints")] {
-            use pidgeons::ConstraintId;
+            use pigeons::ConstraintId;
             proof.reverse_unit_prop(_clause, antecedents.into_iter().map(ConstraintId::from))
                 .expect("failed to write proof")
         } else {
-            use pidgeons::{OperationLike, OperationSequence};
+            use pigeons::{OperationLike, OperationSequence};
             let mut antecedents = antecedents.into_iter().rev();
             let Some(first) = antecedents.next() else {
                 panic!("need antecedents for derived clause")

@@ -4,34 +4,33 @@ exclude = ["rustsat", "maxpre-rs"]
 resolver = "2"
 
 [workspace.dependencies]
-anyhow = "1.0.86"
+anyhow = "1.0.98"
 atty = "0.2.14"
 cadical-veripb-tracer = { version = "0.1.0", path = "./cadical-veripb-tracer" }
 cfg-if = "1.0.0"
-clap = { version = "4.5.15", features = ["derive", "cargo"] }
+clap = { version = "4.5.36", features = ["derive", "cargo"] }
 cpu-time = "1.0.0"
 concolor-clap = "0.1.0"
-highs = { path = "../../highs" }
-#highs = { git = "https://github.com/chrjabs/highs.git", branch = "integer-vars" }
+highs = "1.9.0"
 hitting-sets = { path = "./hitting-sets" }
-itertools = "0.13.0"
-maxpre = { version = "0.2.2", path = "./maxpre-rs", features = ["multiopt"] }
-pidgeons = { version = "0.1.0", path = "./rustsat/pidgeons" }
-rustsat = { version = "0.5.0", path = "./rustsat", features = [
+itertools = "0.14.0"
+maxpre = { version = "0.2.3", path = "./maxpre-rs", features = ["multiopt"] }
+pigeons = { version = "0.1.1", path = "./rustsat/pigeons" }
+rustsat = { version = "0.7.1", path = "./rustsat", features = [
   "multiopt",
   "internals",
   "proof-logging",
 ] }
-rustsat-cadical = { version = "0.3", path = "./rustsat/cadical", features = [
-  "v2-0-0",
-  "pidgeons",
+rustsat-cadical = { version = "0.7.1", path = "./rustsat/cadical", features = [
+  "v2-1-3",
+  "pigeons",
 ] }
 signal-hook = "0.3.17"
 scuttle-core = { version = "0.4.0", path = "./core" }
 scuttle-proc = { version = "0.2", path = "./proc" }
-tempfile = "3.12.0"
+tempfile = "3.19.1"
 termcolor = "1.4.1"
-thiserror = "1.0.63"
+thiserror = "2.0.12"
 
 [package]
 name = "scuttle"
@@ -51,8 +50,8 @@ cpu-time.workspace = true
 clap.workspace = true
 concolor-clap.workspace = true
 hitting-sets.workspace = true
-maxpre.workspace = true
-pidgeons.workspace = true
+maxpre = { workspace = true, optional = true }
+pigeons.workspace = true
 rustsat.workspace = true
 rustsat-cadical.workspace = true
 scuttle-core = { workspace = true, features = ["clap"] }
@@ -62,6 +61,7 @@ thiserror.workspace = true
 
 [features]
 sol-tightening = ["scuttle-core/sol-tightening"]
+maxpre = ["dep:maxpre", "scuttle-core/maxpre"]
 
 [profile.release]
 lto = true
@@ -69,3 +69,7 @@ lto = true
 [profile.profiling]
 inherits = "release"
 debug = 1
+
+[patch.crates-io]
+highs = { git = "https://github.com/chrjabs/highs.git", branch = "integer-vars" }
+highs-sys = { git = "https://github.com/chrjabs/highs-sys.git", branch = "bindgen-0.71" }

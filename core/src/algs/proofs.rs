@@ -11,16 +11,16 @@ use std::{
 use std::sync::Mutex;
 
 use cadical_veripb_tracer::{CadicalCertCollector, CadicalTracer};
-use pidgeons::{
+use pigeons::{
     AbsConstraintId, Axiom, ConstraintId, ConstraintLike, Derivation, OperationLike,
     OperationSequence, Order, OrderVar, Proof, ProofGoal, ProofGoalId, ProofOnlyVar, Substitution,
     VarLike,
 };
 use rustsat::{
-    encodings::{atomics, card::DbTotalizer, pb::DbGte, CollectCertClauses},
-    instances::{Cnf, ManageVars},
+    encodings::{atomics, card::Totalizer, cert::CollectClauses, pb::GeneralizedTotalizer},
+    instances::ManageVars,
     solvers::Initialize,
-    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var, WLitIter},
+    types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var},
 };
 use rustsat_cadical::CaDiCaL;
 
@@ -36,18 +36,16 @@ pub trait InitCert: super::Init {
     type ProofWriter: io::Write;
 
     /// Initialization of the algorithm providing all optional input
-    fn new_cert<Cls, Objs, Obj>(
+    fn new_cert<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         proof: Proof<Self::ProofWriter>,
         block_clause_gen: <Self as super::Init>::BlockClauseGen,
     ) -> anyhow::Result<Self>
     where
-        Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter;
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>;
 
     /// Initialization of the algorithm using an [`Instance`] rather than iterators
     fn from_instance_cert(
@@ -56,23 +54,28 @@ pub trait InitCert: super::Init {
         proof: Proof<Self::ProofWriter>,
         block_clause_gen: <Self as super::Init>::BlockClauseGen,
     ) -> anyhow::Result<Self> {
-        Self::new_cert(inst.cnf, inst.objs, inst.vm, opts, proof, block_clause_gen)
+        Self::new_cert(
+            inst.clauses.into_iter().map(|(cl, id)| (cl, id.unwrap())),
+            inst.objs,
+            inst.vm,
+            opts,
+            proof,
+            block_clause_gen,
+        )
     }
 }
 
 pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clause> {
     /// Initializes the algorithm with the default blocking clause generator
-    fn new_default_blocking_cert<Cls, Objs, Obj>(
+    fn new_default_blocking_cert<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         opts: KernelOptions,
         proof: Proof<Self::ProofWriter>,
     ) -> anyhow::Result<Self>
     where
-        Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
     {
         Self::new_cert(
             clauses,
@@ -92,7 +95,7 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
         proof: Proof<Self::ProofWriter>,
     ) -> anyhow::Result<Self> {
         Self::new_cert(
-            inst.cnf,
+            inst.clauses.into_iter().map(|(cl, id)| (cl, id.unwrap())),
             inst.objs,
             inst.vm,
             opts,
@@ -119,6 +122,27 @@ pub struct ProofStuff<ProofW: io::Write> {
 pub enum Value {
     Identical(Lit),
     ObjAtLeast(usize, usize),
+}
+
+pub fn init_proof<W>(
+    writer: W,
+    n_constraints: usize,
+    objs: &[Objective],
+) -> io::Result<pigeons::Proof<W>>
+where
+    W: io::Write,
+{
+    let mut proof = pigeons::Proof::new_with_conclusion(
+        writer,
+        n_constraints,
+        false,
+        pigeons::OutputGuarantee::None,
+        &pigeons::Conclusion::<&str>::Unsat(Some(pigeons::ConstraintId::last(1))),
+    )?;
+    let order = crate::algs::proofs::objectives_as_order(objs);
+    proof.define_order(&order)?;
+    proof.load_order(order.name(), order.used_vars())?;
+    Ok(proof)
 }
 
 fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<Var>>> {
@@ -156,10 +180,7 @@ fn objectives_as_order(objs: &[Objective]) -> Order<Var, LbConstraint<OrderVar<V
 }
 
 pub fn certify_pmin_cut<ProofW>(
-    obj_encs: &[ObjEncoding<
-        rustsat::encodings::pb::DbGte,
-        rustsat::encodings::card::DbTotalizer,
-    >],
+    obj_encs: &[ObjEncoding<GeneralizedTotalizer, Totalizer>],
     objs: &[Objective],
     costs: &[usize],
     witness: &Assignment,
@@ -317,13 +338,16 @@ where
                     (None, Some(reform_id)) => {
                         // Cost is lower bound derived in core boosting
                         debug_assert!(*cst <= obj.lower_bound());
-                        Some(ProofGoal::new(
-                            ProofGoalId::specific(idx + 2),
-                            [Derivation::from(
-                                OperationSequence::from(ConstraintId::from(reform_id))
-                                    + ConstraintId::last(1),
-                            )],
-                        ))
+                        Some(
+                            ProofGoal::new(
+                                ProofGoalId::specific(idx + 2),
+                                [Derivation::from(
+                                    OperationSequence::from(ConstraintId::from(reform_id))
+                                        + ConstraintId::last(1),
+                                )],
+                            )
+                            .into(),
+                        )
                     }
                     (Some(lit), Some(def)) => {
                         // Prove that the witness dominates
@@ -335,13 +359,19 @@ where
                         }
                         conf_deriv *= obj.unit_weight();
                         conf_deriv += ConstraintId::last(2);
-                        Some(ProofGoal::new(
-                            ProofGoalId::specific(idx + 2),
-                            [
-                                Derivation::Rup(LbConstraint::clause([!lit]), vec![negation_id]),
-                                Derivation::from(conf_deriv),
-                            ],
-                        ))
+                        Some(
+                            ProofGoal::new(
+                                ProofGoalId::specific(idx + 2),
+                                [
+                                    Derivation::Rup(
+                                        LbConstraint::clause([!lit]),
+                                        vec![negation_id],
+                                    ),
+                                    Derivation::from(conf_deriv),
+                                ],
+                            )
+                            .into(),
+                        )
                     }
                     (_, None) => {
                         // Cost is trivial lower bound of objective or objective is trivial
@@ -383,7 +413,8 @@ where
                 Clause::default(),
                 vec![ConstraintId::last(1), cut_id.into()],
             )],
-        )],
+        )
+        .into()],
     )?;
 
     Ok(cut_id)
@@ -399,7 +430,7 @@ pub fn certify_assump_reification<ProofW>(
     oracle: &mut CaDiCaL<'_, '_>,
     proof_stuff: &mut ProofStuff<ProofW>,
     obj: &Objective,
-    enc: &ObjEncoding<DbGte, DbTotalizer>,
+    enc: &ObjEncoding<GeneralizedTotalizer, Totalizer>,
     value: usize,
     reif_lit: Lit,
     assumps: &[Lit],
@@ -533,7 +564,7 @@ pub fn linsu_certify_lower_bound<ProofW>(
     cost: usize,
     core: &[Lit],
     obj: &Objective,
-    encoding: &ObjEncoding<DbGte, DbTotalizer>,
+    encoding: &ObjEncoding<GeneralizedTotalizer, Totalizer>,
     proof_stuff: &mut ProofStuff<ProofW>,
     oracle: &mut rustsat_cadical::CaDiCaL<'_, '_>,
 ) -> io::Result<AbsConstraintId>
@@ -817,9 +848,11 @@ where
     OInit: Initialize<rustsat_cadical::CaDiCaL<'term, 'learn>>,
     BCG: Fn(Assignment) -> Clause,
 {
-    pub fn new_cert<Cls, Objs, Obj>(
+    /// **NOTE**: the order must be already loaded in the proof, e.g., through calling
+    /// [`init_proof`]
+    pub fn new_cert<Cls>(
         clauses: Cls,
-        objs: Objs,
+        objs: Vec<Objective>,
         var_manager: VarManager,
         bcg: BCG,
         proof: Proof<ProofW>,
@@ -827,11 +860,9 @@ where
     ) -> anyhow::Result<Self>
     where
         ProofW: io::Write + 'static,
-        Cls: IntoIterator<Item = Clause>,
-        Objs: IntoIterator<Item = (Obj, isize)>,
-        Obj: WLitIter,
+        Cls: IntoIterator<Item = (Clause, pigeons::AbsConstraintId)>,
     {
-        use rustsat::{encodings::CollectCertClauses, solvers::Solve};
+        use rustsat::{encodings::cert::CollectClauses, solvers::Solve};
 
         let mut stats = Stats {
             n_objs: 0,
@@ -842,9 +873,9 @@ where
         let mut oracle = OInit::init();
         let pt_handle = oracle.connect_proof_tracer(CadicalTracer::new(proof), true);
         oracle.reserve(var_manager.max_var().unwrap())?;
-        let clauses: Cnf = clauses.into_iter().collect();
+        let clauses: Vec<_> = clauses.into_iter().collect();
         let orig_cnf = if opts.store_cnf {
-            Some(clauses.clone())
+            Some(clauses.iter().map(|(cl, _)| cl.clone()).collect())
         } else {
             None
         };
@@ -852,18 +883,8 @@ where
 
         // Add clauses to solver
         let mut collector = CadicalCertCollector::new(&mut oracle, &pt_handle);
-        collector.extend_cert_clauses(
-            clauses
-                .into_iter()
-                .enumerate()
-                .map(|(idx, cl)| (cl, AbsConstraintId::new(idx + 1))),
-        )?;
+        collector.extend_cert_clauses(clauses)?;
 
-        let objs: Vec<_> = objs
-            .into_iter()
-            .enumerate()
-            .map(|(idx, (wlits, offset))| Objective::new(wlits, offset, idx))
-            .collect();
         stats.n_objs = objs.len();
         stats.n_real_objs = objs.iter().fold(0, |cnt, o| {
             if matches!(o, Objective::Constant { .. }) {
@@ -924,12 +945,6 @@ where
             oracle.interrupter()
         };
 
-        // Proof logging: write order to proof
-        let order = objectives_as_order(&objs);
-        let proof = oracle.proof_tracer_mut(&pt_handle).proof_mut();
-        proof.define_order(&order)?;
-        proof.load_order(order.name(), order.used_vars())?;
-
         Ok(Self {
             oracle,
             var_manager,
@@ -941,6 +956,7 @@ where
             opts,
             stats,
             lims: Limits::none(),
+            #[cfg(feature = "maxpre")]
             inpro: None,
             logger: None,
             term_flag: Arc::new(AtomicBool::new(false)),
@@ -965,7 +981,7 @@ mod tests {
         process::Command,
     };
 
-    use pidgeons::{Conclusion, ConstraintId, OutputGuarantee};
+    use pigeons::{Conclusion, ConstraintId, OutputGuarantee};
     use rustsat::lit;
 
     use crate::types::Objective;
@@ -995,9 +1011,9 @@ mod tests {
     fn new_proof(
         num_constraints: usize,
         optimization: bool,
-    ) -> pidgeons::Proof<tempfile::NamedTempFile> {
+    ) -> pigeons::Proof<tempfile::NamedTempFile> {
         let file = tempfile::NamedTempFile::new().expect("failed to create temporary proof file");
-        pidgeons::Proof::new_with_conclusion(
+        pigeons::Proof::new_with_conclusion(
             file,
             num_constraints,
             optimization,
@@ -1038,8 +1054,8 @@ mod tests {
         let formatted = format!("{order}");
         let expected = r#"def_order pareto
   vars
-    left u_x1 u_x2 u_x4 u_x43 u_x5 u_x3
-    right v_x1 v_x2 v_x4 v_x43 v_x5 v_x3
+    left u_x1 u_x43 u_x4 u_x2 u_x5 u_x3
+    right v_x1 v_x43 v_x4 v_x2 v_x5 v_x3
     aux
   end
   def
@@ -1049,7 +1065,7 @@ mod tests {
   end
   transitivity
     vars
-      fresh_right w_x1 w_x2 w_x4 w_x43 w_x5 w_x3
+      fresh_right w_x1 w_x43 w_x4 w_x2 w_x5 w_x3
     end
     proof
       proofgoal #1
@@ -1102,8 +1118,8 @@ end"#;
 
         let proof_file = proof
             .conclude(
-                pidgeons::OutputGuarantee::None,
-                &pidgeons::Conclusion::<&str>::None,
+                pigeons::OutputGuarantee::None,
+                &pigeons::Conclusion::<&str>::None,
             )
             .unwrap();
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();

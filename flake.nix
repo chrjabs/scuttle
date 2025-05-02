@@ -1,29 +1,55 @@
 {
-  description = "A VeriPB checker focused on performance";
+  description = "Rust library for tools and encodings related to SAT solving library";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
     systems.url = "github:nix-systems/default-linux";
 
-    custom.url = "github:chrjabs/nix-config";
-    custom.inputs.nixpkgs.follows = "nixpkgs";
+    nix-config.url = "github:chrjabs/nix-config";
+    nix-config.inputs.nixpkgs.follows = "nixpkgs";
+
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = {
+  outputs = inputs @ {
     self,
     nixpkgs,
     systems,
-    custom,
+    rust-overlay,
+    nix-config,
   }: let
-    forAllSystems = nixpkgs.lib.genAttrs (import systems);
-    pkgsFor = nixpkgs.legacyPackages;
+    lib = nixpkgs.lib;
+    pkgsFor = lib.genAttrs (import systems) (system: (import nixpkgs {
+      inherit system;
+      overlays = [(import rust-overlay)] ++ builtins.attrValues nix-config.overlays;
+    }));
+    forEachSystem = f: lib.genAttrs (import systems) (system: f pkgsFor.${system});
   in {
-    devShells = forAllSystems (system: {
-      default = pkgsFor.${system}.callPackage ./shell.nix {veripb = custom.packages.${system}.veripb;};
+    devShells = forEachSystem (pkgs: {
+      default = let
+        libs = with pkgs; [openssl xz bzip2];
+      in
+        pkgs.mkShell rec {
+          nativeBuildInputs = with pkgs; [
+            llvmPackages.bintools
+            pkg-config
+            clang
+            cmake
+            (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
+            cargo-nextest
+            veripb
+          ];
+          buildInputs = libs;
+          LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath libs;
+          PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig/";
+          VERIPB_CHECKER = lib.getExe pkgs.veripb;
+        };
     });
 
-    packages = forAllSystems (system: {
-      default = pkgsFor.${system}.callPackage ./package.nix {};
+    packages = forEachSystem (pkgs: {
+      tools = pkgs.callPackage ./tools {};
     });
   };
 }

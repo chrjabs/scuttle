@@ -6,30 +6,42 @@ Scuttle is a multi-objective MaxSAT solver written in Rust and based on the
 
 ## Publications
 
-This solver was used in our CP'23 paper on preprocessing for multi-objective
-optimization \[5\] and our CPAIOR'24 paper on core boosting \[6\].
-Additional material for the CP'23 paper can be found
-[here](https://bitbucket.org/coreo-group/mo-prepro) while material for the
-CPAIOR'24 paper is available in the `cpaior24/` directory in this repository.
+This solver was used in the following publications.
+For each publication, a tag (specified in brackets) marks the exact revision used:
+- CP'23 (`cp23`): "Preprocessing in SAT-Based Multi-Objective Combinatorial
+  Optimization" \[5\]. Additional material
+  [here](https://bitbucket.org/coreo-group/mo-prepro).
+- CPAIOR'24 (`cpaior24`): "Core Boosting in SAT-Based Multi-Objective
+  Optimization" \[6\]. Additional material in `cpaior24/`.
+- TACAS'25 (`tacas25`): "Certifying Pareto-Optimality in Multi-Objective
+  Maximum Satisfiability" \[7\]. Additional material in `tacas25/`.
 
 ## Algorithms
 
-| `--algorithm=`   | Description                                                               |
-| ---------------- | ------------------------------------------------------------------------- |
-| `p-minimal`      | P-Minimal model enumeration as described in \[1\] and \[2\]               |
-| `lower-bounding` | Lower-bounding search as described in \[3\] (called "core-guiding" there) |
-| `bioptsat`       | Sat-Unsat variant of the BiOptSat algorithm described in \[4\]            |
+| First argument   | Description                                                              |
+| ---------------- | ------------------------------------------------------------------------ |
+| `p-minimal`      | P-Minimal model enumeration as described in \[1\] and \[2\]              |
+| `lower-bounding` | Lower-bounding search as described in \[3\] (called "core-guided" there) |
+| `bioptsat`       | Sat-Unsat variant of the BiOptSat algorithm described in \[4\]           |
 
 ## Building
 
 **Note**: Scuttle requires nightly Rust, which can be installed via `rustup`.
 
 If you simply want a binary of the solver, you can install it from
-[crates.io](https://crates.io) by running `cargo +nightly install scuttle`.
+[crates.io](https://crates.io) by running `cargo +nightly install --locked scuttle`.
 
 To build the project from source, make sure to initialize the git submodules
 with `git submodule update --init --recursive`. You can then build `scuttle` by
 running `cargo +nightly build`.
+
+By default, MaxPre preprocessing is not included in the build anymore. To
+include preprocessing with MaxPre, add `--features=maxpre`.
+
+### Features
+
+- `sol-tightening`: includes heuristic tightening of solutions after they are found in the build
+- `maxpre`: includes preprocessing with MaxPre in the build
 
 ## What's The Name
 
@@ -55,3 +67,6 @@ _multi_-objective solver in _Rust_.
   Optimization_, CP 2023.
 - \[6\] Christoph Jabs and Jeremias Berg and Matti Järvisalo: _Core Boosting
   in SAT-Based Multi-Objective Optimization_, CPAIOR 2024.
+- \[7\] Christoph Jabs and Jeremias Berg and Bart Boergarts and Matti
+  Järvisalo: _Certifying Pareto-Optimality in
+  Multi-Objective Maximum Satisfiability_, TACAS 2025.

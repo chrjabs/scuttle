@@ -12,14 +12,16 @@ macro_rules! check_pf_shape {
 macro_rules! test_instance {
     ($s:ty, $o:expr, $i:expr, $t:expr) => {{
         use scuttle_core::{prepro, InitDefaultBlock, KernelFunctions, Solve};
-        let inst = prepro::handle_soft_clauses(
+        let (_, inst) = prepro::to_clausal(
             prepro::parse(
                 $i,
                 prepro::FileFormat::Infer,
                 rustsat::instances::fio::opb::Options::default(),
             )
             .unwrap(),
-        );
+            &None,
+        )
+        .unwrap();
         let mut solver = <$s>::from_instance_default_blocking(inst, $o).unwrap();
         solver.solve(scuttle_core::Limits::none()).unwrap();
         let pf = dbg!(solver.pareto_front());
@@ -28,14 +30,16 @@ macro_rules! test_instance {
     }};
     ($s:ty, $o:expr, $cbo:expr, $i:expr, $t:expr) => {{
         use scuttle_core::{prepro, CoreBoost, InitDefaultBlock, KernelFunctions, Solve};
-        let inst = prepro::handle_soft_clauses(
+        let (_, inst) = prepro::to_clausal(
             prepro::parse(
                 $i,
                 prepro::FileFormat::Infer,
                 rustsat::instances::fio::opb::Options::default(),
             )
             .unwrap(),
-        );
+            &None,
+        )
+        .unwrap();
         let mut solver = <$s>::from_instance_default_blocking(inst, $o).unwrap();
         let cont = solver.core_boost($cbo).unwrap();
         if cont {
