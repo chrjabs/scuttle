@@ -3,6 +3,42 @@ c Original instance file: /wrk-vakka/users/chrisjab/set-cover-generated/fixed-el
 c Lines containing clauses start with h
 c Soft clauses start either with o1 or o2, depending on which objective they belong to
 c All soft clauses are unit
+c 
+c meta:n-objs=2
+c ignore-test:lower-bounding
+c ignore-test:p-minimal:cert
+c ignore-test:p-minimal:cert:no-heur
+c ignore-test:p-minimal:cert:all-heur
+c ignore-test:p-minimal:cert:other-reserve
+c ignore-test:p-minimal:cert:other-sol-guided
+c ignore-test:p-minimal:cert:cb
+c ignore-test:p-minimal:cert:cb-rebase
+c ignore-test:bioptsat:cert
+c ignore-test:bioptsat:cert:no-heur
+c ignore-test:bioptsat:cert:all-heur
+c ignore-test:bioptsat:cert:other-reserve
+c ignore-test:bioptsat:cert:other-sol-guided
+c ignore-test:bioptsat:cert:cb
+c ignore-test:bioptsat:cert:cb-rebase
+c
+c non-dominated points
+c nd (302, 133), 1
+c nd (195, 228), 1
+c nd (253, 175), 1
+c nd (284, 143), 1
+c nd (173, 278), 1
+c nd (147, 289), 1
+c nd (223, 185), 1
+c nd (268, 162), 1
+c nd (343, 119), 1
+c nd (341, 123), 1
+c nd (325, 129), 1
+c nd (273, 152), 1
+c nd (264, 171), 1
+c nd (216, 216), 1
+c nd (220, 196), 1
+c nd (192, 266), 1
+c nd (185, 274), 1
 h 7 10 16 18 29 37 48 73 76 82 84 0
 h 15 26 28 30 51 56 60 66 78 0
 h 22 32 38 71 73 0

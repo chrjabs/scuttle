@@ -5,21 +5,23 @@ c 2 objectives
 c ( 206 34 ) soft clauses
 c objective offsets: ( 0 0 )
 c 
-c non-dominated points:
+c meta:n-objs=2,enum-data=false
+c ignore-test
 c 
-c (222, 33)
-c (223, 32)
-c (224, 31)
-c (226, 30)
-c (228, 29)
-c (230, 28)
-c (233, 27)
-c (235, 26)
-c (238, 25)
-c (240, 24)
-c (243, 23)
-c (248, 22)
-c (253, 21)
+c non-dominated points:
+c nd (222, 33)
+c nd (223, 32)
+c nd (224, 31)
+c nd (226, 30)
+c nd (228, 29)
+c nd (230, 28)
+c nd (233, 27)
+c nd (235, 26)
+c nd (238, 25)
+c nd (240, 24)
+c nd (243, 23)
+c nd (248, 22)
+c nd (253, 21)
 c
 h 1 2 3 4 0
 h 5 6 7 8 0

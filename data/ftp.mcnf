@@ -8,6 +8,17 @@ c 8895 hard clauses
 c 2 objectives
 c ( 490 490 ) soft clauses
 c objective offsets: ( 0 0 )
+c
+c meta:n-objs=2,enum-data=false
+c ignore-test
+c
+c non-dominated points
+c nd (345, 6125)
+c nd (356, 4760)
+c nd (364, 4150)
+c nd (373, 3845)
+c nd (383, 3390)
+c nd (392, 2760)
 h -2 132 133 134 135 0
 h -36 133 134 135 0
 h -40 132 134 135 0

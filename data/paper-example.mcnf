@@ -1,9 +1,11 @@
 c A Small MCNF example from the core boosting / proof logging paper
 c 
+c meta:n-objs=2
+c 
 c non-dominated points:
-c (4, 8)
-c (5, 7)
-c (6, 3)
+c nd (4, 8), 1
+c nd (5, 6), 1
+c nd (6, 3), 1
 c 
 h 1 2 3 0
 h 1 2 4 0

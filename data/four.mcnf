@@ -1,4 +1,12 @@
 c A Small MCNF example with four objectives
+c
+c meta:n-objs=4
+c
+c non-dominated points
+c nd (0, 0, 0, 1), 1
+c nd (0, 0, 1, 0), 1
+c nd (0, 1, 0, 0), 1
+c nd (1, 0, 0, 0), 1
 h 1 2 3 4 0
 o1 1 -1 0
 o2 1 -2 0

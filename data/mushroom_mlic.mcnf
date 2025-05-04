@@ -3,6 +3,35 @@ c Original instance file: /wrk/users/chrisjab/data-subsets/mushroom_1000_1.csv
 c Lines containing clauses start with h
 c Lines belonging to the first objective start with o1
 c Lines belonging to the second objective start with o2
+c
+c meta:n-objs=2,enum-data=false
+c ignore-test:bioptsat
+c ignore-test:lower-bounding
+c ignore-test:p-minimal:no-heur
+c ignore-test:p-minimal:all-heur
+c ignore-test:p-minimal:other-reserve
+c ignore-test:p-minimal:other-sol-guided
+c ignore-test:p-minimal:cb
+c ignore-test:p-minimal:cb-rebase
+c ignore-test:p-minimal:cert
+c ignore-test:p-minimal:cert:no-heur
+c ignore-test:p-minimal:cert:all-heur
+c ignore-test:p-minimal:cert:other-reserve
+c ignore-test:p-minimal:cert:other-sol-guided
+c ignore-test:p-minimal:cert:cb
+c ignore-test:p-minimal:cert:cb-rebase
+c
+c non-dominated points
+c nd (0, 505)
+c nd (2, 144)
+c nd (3, 60)
+c nd (4, 43)
+c nd (5, 29)
+c nd (6, 12)
+c nd (7, 7)
+c nd (8, 3)
+c nd (9, 2)
+c nd (10, 0)
 h -231 -6 0
 h -231 -9 0
 h -231 -14 0
