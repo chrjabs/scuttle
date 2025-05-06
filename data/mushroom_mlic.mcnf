@@ -20,6 +20,7 @@ c ignore-test:p-minimal:cert:other-reserve
 c ignore-test:p-minimal:cert:other-sol-guided
 c ignore-test:p-minimal:cert:cb
 c ignore-test:p-minimal:cert:cb-rebase
+c ignore-test:pareto-ihs
 c
 c non-dominated points
 c nd (0, 505)

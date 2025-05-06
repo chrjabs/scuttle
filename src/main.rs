@@ -11,7 +11,7 @@ use scuttle_core::{
     self, prepro,
     types::{Instance, Reindexer},
     BiOptSat, CoreBoost, InitCertDefaultBlock, InitDefaultBlock, KernelFunctions, KernelOptions,
-    LowerBounding, MaybeTerminatedError, PMinimal, Solve,
+    LowerBounding, MaybeTerminatedError, PMinimal, ParetoIhs, Solve,
 };
 
 mod cli;
@@ -34,9 +34,12 @@ type Lb<OInit = CaDiCaLDefaultInit> = LowerBounding<
     io::BufWriter<fs::File>,
     OInit,
 >;
+/// Paretop-k IHS instantiation used
+type Ihs<OInit = CaDiCaLDefaultInit> =
+    ParetoIhs<Oracle, hitting_sets::HighsSolver, io::BufWriter<fs::File>, OInit>;
 
-// TODO: this macro will potentially need a variant without core boosting
 macro_rules! run {
+    // with proof
     ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {
         if let Some(proof) = $proof {
             let mut alg = setup_alg_cert::<$slv>($cli, $inst, $kernel_opts, proof)?;
@@ -62,10 +65,23 @@ macro_rules! run {
             post_solve(alg, $cli, $prepro, $reindexer)?;
         }
     };
+    // without proof
+    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {{
+        let mut alg = setup_alg::<$slv>($cli, $inst, $kernel_opts)?;
+        let cont = if let Some(opts) = $cb_opts {
+            handle_termination(alg.core_boost(opts.clone()), $cli)?.unwrap_or(false)
+        } else {
+            true
+        };
+        if cont {
+            handle_termination(alg.solve($cli.limits), $cli)?;
+        };
+        post_solve(alg, $cli, $prepro, $reindexer)?;
+    }};
 }
 
-// TODO: this macro will potentially need a variant without core boosting
 macro_rules! dispatch_options {
+    // with proof
     ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {
         match $cli.cadical_config {
             CadicalConfig::Default => run!(
@@ -116,6 +132,26 @@ macro_rules! dispatch_options {
                     $cb_opts,
                     $cli
                 )
+            }
+        }
+    };
+    // without proof
+    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {
+        match $cli.cadical_config {
+            CadicalConfig::Default => {
+                run!(no-proof: $slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
+            }
+            CadicalConfig::Plain => {
+                type Slv = $slv<CaDiCaLPlainInit>;
+                run!(no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
+            }
+            CadicalConfig::Sat => {
+                type Slv = $slv<CaDiCaLSatInit>;
+                run!(no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
+            }
+            CadicalConfig::Unsat => {
+                type Slv = $slv<CaDiCaLUnsatInit>;
+                run!(no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
             }
         }
     };
@@ -199,6 +235,9 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
         }
         Algorithm::LowerBounding(opts, ref cb_opts) => {
             dispatch_options!(Lb, inst, proof, prepro, reindexer, opts, cb_opts, cli)
+        }
+        Algorithm::ParetoIhs(opts, ref cb_opts) => {
+            dispatch_options!(no-proof: Ihs, inst, prepro, reindexer, opts, cb_opts, cli)
         }
     }
     Ok(())

@@ -1,6 +1,8 @@
 c A Medium MCNF example
 c
 c meta:n-objs=2
+c
+c ignore-test:pareto-ihs
 c 
 c non-dominated points:
 c nd (0, 10), 1

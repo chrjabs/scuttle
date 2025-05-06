@@ -37,6 +37,7 @@ use crate::{
 };
 
 pub mod bioptsat;
+pub mod ihs;
 pub mod lowerbounding;
 pub mod pminimal;
 

@@ -40,7 +40,7 @@ use crate::{
     options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
     termination::ensure,
     types::{ParetoFront, VarManager},
-    EncodingStats, ExtendedSolveStats, KernelFunctions, KernelOptions, Limits,
+    EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
     MaybeTerminatedError::{self, Done},
     Phase,
 };

@@ -11,6 +11,7 @@ repository = "https://github.com/chrjabs/scuttle"
 anyhow.workspace = true
 cadical-veripb-tracer.workspace = true
 clap = { workspace = true, optional = true }
+hitting-sets.workspace = true
 itertools.workspace = true
 maxpre = { workspace = true, optional = true }
 pigeons.workspace = true

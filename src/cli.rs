@@ -126,6 +126,14 @@ enum AlgorithmCommand {
         #[command(flatten)]
         proof: ProofArgs,
     },
+    /// Paretop-k IHS
+    ParetoIhs {
+        /// Log extracted hitting set values
+        #[arg(long)]
+        log_hitting_sets: bool,
+        #[command(flatten)]
+        file: FileArgs,
+    },
 }
 
 #[derive(Args)]
@@ -334,6 +342,7 @@ impl From<LogArgs> for LoggerConfig {
             log_bound_points: value.log_bound_points || value.verbosity >= 2,
             log_cores: value.log_cores || value.verbosity >= 2,
             log_inpro: value.log_inprocessing || value.verbosity >= 1,
+            log_hitting_sets: false,
         }
     }
 }
@@ -531,6 +540,7 @@ pub enum Algorithm {
         Option<CoreBoostingOptions>,
     ),
     LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
+    ParetoIhs(KernelOptions, Option<CoreBoostingOptions>),
 }
 
 impl fmt::Display for Algorithm {
@@ -539,6 +549,7 @@ impl fmt::Display for Algorithm {
             Algorithm::PMinimal(..) => write!(f, "p-pminimal"),
             Algorithm::BiOptSat(..) => write!(f, "bioptsat"),
             Algorithm::LowerBounding(..) => write!(f, "lower-bounding"),
+            Algorithm::ParetoIhs(..) => write!(f, "pareto-ihs"),
         }
     }
 }
@@ -681,6 +692,38 @@ impl Cli {
                     proof_paths,
                 }
             }
+            AlgorithmCommand::ParetoIhs {
+                log_hitting_sets,
+                file,
+            } => Cli {
+                limits: args.limits.into(),
+                file_format: file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: file.inst_path.clone(),
+                #[cfg(feature = "maxpre")]
+                preprocessing: args.prepro.preprocessing.into(),
+                #[cfg(feature = "maxpre")]
+                maxpre_techniques: args.prepro.maxpre_techniques.clone(),
+                reindexing: args.prepro.reindexing.into(),
+                #[cfg(feature = "maxpre")]
+                maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
+                cadical_config: args.cadical_config,
+                stdout: stdout(args.log.color),
+                stderr: stderr(args.log.color),
+                print_solver_config: args.log.print_solver_config,
+                print_solutions: args.log.print_solutions,
+                print_stats: !args.log.no_print_stats,
+                color: args.log.color,
+                logger_config: LoggerConfig {
+                    log_hitting_sets: log_hitting_sets || args.log.verbosity >= 2,
+                    ..args.log.into()
+                },
+                alg: Algorithm::ParetoIhs(kernel_opts, cb),
+                proof_paths: None,
+            },
         }
     }
 
@@ -778,13 +821,21 @@ impl Cli {
             writeln!(buffer, ": ")?;
             buffer.reset()?;
             match &self.alg {
-                Algorithm::PMinimal(opts, cb_opts) | Algorithm::LowerBounding(opts, cb_opts) => {
+                Algorithm::PMinimal(opts, cb_opts)
+                | Algorithm::LowerBounding(opts, cb_opts)
+                | Algorithm::ParetoIhs(opts, cb_opts) => {
                     Self::print_parameter(
                         &mut buffer,
                         "enumeration",
                         EnumPrinter::new(opts.enumeration),
                     )?;
-                    Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
+                    if !matches!(self.alg, Algorithm::ParetoIhs(..)) {
+                        Self::print_parameter(
+                            &mut buffer,
+                            "reserve-enc-vars",
+                            opts.reserve_enc_vars,
+                        )?;
+                    }
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
                 }
                 Algorithm::BiOptSat(opts, pb_enc, card_enc, cb_opts) => {
@@ -1049,6 +1100,7 @@ struct LoggerConfig {
     log_bound_points: bool,
     log_cores: bool,
     log_inpro: bool,
+    log_hitting_sets: bool,
 }
 
 pub struct CliLogger {
@@ -1310,6 +1362,22 @@ impl WriteSolverLog for CliLogger {
         let mut buffer = self.stdout.buffer();
         writeln!(buffer, "{}", msg)?;
         self.stdout.print(&buffer)?;
+        Ok(())
+    }
+
+    fn log_hitting_set(&mut self, hitting_set_val: f64, optimal: bool) -> anyhow::Result<()> {
+        if self.config.log_hitting_sets {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
+            write!(buffer, "extracted hitting set")?;
+            buffer.reset()?;
+            write!(buffer, ": val {} ", hitting_set_val.round())?;
+            if optimal {
+                write!(buffer, "(optimal)")?;
+            }
+            writeln!(buffer, "")?;
+            self.stdout.print(&buffer)?;
+        }
         Ok(())
     }
 }

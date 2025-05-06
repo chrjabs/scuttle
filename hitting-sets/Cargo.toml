@@ -1,0 +1,12 @@
+[package]
+name = "hitting-sets"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["highs"]
+highs = ["dep:highs"]
+
+[dependencies]
+highs = { workspace = true, optional = true }
+rustsat.workspace = true

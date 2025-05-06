@@ -32,7 +32,7 @@
       in
         pkgs.mkShell rec {
           nativeBuildInputs = with pkgs; [
-            llvmPackages_12.bintools
+            llvmPackages.bintools
             pkg-config
             clang
             cmake
@@ -41,7 +41,7 @@
             veripb
           ];
           buildInputs = libs;
-          LIBCLANG_PATH = lib.makeLibraryPath [pkgs.llvmPackages_12.libclang.lib];
+          LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath libs;
           PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig/";
           VERIPB_CHECKER = lib.getExe pkgs.veripb;

@@ -80,6 +80,33 @@ fn main() {
     }
 
     let vars = [
+        ("", KernelOptions::default()),
+        (
+            "core-min",
+            KernelOptions {
+                core_minimization: true,
+                ..KernelOptions::default()
+            },
+        ),
+    ];
+    for (id, opts) in vars {
+        tests.extend(
+            TestSetup::new(
+                "pareto-ihs",
+                id,
+                run_test::<
+                    scuttle_core::ParetoIhs<
+                        rustsat_cadical::CaDiCaL<'static, 'static>,
+                        hitting_sets::HighsSolver,
+                    >,
+                >,
+                opts,
+            )
+            .collect_tests(),
+        );
+    }
+
+    let vars = [
         ("cb", CoreBoostingOptions::default()),
         (
             "cb-rebase",
