@@ -34,6 +34,7 @@ pub struct ParetoIhs<
     kernel: Kernel<O, ProofW, OInit, BCG>,
     hitting_set_solver: Hss,
     objective_lits: RsHashSet<Lit>,
+    n_seeded: usize,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
     /// Archive of candidate solutions
@@ -105,6 +106,7 @@ where
             .iter()
             .flat_map(|obj| obj.iter().map(|(lit, _)| lit.var()))
             .collect();
+        let mut n_seeded = 0;
         'outer: for cl in &clauses {
             for lit in cl {
                 if !obj_vars.contains(&lit.var()) {
@@ -112,6 +114,7 @@ where
                 }
             }
             hitting_set_solver.add_core(cl);
+            n_seeded += 1;
         }
         let objective_lits: RsHashSet<_> = objs
             .iter()
@@ -123,6 +126,7 @@ where
             kernel,
             hitting_set_solver,
             objective_lits,
+            n_seeded,
             pareto_front: Default::default(),
             candidates: Default::default(),
         })
@@ -152,6 +156,11 @@ where
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> MaybeTerminatedError {
         self.kernel.log_routine_start("ihs")?;
+        if let Some(logger) = &mut self.kernel.logger {
+            logger.log_seeding_ratio(
+                self.kernel.stats.n_orig_clauses as f64 / self.n_seeded as f64,
+            )?;
+        }
         let mut want_optimal = false;
         loop {
             self.kernel.log_routine_start("extract hitting set")?;
@@ -161,7 +170,6 @@ where
                     if want_optimal {
                         self.hitting_set_solver.optimal_hitting_set().into()
                     } else {
-                        dbg!(target);
                         self.hitting_set_solver.hitting_set(target - 1)
                     }
                 } else {
@@ -290,7 +298,6 @@ where
                     if want_optimal {
                         self.hitting_set_solver.optimal_hitting_set().into()
                     } else {
-                        dbg!(target);
                         self.hitting_set_solver.hitting_set(target - 1)
                     }
                 } else {

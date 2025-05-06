@@ -131,6 +131,9 @@ enum AlgorithmCommand {
         /// Log extracted hitting set values
         #[arg(long)]
         log_hitting_sets: bool,
+        /// Log ratio of seeded constraints
+        #[arg(long)]
+        log_seeding_ratio: bool,
         #[command(flatten)]
         file: FileArgs,
     },
@@ -343,6 +346,7 @@ impl From<LogArgs> for LoggerConfig {
             log_cores: value.log_cores || value.verbosity >= 2,
             log_inpro: value.log_inprocessing || value.verbosity >= 1,
             log_hitting_sets: false,
+            log_seeding_ratio: false,
         }
     }
 }
@@ -694,6 +698,7 @@ impl Cli {
             }
             AlgorithmCommand::ParetoIhs {
                 log_hitting_sets,
+                log_seeding_ratio,
                 file,
             } => Cli {
                 limits: args.limits.into(),
@@ -719,6 +724,7 @@ impl Cli {
                 color: args.log.color,
                 logger_config: LoggerConfig {
                     log_hitting_sets: log_hitting_sets || args.log.verbosity >= 2,
+                    log_seeding_ratio: log_seeding_ratio || args.log.verbosity >= 1,
                     ..args.log.into()
                 },
                 alg: Algorithm::ParetoIhs(kernel_opts, cb),
@@ -1101,6 +1107,7 @@ struct LoggerConfig {
     log_cores: bool,
     log_inpro: bool,
     log_hitting_sets: bool,
+    log_seeding_ratio: bool,
 }
 
 pub struct CliLogger {
@@ -1376,6 +1383,18 @@ impl WriteSolverLog for CliLogger {
                 write!(buffer, "(optimal)")?;
             }
             writeln!(buffer, "")?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
+
+    fn log_seeding_ratio(&mut self, ratio: f64) -> anyhow::Result<()> {
+        if self.config.log_seeding_ratio {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
+            write!(buffer, "seeding ratio")?;
+            buffer.reset()?;
+            writeln!(buffer, ": {ratio}")?;
             self.stdout.print(&buffer)?;
         }
         Ok(())

@@ -144,4 +144,6 @@ pub trait WriteSolverLog {
     fn log_message(&mut self, msg: &str) -> anyhow::Result<()>;
     /// Logs a hitting set value
     fn log_hitting_set(&mut self, hitting_set_val: f64, optimal: bool) -> anyhow::Result<()>;
+    /// Log the seeding ratio of the hitting set algorithm
+    fn log_seeding_ratio(&mut self, ratio: f64) -> anyhow::Result<()>;
 }
