@@ -567,9 +567,11 @@ mod setup {
                             let opts = self.opts.clone();
                             #[cfg(not(feature = "maxpre"))]
                             tests.push(
-                                Trial::test(name, move || run_test(&path, run_fn, opts, sol_enum))
-                                    .with_kind(self.kind())
-                                    .with_ignored_flag(dec == Decision::Ignore),
+                                Trial::test(name, move || {
+                                    run_test(&path, run_fn, opts, self.sol_enum)
+                                })
+                                .with_kind(self.kind())
+                                .with_ignored_flag(dec == Decision::Ignore),
                             );
                             #[cfg(feature = "maxpre")]
                             if let Some(tech) = self.techniques {

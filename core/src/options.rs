@@ -7,8 +7,7 @@ use std::fmt;
 use crate::Phase;
 
 /// Solver-wide configuration options
-#[derive(Clone, Copy)]
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct KernelOptions {
     /// The Pareto point enumeration mode
     pub enumeration: EnumOptions,
@@ -27,7 +26,6 @@ pub struct KernelOptions {
     /// Store the original clauses
     pub store_cnf: bool,
 }
-
 
 impl KernelOptions {
     pub fn set_enumeration(&mut self, enumeration: EnumOptions) {
