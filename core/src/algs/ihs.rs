@@ -2,7 +2,7 @@
 
 use std::io;
 
-use hitting_sets::{BuildSolver, HittingSetSolver, IncompleteSolveResult};
+use hitting_sets::{BuildSolver, CompleteSolveResult, HittingSetSolver, IncompleteSolveResult};
 use rustsat::{
     solvers::{
         DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
@@ -161,6 +161,13 @@ where
                 self.kernel.stats.n_orig_clauses as f64 / self.n_seeded as f64,
             )?;
         }
+        if (self.kernel.stats.n_orig_clauses as f64 / self.n_seeded as f64 - 1.0).abs()
+            < f64::EPSILON
+        {
+            let term = self.main_fully_seeded();
+            self.kernel.log_routine_end()?;
+            return term;
+        }
         let mut want_optimal = false;
         loop {
             self.kernel.log_routine_start("extract hitting set")?;
@@ -269,6 +276,58 @@ where
                 SolverResult::Interrupted => unreachable!(),
             }
         }
+    }
+
+    fn main_fully_seeded(&mut self) -> MaybeTerminatedError {
+        debug_assert!(
+            (self.kernel.stats.n_orig_clauses as f64 / self.n_seeded as f64 - 1.0).abs()
+                < f64::EPSILON
+        );
+        self.kernel.log_routine_start("ihs (fully seeded)")?;
+        loop {
+            self.kernel.log_routine_start("extract hitting set")?;
+            let hitting_set_answer = self.hitting_set_solver.optimal_hitting_set();
+            let (cost, hitting_set) = match hitting_set_answer {
+                CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
+                CompleteSolveResult::Infeasible => {
+                    self.kernel.log_routine_end()?;
+                    self.kernel.log_routine_end()?;
+                    return Done(());
+                }
+            };
+            self.kernel.log_routine_end()?;
+            if let Some(logger) = &mut self.kernel.logger {
+                logger.log_hitting_set(cost, true)?;
+            }
+            self.kernel.check_termination()?;
+            let (mut costs, solution) =
+                self.hitting_set_to_solution_and_internal_costs(hitting_set)?;
+            // store solution
+            self.kernel
+                .yield_solutions(costs.clone(), &[], solution, &mut self.pareto_front)?;
+            // introduce PD cut in the hitting set solver
+            for (obj, cost) in self.kernel.objs.iter().zip(&mut costs) {
+                if let Objective::Unweighted { unit_weight, .. } = obj {
+                    *cost *= *unit_weight;
+                }
+            }
+            self.hitting_set_solver.add_pd_cut(&costs);
+        }
+    }
+
+    fn hitting_set_to_solution_and_internal_costs(
+        &mut self,
+        hitting_set: Vec<Lit>,
+    ) -> anyhow::Result<(Vec<usize>, Assignment)> {
+        let mut sol: Assignment = hitting_set.into_iter().collect();
+        let costs = (0..self.kernel.objs.len())
+            .map(|idx| {
+                self.kernel
+                    .get_cost_with_heuristic_improvements(idx, &mut sol, false)
+            })
+            .collect::<Result<Vec<usize>, _>>()?;
+        debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
+        Ok((costs, sol))
     }
 }
 
