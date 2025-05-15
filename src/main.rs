@@ -10,7 +10,7 @@ use rustsat_cadical::CaDiCaL;
 use scuttle_core::{
     self, prepro,
     types::{Instance, Reindexer},
-    BiOptSat, CoreBoost, InitCertDefaultBlock, InitDefaultBlock, KernelFunctions, KernelOptions,
+    BiOptSat, CoreBoost, Init, InitCertDefaultBlock, InitDefaultBlock, KernelFunctions,
     LowerBounding, MaybeTerminatedError, PMinimal, ParetoIhs, Solve,
 };
 
@@ -40,9 +40,9 @@ type Ihs<OInit = CaDiCaLDefaultInit> =
 
 macro_rules! run {
     // with proof
-    ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {
+    ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $opts:expr, $cb_opts:expr, $cli:expr) => {
         if let Some(proof) = $proof {
-            let mut alg = setup_alg_cert::<$slv>($cli, $inst, $kernel_opts, proof)?;
+            let mut alg = setup_alg_cert::<$slv>($cli, $inst, $opts, proof)?;
             let cont = if let Some(opts) = $cb_opts {
                 handle_termination(alg.core_boost(opts.clone()), $cli)?.unwrap_or(false)
             } else {
@@ -53,7 +53,7 @@ macro_rules! run {
             };
             post_solve(alg, $cli, $prepro, $reindexer)?;
         } else {
-            let mut alg = setup_alg::<$slv>($cli, $inst, $kernel_opts)?;
+            let mut alg = setup_alg::<$slv>($cli, $inst, $opts)?;
             let cont = if let Some(opts) = $cb_opts {
                 handle_termination(alg.core_boost(opts.clone()), $cli)?.unwrap_or(false)
             } else {
@@ -66,8 +66,8 @@ macro_rules! run {
         }
     };
     // without proof
-    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {{
-        let mut alg = setup_alg::<$slv>($cli, $inst, $kernel_opts)?;
+    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $opts:expr, $cb_opts:expr, $cli:expr) => {{
+        let mut alg = setup_alg::<$slv>($cli, $inst, $opts)?;
         let cont = if let Some(opts) = $cb_opts {
             handle_termination(alg.core_boost(opts.clone()), $cli)?.unwrap_or(false)
         } else {
@@ -82,76 +82,42 @@ macro_rules! run {
 
 macro_rules! dispatch_options {
     // with proof
-    ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {
+    ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $opts:expr, $cb_opts:expr, $cli:expr) => {
         match $cli.cadical_config {
-            CadicalConfig::Default => run!(
-                $slv,
-                $inst,
-                $proof,
-                $prepro,
-                $reindexer,
-                $kernel_opts,
-                $cb_opts,
-                $cli
-            ),
+            CadicalConfig::Default => {
+                run!($slv, $inst, $proof, $prepro, $reindexer, $opts, $cb_opts, $cli)
+            }
             CadicalConfig::Plain => {
                 type Slv = $slv<CaDiCaLPlainInit>;
-                run!(
-                    Slv,
-                    $inst,
-                    $proof,
-                    $prepro,
-                    $reindexer,
-                    $kernel_opts,
-                    $cb_opts,
-                    $cli
-                )
+                run!(Slv, $inst, $proof, $prepro, $reindexer, $opts, $cb_opts, $cli)
             }
             CadicalConfig::Sat => {
                 type Slv = $slv<CaDiCaLSatInit>;
-                run!(
-                    Slv,
-                    $inst,
-                    $proof,
-                    $prepro,
-                    $reindexer,
-                    $kernel_opts,
-                    $cb_opts,
-                    $cli
-                )
+                run!(Slv, $inst, $proof, $prepro, $reindexer, $opts, $cb_opts, $cli)
             }
             CadicalConfig::Unsat => {
                 type Slv = $slv<CaDiCaLUnsatInit>;
-                run!(
-                    Slv,
-                    $inst,
-                    $proof,
-                    $prepro,
-                    $reindexer,
-                    $kernel_opts,
-                    $cb_opts,
-                    $cli
-                )
+                run!(Slv, $inst, $proof, $prepro, $reindexer, $opts, $cb_opts, $cli)
             }
         }
     };
     // without proof
-    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $kernel_opts:expr, $cb_opts:expr, $cli:expr) => {
+    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $opts:expr, $cb_opts:expr, $cli:expr) => {
         match $cli.cadical_config {
             CadicalConfig::Default => {
-                run!(no-proof: $slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
+                run!(no-proof: $slv, $inst, $prepro, $reindexer, $opts, $cb_opts, $cli)
             }
             CadicalConfig::Plain => {
                 type Slv = $slv<CaDiCaLPlainInit>;
-                run!(no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
+                run!(no-proof: Slv, $inst, $prepro, $reindexer, $opts, $cb_opts, $cli)
             }
             CadicalConfig::Sat => {
                 type Slv = $slv<CaDiCaLSatInit>;
-                run!(no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
+                run!(no-proof: Slv, $inst, $prepro, $reindexer, $opts, $cb_opts, $cli)
             }
             CadicalConfig::Unsat => {
                 type Slv = $slv<CaDiCaLUnsatInit>;
-                run!(no-proof: Slv, $inst, $prepro, $reindexer, $kernel_opts, $cb_opts, $cli)
+                run!(no-proof: Slv, $inst, $prepro, $reindexer, $opts, $cb_opts, $cli)
             }
         }
     };
@@ -243,7 +209,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn setup_alg<Alg>(cli: &Cli, inst: Instance, opts: KernelOptions) -> anyhow::Result<Alg>
+fn setup_alg<Alg>(cli: &Cli, inst: Instance, opts: <Alg as Init>::Options) -> anyhow::Result<Alg>
 where
     Alg: InitDefaultBlock + KernelFunctions,
 {
@@ -273,7 +239,7 @@ where
 fn setup_alg_cert<Alg>(
     cli: &Cli,
     inst: Instance,
-    opts: KernelOptions,
+    opts: <Alg as Init>::Options,
     proof: pigeons::Proof<Alg::ProofWriter>,
 ) -> anyhow::Result<Alg>
 where

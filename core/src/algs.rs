@@ -50,13 +50,14 @@ pub use proofs::{InitCert, InitCertDefaultBlock};
 pub trait Init: Sized {
     type Oracle: SolveIncremental;
     type BlockClauseGen: Fn(Assignment) -> Clause;
+    type Options: Default = KernelOptions;
 
     /// Initialization of the algorithm providing all optional input
     fn new<Cls>(
         clauses: Cls,
         objs: Vec<Objective>,
         var_manager: VarManager,
-        opts: KernelOptions,
+        opts: Self::Options,
         block_clause_gen: Self::BlockClauseGen,
     ) -> anyhow::Result<Self>
     where
@@ -65,7 +66,7 @@ pub trait Init: Sized {
     /// Initialization of the algorithm using an [`Instance`] rather than iterators
     fn from_instance(
         inst: Instance,
-        opts: KernelOptions,
+        opts: Self::Options,
         block_clause_gen: Self::BlockClauseGen,
     ) -> anyhow::Result<Self> {
         Self::new(
@@ -84,7 +85,7 @@ pub trait InitDefaultBlock: Init<BlockClauseGen = fn(Assignment) -> Clause> {
         clauses: Cls,
         objs: Vec<Objective>,
         var_manager: VarManager,
-        opts: KernelOptions,
+        opts: <Self as Init>::Options,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
@@ -94,7 +95,10 @@ pub trait InitDefaultBlock: Init<BlockClauseGen = fn(Assignment) -> Clause> {
 
     /// Initializes the algorithm using an [`Instance`] rather than iterators with the default
     /// blocking clause generator
-    fn from_instance_default_blocking(inst: Instance, opts: KernelOptions) -> anyhow::Result<Self> {
+    fn from_instance_default_blocking(
+        inst: Instance,
+        opts: <Self as Init>::Options,
+    ) -> anyhow::Result<Self> {
         Self::new(
             inst.clauses.into_iter().map(|(cl, _)| cl),
             inst.objs,

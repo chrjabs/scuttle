@@ -6,7 +6,7 @@ use scuttle_core::{
     algs::{InitDefaultBlock, Solve},
     options::EnumOptions,
     types::{Instance, ParetoFront},
-    CoreBoost, CoreBoostingOptions, InitCert, InitCertDefaultBlock, KernelOptions,
+    CoreBoost, CoreBoostingOptions, Init, InitCert, InitCertDefaultBlock, KernelOptions,
 };
 
 use setup::TestSetup;
@@ -346,7 +346,7 @@ fn main() {
     libtest_mimic::run(&args, tests).exit();
 }
 
-fn run_test<Alg>(inst: Instance, opts: KernelOptions) -> Result<ParetoFront, Failed>
+fn run_test<Alg>(inst: Instance, opts: <Alg as Init>::Options) -> Result<ParetoFront, Failed>
 where
     Alg: InitDefaultBlock + Solve,
 {
@@ -367,7 +367,7 @@ fn run_cb_test<Alg>(inst: Instance, cb_opts: CoreBoostingOptions) -> Result<Pare
 where
     Alg: InitDefaultBlock + Solve + CoreBoost,
 {
-    let mut alg = Alg::from_instance_default_blocking(inst, KernelOptions::default())?;
+    let mut alg = Alg::from_instance_default_blocking(inst, <Alg as Init>::Options::default())?;
     let cont = match alg.core_boost(cb_opts) {
         scuttle_core::MaybeTerminatedError::Done(cont) => cont,
         scuttle_core::MaybeTerminatedError::Terminated(t) => {
@@ -394,7 +394,7 @@ where
 fn run_certified_test<Alg>(
     inst: Instance,
     proof: Proof<BufWriter<File>>,
-    opts: KernelOptions,
+    opts: <Alg as Init>::Options,
 ) -> Result<ParetoFront, Failed>
 where
     Alg: InitCert<ProofWriter = BufWriter<File>> + InitCertDefaultBlock + Solve,
@@ -420,7 +420,8 @@ fn run_certified_cb_test<Alg>(
 where
     Alg: InitCert<ProofWriter = BufWriter<File>> + InitCertDefaultBlock + Solve + CoreBoost,
 {
-    let mut alg = Alg::from_instance_default_blocking_cert(inst, KernelOptions::default(), proof)?;
+    let mut alg =
+        Alg::from_instance_default_blocking_cert(inst, <Alg as Init>::Options::default(), proof)?;
     let cont = match alg.core_boost(cb_opts) {
         scuttle_core::MaybeTerminatedError::Done(cont) => cont,
         scuttle_core::MaybeTerminatedError::Terminated(t) => {

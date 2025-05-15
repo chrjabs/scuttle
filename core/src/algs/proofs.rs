@@ -40,7 +40,7 @@ pub trait InitCert: super::Init {
         clauses: Cls,
         objs: Vec<Objective>,
         var_manager: VarManager,
-        opts: KernelOptions,
+        opts: <Self as super::Init>::Options,
         proof: Proof<Self::ProofWriter>,
         block_clause_gen: <Self as super::Init>::BlockClauseGen,
     ) -> anyhow::Result<Self>
@@ -50,7 +50,7 @@ pub trait InitCert: super::Init {
     /// Initialization of the algorithm using an [`Instance`] rather than iterators
     fn from_instance_cert(
         inst: Instance,
-        opts: KernelOptions,
+        opts: <Self as super::Init>::Options,
         proof: Proof<Self::ProofWriter>,
         block_clause_gen: <Self as super::Init>::BlockClauseGen,
     ) -> anyhow::Result<Self> {
@@ -71,7 +71,7 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
         clauses: Cls,
         objs: Vec<Objective>,
         var_manager: VarManager,
-        opts: KernelOptions,
+        opts: <Self as super::Init>::Options,
         proof: Proof<Self::ProofWriter>,
     ) -> anyhow::Result<Self>
     where
@@ -91,7 +91,7 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
     /// blocking clause generator
     fn from_instance_default_blocking_cert(
         inst: Instance,
-        opts: KernelOptions,
+        opts: <Self as super::Init>::Options,
         proof: Proof<Self::ProofWriter>,
     ) -> anyhow::Result<Self> {
         Self::new_cert(

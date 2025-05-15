@@ -2,6 +2,7 @@
 //!
 //! A multi-objective MaxSAT solver with multiple algorithms implemented.
 #![feature(try_trait_v2)]
+#![feature(associated_type_defaults)]
 
 use std::fmt;
 
