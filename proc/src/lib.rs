@@ -56,8 +56,7 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
     let obounds = "where";
     #[cfg(feature = "interrupt-oracle")]
     let obounds = format!(
-        "{} O: rustsat::solvers::Interrupt, ProofW: std::io::Write,",
-        obounds
+        "{obounds} O: rustsat::solvers::Interrupt, ProofW: std::io::Write,"
     );
     let obounds: TokenStream = obounds.parse().unwrap();
     let obounds: syn::WhereClause = parse_macro_input!(obounds);
@@ -146,16 +145,16 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
     ast.generics.make_where_clause();
     let obounds = "where";
     #[cfg(feature = "interrupt-oracle")]
-    let obounds = format!("{} O: rustsat::solvers::Interrupt,", obounds);
+    let obounds = format!("{obounds} O: rustsat::solvers::Interrupt,");
     #[cfg(feature = "phasing")]
-    let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
+    let obounds = format!("{obounds} O: rustsat::solvers::PhaseLit,");
     #[cfg(feature = "sol-tightening")]
     let obounds = format!(
         "{} O: rustsat::solvers::FlipLit + rustsat::solvers::FreezeVar,",
         obounds
     );
     #[cfg(feature = "limit-conflicts")]
-    let obounds = format!("{} O: rustsat::solvers::LimitConflicts,", obounds);
+    let obounds = format!("{obounds} O: rustsat::solvers::LimitConflicts,");
     let obounds: TokenStream = obounds.parse().unwrap();
     let obounds: syn::WhereClause = parse_macro_input!(obounds);
     ast.generics
@@ -217,16 +216,16 @@ fn insert_oracle_bounds(mut impl_block: syn::ItemImpl) -> TokenStream {
 
     let obounds = "where";
     #[cfg(feature = "interrupt-oracle")]
-    let obounds = format!("{} O: rustsat::solvers::Interrupt,", obounds);
+    let obounds = format!("{obounds} O: rustsat::solvers::Interrupt,");
     #[cfg(feature = "phasing")]
-    let obounds = format!("{} O: rustsat::solvers::PhaseLit,", obounds);
+    let obounds = format!("{obounds} O: rustsat::solvers::PhaseLit,");
     #[cfg(feature = "sol-tightening")]
     let obounds = format!(
         "{} O: rustsat::solvers::FlipLit + rustsat::solvers::FreezeVar,",
         obounds
     );
     #[cfg(feature = "limit-conflicts")]
-    let obounds = format!("{} O: rustsat::solvers::LimitConflicts,", obounds);
+    let obounds = format!("{obounds} O: rustsat::solvers::LimitConflicts,");
     let obounds: TokenStream = obounds.parse().unwrap();
     let obounds: syn::WhereClause = parse_macro_input!(obounds);
 

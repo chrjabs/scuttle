@@ -5,8 +5,8 @@
 //! ## References
 //!
 //! - \[1\] Joao Cortes and Ines Lynce and Vasco M. Maquinho: _New Core-Guided
-//!     and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
-//!     TACAS 2023.
+//!   and Hitting Set Algorithms for Multi-Objective Combinatorial Optimization_,
+//!   TACAS 2023.
 
 use std::{fs, io};
 

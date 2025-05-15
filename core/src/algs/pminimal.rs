@@ -10,11 +10,11 @@
 //! ## References
 //!
 //! - \[1\] Takehide Soh and Mutsunori Banbara and Naoyuki Tamura and Daniel Le
-//!     Berre: _Solving Multiobjective Discrete Optimization Problems with
-//!     Propositional Minimal Model Generation_, CP 2017.
+//!   Berre: _Solving Multiobjective Discrete Optimization Problems with
+//!   Propositional Minimal Model Generation_, CP 2017.
 //! - \[2\] Miyuki Koshimura and Hidetomo Nabeshima and Hiroshi Fujita and Ryuzo
-//!     Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
-//!     2009.
+//!   Hasegawa: _Minimal Model Generation with Respect to an Atom Set_, FTP
+//!   2009.
 use std::{fs, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;

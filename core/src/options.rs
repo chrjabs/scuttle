@@ -184,9 +184,9 @@ impl fmt::Display for DivConAnchor {
         match self {
             DivConAnchor::LinSu => write!(f, "lin-su"),
             DivConAnchor::BiOptSat => write!(f, "bioptsat"),
-            DivConAnchor::PMinimal(size) => write!(f, "p-minimal({})", size),
-            DivConAnchor::LowerBounding(size) => write!(f, "lower-bounding({})", size),
-            DivConAnchor::NMinus(x) => write!(f, "n-minus({})", x),
+            DivConAnchor::PMinimal(size) => write!(f, "p-minimal({size})"),
+            DivConAnchor::LowerBounding(size) => write!(f, "lower-bounding({size})"),
+            DivConAnchor::NMinus(x) => write!(f, "n-minus({x})"),
         }
     }
 }
@@ -236,8 +236,8 @@ impl SubProblemSize {
 impl fmt::Display for SubProblemSize {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SubProblemSize::Abs(size) => write!(f, "+{}", size),
-            SubProblemSize::Smaller(size) => write!(f, "-{}", size),
+            SubProblemSize::Abs(size) => write!(f, "+{size}"),
+            SubProblemSize::Smaller(size) => write!(f, "-{size}"),
         }
     }
 }

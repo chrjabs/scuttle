@@ -759,7 +759,7 @@ impl Cli {
         buffer.set_color(ColorSpec::new().set_bold(true))?;
         write!(buffer, ": ")?;
         buffer.reset()?;
-        writeln!(buffer, "{}", msg)?;
+        writeln!(buffer, "{msg}")?;
         self.stderr.print(&buffer)?;
         Ok(())
     }
@@ -772,7 +772,7 @@ impl Cli {
         buffer.set_color(ColorSpec::new().set_bold(true))?;
         write!(buffer, ": ")?;
         buffer.reset()?;
-        writeln!(buffer, "{}", msg)?;
+        writeln!(buffer, "{msg}")?;
         self.stderr.print(&buffer)?;
         Ok(())
     }
@@ -785,13 +785,13 @@ impl Cli {
         buffer.set_color(ColorSpec::new().set_bold(true))?;
         write!(buffer, ": ")?;
         buffer.reset()?;
-        writeln!(buffer, "{}", msg)?;
+        writeln!(buffer, "{msg}")?;
         self.stdout.print(&buffer)?;
         Ok(())
     }
 
     pub fn log_termination(&self, term: &Termination) -> Result<(), IOError> {
-        let msg = &format!("{}", term);
+        let msg = &format!("{term}");
         self.warning(msg)
     }
 
@@ -1040,7 +1040,7 @@ impl Cli {
         if self.print_solutions {
             non_dom
                 .into_iter()
-                .try_fold((), |_, sol| writeln!(buffer, "v {}", sol))?
+                .try_fold((), |_, sol| writeln!(buffer, "v {sol}"))?
         }
         Self::end_block(buffer)?;
         Ok(())
@@ -1055,7 +1055,7 @@ impl Cli {
         buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
         write!(buffer, "Encoding")?;
         buffer.reset()?;
-        writeln!(buffer, " #{}", idx)?;
+        writeln!(buffer, " #{idx}")?;
         Self::print_parameter(buffer, "n-clauses", stats.n_clauses)?;
         Self::print_parameter(buffer, "n-vars", stats.n_vars)?;
         Self::print_parameter(buffer, "offset", stats.offset)?;
@@ -1070,9 +1070,9 @@ impl Cli {
         val: V,
     ) -> Result<(), IOError> {
         buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-        write!(buffer, "{}", name)?;
+        write!(buffer, "{name}")?;
         buffer.reset()?;
-        writeln!(buffer, ": {}", val)?;
+        writeln!(buffer, ": {val}")?;
         Ok(())
     }
 
@@ -1231,7 +1231,7 @@ impl WriteSolverLog for CliLogger {
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
             write!(buffer, ">>> routine start")?;
             buffer.reset()?;
-            writeln!(buffer, ": {}", desc)?;
+            writeln!(buffer, ": {desc}")?;
             self.stdout.print(&buffer)?;
         }
         Ok(())
@@ -1307,8 +1307,7 @@ impl WriteSolverLog for CliLogger {
             buffer.reset()?;
             writeln!(
                 buffer,
-                ": weight: {}; original-len: {}; reduced-len: {}",
-                weight, len, red_len,
+                ": weight: {weight}; original-len: {len}; reduced-len: {red_len}",
             )?;
             self.stdout.print(&buffer)?;
         }
@@ -1321,7 +1320,7 @@ impl WriteSolverLog for CliLogger {
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
             write!(buffer, "exhausted core")?;
             buffer.reset()?;
-            writeln!(buffer, ": exhausted: {}; weight: {}", exhausted, weight)?;
+            writeln!(buffer, ": exhausted: {exhausted}; weight: {weight}")?;
             self.stdout.print(&buffer)?;
         }
         Ok(())
@@ -1367,7 +1366,7 @@ impl WriteSolverLog for CliLogger {
 
     fn log_message(&mut self, msg: &str) -> anyhow::Result<()> {
         let mut buffer = self.stdout.buffer();
-        writeln!(buffer, "{}", msg)?;
+        writeln!(buffer, "{msg}")?;
         self.stdout.print(&buffer)?;
         Ok(())
     }
@@ -1382,7 +1381,7 @@ impl WriteSolverLog for CliLogger {
             if optimal {
                 write!(buffer, "(optimal)")?;
             }
-            writeln!(buffer, "")?;
+            writeln!(buffer)?;
             self.stdout.print(&buffer)?;
         }
         Ok(())
@@ -1440,7 +1439,7 @@ impl<'a, C: fmt::Display> fmt::Display for VecPrinter<'a, C> {
             if !first {
                 write!(f, ", ")?
             };
-            write!(f, "{}", cost)?;
+            write!(f, "{cost}")?;
             Ok(false)
         })?;
         write!(f, ")")
@@ -1479,8 +1478,8 @@ impl fmt::Display for EnumPrinter {
             EnumOptions::NoEnum => write!(f, "none"),
             EnumOptions::Solutions(None) => write!(f, "all solutions"),
             EnumOptions::PMCSs(None) => write!(f, "all Pareto-MCSs"),
-            EnumOptions::Solutions(Some(limit)) => write!(f, "{} solutions", limit),
-            EnumOptions::PMCSs(Some(limit)) => write!(f, "{} Pareto-MCSs", limit),
+            EnumOptions::Solutions(Some(limit)) => write!(f, "{limit} solutions"),
+            EnumOptions::PMCSs(Some(limit)) => write!(f, "{limit} Pareto-MCSs"),
         }
     }
 }

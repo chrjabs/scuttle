@@ -466,28 +466,12 @@ where
     {
         match self {
             ObjEncoding::Weighted(enc, offset) => enc.encode_ub_change(
-                if range.start >= *offset {
-                    range.start - *offset
-                } else {
-                    0
-                }..if range.end >= *offset {
-                    range.end - *offset
-                } else {
-                    0
-                },
+                range.start.saturating_sub(*offset)..range.end.saturating_sub(*offset),
                 collector,
                 var_manager,
             ),
             ObjEncoding::Unweighted(enc, offset) => enc.encode_ub_change(
-                if range.start >= *offset {
-                    range.start - *offset
-                } else {
-                    0
-                }..if range.end >= *offset {
-                    range.end - *offset
-                } else {
-                    0
-                },
+                range.start.saturating_sub(*offset)..range.end.saturating_sub(*offset),
                 collector,
                 var_manager,
             ),
@@ -554,15 +538,7 @@ where
                 #[cfg(feature = "verbose-proofs")]
                 proof.comment(&"extend generalized totalizer")?;
                 enc.encode_ub_change_cert(
-                    if range.start >= *offset {
-                        range.start - *offset
-                    } else {
-                        0
-                    }..if range.end >= *offset {
-                        range.end - *offset
-                    } else {
-                        0
-                    },
+                    range.start.saturating_sub(*offset)..range.end.saturating_sub(*offset),
                     collector,
                     var_manager,
                     proof,
@@ -572,15 +548,7 @@ where
                 #[cfg(feature = "verbose-proofs")]
                 proof.comment(&"extend totalizer")?;
                 enc.encode_ub_change_cert(
-                    if range.start >= *offset {
-                        range.start - *offset
-                    } else {
-                        0
-                    }..if range.end >= *offset {
-                        range.end - *offset
-                    } else {
-                        0
-                    },
+                    range.start.saturating_sub(*offset)..range.end.saturating_sub(*offset),
                     collector,
                     var_manager,
                     proof,
@@ -653,8 +621,8 @@ impl VarManager {
     ///
     /// - `max_orig_var` is the maximum variable in the _original_ instance, (e.g., the OPB file)
     /// - `max_enc_var` is the maximum variable in the encoded CNF instance with a linear
-    ///     objective, i.e., this might include variables used for encoding PB constraints and for
-    ///     relaxing soft clauses
+    ///   objective, i.e., this might include variables used for encoding PB constraints and for
+    ///   relaxing soft clauses
     ///
     /// # Panics
     ///

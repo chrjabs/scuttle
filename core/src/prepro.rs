@@ -312,7 +312,7 @@ fn process_objective<VM: ManageVars>(
     let (soft_cls, offset) = obj.into_soft_cls();
     Objective::new(
         soft_cls.into_iter().map(|(mut cl, w)| {
-            debug_assert!(cl.len() > 0);
+            debug_assert!(!cl.is_empty());
             if cl.len() == 1 {
                 return (!cl[0], w);
             }
