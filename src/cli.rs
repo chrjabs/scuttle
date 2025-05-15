@@ -8,7 +8,9 @@ use std::{
     io::Write,
 };
 
-use clap::{crate_authors, crate_name, crate_version, Args, Parser, Subcommand, ValueEnum};
+use clap::{
+    builder::styling, crate_authors, crate_name, crate_version, Args, Parser, Subcommand, ValueEnum,
+};
 use cpu_time::ProcessTime;
 use rustsat::{
     instances::fio,
@@ -35,8 +37,19 @@ macro_rules! none_if_zero {
     };
 }
 
+/// Cargo's color style
+/// [source](https://github.com/crate-ci/clap-cargo/blob/master/src/style.rs)
+const STYLES: styling::Styles = styling::Styles::styled()
+    .header(styling::AnsiColor::Green.on_default().bold())
+    .usage(styling::AnsiColor::Green.on_default().bold())
+    .literal(styling::AnsiColor::Cyan.on_default().bold())
+    .placeholder(styling::AnsiColor::Cyan.on_default())
+    .error(styling::AnsiColor::Red.on_default().bold())
+    .valid(styling::AnsiColor::Cyan.on_default().bold())
+    .invalid(styling::AnsiColor::Yellow.on_default().bold());
+
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None, styles = STYLES)]
 struct CliArgs {
     #[command(subcommand)]
     command: AlgorithmCommand,
@@ -271,6 +284,7 @@ impl From<LimitArgs> for Limits {
 }
 
 #[derive(Args, Clone)]
+#[command(next_help_heading = "Input file")]
 struct FileArgs {
     /// The file format of the input file. With infer, the file format is
     /// inferred from the file extension.
