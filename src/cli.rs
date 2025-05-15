@@ -16,6 +16,7 @@ use rustsat::{
     instances::fio,
     solvers::{SolverResult, SolverStats},
 };
+use scuttle_core::options::{CandidateSeeding, IhsOptions};
 use scuttle_core::prepro::FileFormat;
 use scuttle_core::{
     options::{
@@ -147,13 +148,16 @@ enum AlgorithmCommand {
         /// Log ratio of seeded constraints
         #[arg(long)]
         log_seeding_ratio: bool,
+        /// Whether to seed constraints over only objective variables into the hitting set solver
+        #[arg(long, default_value_t = Bool::from(IhsOptions::default().seeding))]
+        seeding: Bool,
+        /// Candidate seeding
+        #[arg(long, default_value_t = CandidateSeeding::default())]
+        candidate_seeding: CandidateSeeding,
         #[command(flatten)]
         file: FileArgs,
     },
 }
-
-#[derive(Args)]
-struct SharedArgs {}
 
 #[derive(Args, Copy, Clone)]
 struct ObjEncArgs {
@@ -558,7 +562,7 @@ pub enum Algorithm {
         Option<CoreBoostingOptions>,
     ),
     LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
-    ParetoIhs(KernelOptions, Option<CoreBoostingOptions>),
+    ParetoIhs(KernelOptions, IhsOptions, Option<CoreBoostingOptions>),
 }
 
 impl fmt::Display for Algorithm {
@@ -713,6 +717,8 @@ impl Cli {
             AlgorithmCommand::ParetoIhs {
                 log_hitting_sets,
                 log_seeding_ratio,
+                seeding,
+                candidate_seeding,
                 file,
             } => Cli {
                 limits: args.limits.into(),
@@ -741,7 +747,14 @@ impl Cli {
                     log_seeding_ratio: log_seeding_ratio || args.log.verbosity >= 1,
                     ..args.log.into()
                 },
-                alg: Algorithm::ParetoIhs(kernel_opts, cb),
+                alg: Algorithm::ParetoIhs(
+                    kernel_opts,
+                    IhsOptions {
+                        seeding: seeding.into(),
+                        candidate_seeding,
+                    },
+                    cb,
+                ),
                 proof_paths: None,
             },
         }
@@ -841,21 +854,13 @@ impl Cli {
             writeln!(buffer, ": ")?;
             buffer.reset()?;
             match &self.alg {
-                Algorithm::PMinimal(opts, cb_opts)
-                | Algorithm::LowerBounding(opts, cb_opts)
-                | Algorithm::ParetoIhs(opts, cb_opts) => {
+                Algorithm::PMinimal(opts, cb_opts) | Algorithm::LowerBounding(opts, cb_opts) => {
                     Self::print_parameter(
                         &mut buffer,
                         "enumeration",
                         EnumPrinter::new(opts.enumeration),
                     )?;
-                    if !matches!(self.alg, Algorithm::ParetoIhs(..)) {
-                        Self::print_parameter(
-                            &mut buffer,
-                            "reserve-enc-vars",
-                            opts.reserve_enc_vars,
-                        )?;
-                    }
+                    Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
                 }
                 Algorithm::BiOptSat(opts, pb_enc, card_enc, cb_opts) => {
@@ -868,6 +873,19 @@ impl Cli {
                     Self::print_parameter(&mut buffer, "obj-pb-encoding", pb_enc)?;
                     Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
+                }
+                Algorithm::ParetoIhs(kernel_opts, opts, cb_opts) => {
+                    Self::print_parameter(
+                        &mut buffer,
+                        "enumeration",
+                        EnumPrinter::new(kernel_opts.enumeration),
+                    )?;
+                    Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
+                    Self::print_parameter(
+                        &mut buffer,
+                        "candidate-seeding",
+                        opts.candidate_seeding,
+                    )?;
                 }
             }
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;

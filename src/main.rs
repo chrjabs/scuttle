@@ -202,8 +202,8 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
         Algorithm::LowerBounding(opts, ref cb_opts) => {
             dispatch_options!(Lb, inst, proof, prepro, reindexer, opts, cb_opts, cli)
         }
-        Algorithm::ParetoIhs(opts, ref cb_opts) => {
-            dispatch_options!(no-proof: Ihs, inst, prepro, reindexer, opts, cb_opts, cli)
+        Algorithm::ParetoIhs(kernel_opts, opts, ref cb_opts) => {
+            dispatch_options!(no-proof: Ihs, inst, prepro, reindexer, (kernel_opts, opts), cb_opts, cli)
         }
     }
     Ok(())

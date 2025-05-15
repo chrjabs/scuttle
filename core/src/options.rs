@@ -7,7 +7,7 @@ use std::fmt;
 use crate::Phase;
 
 /// Solver-wide configuration options
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct KernelOptions {
     /// The Pareto point enumeration mode
     pub enumeration: EnumOptions,
@@ -56,7 +56,7 @@ pub enum AfterCbOptions {
 pub type KernelWithCbOptions = (KernelOptions, Option<CoreBoostingOptions>);
 
 /// Enumeration options for the $P$-minimal solver
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EnumOptions {
     #[default]
     /// Don't enumerate at each Pareto point
@@ -69,7 +69,7 @@ pub enum EnumOptions {
 }
 
 /// Options regarding heuristic solution improvement
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct HeurImprOptions {
     /// When to perform solution tightening (flipping objective literals that can
     /// be flipped without breaking satisfiability)
@@ -101,7 +101,7 @@ impl Default for HeurImprOptions {
 }
 
 /// Options for when solution improvement can be performed
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum HeurImprWhen {
     /// Never perform solution improvement
@@ -238,6 +238,35 @@ impl fmt::Display for SubProblemSize {
         match self {
             SubProblemSize::Abs(size) => write!(f, "+{size}"),
             SubProblemSize::Smaller(size) => write!(f, "-{size}"),
+        }
+    }
+}
+
+/// IHS algorithm options
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IhsOptions {
+    /// Seeding constraints over only objective variables into the hitting set solver
+    pub seeding: bool,
+    /// The candidate seeding options
+    pub candidate_seeding: CandidateSeeding,
+}
+
+/// Candidate seeding options for the IHS algorithm
+#[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+pub enum CandidateSeeding {
+    /// Don't see any candidates
+    None,
+    /// Find a first candidate through a SAT call without assumptions
+    #[default]
+    OneSolution,
+}
+
+impl fmt::Display for CandidateSeeding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CandidateSeeding::None => write!(f, "none"),
+            CandidateSeeding::OneSolution => write!(f, "one-solution"),
         }
     }
 }

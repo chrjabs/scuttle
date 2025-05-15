@@ -13,7 +13,7 @@ use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
     archive::Archive,
-    options::EnumOptions,
+    options::{CandidateSeeding, EnumOptions, IhsOptions},
     types::{Objective, ParetoFront, VarManager},
     CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
     MaybeTerminatedError::{self, Done},
@@ -39,6 +39,7 @@ pub struct ParetoIhs<
     pareto_front: ParetoFront,
     /// Archive of candidate solutions
     candidates: Archive<Assignment>,
+    opts: IhsOptions,
 }
 
 impl<Hss, ProofW, OInit, BCG> super::Solve
@@ -80,6 +81,7 @@ where
 {
     type Oracle = O;
     type BlockClauseGen = BCG;
+    type Options = (KernelOptions, IhsOptions);
 
     /// Initializes a default solver with a configured oracle and options. The
     /// oracle should _not_ have any clauses loaded yet.
@@ -87,14 +89,14 @@ where
         clauses: Cls,
         objs: Vec<Objective>,
         var_manager: VarManager,
-        opts: KernelOptions,
+        (kernel_opts, opts): Self::Options,
         block_clause_gen: BCG,
     ) -> anyhow::Result<Self>
     where
         Cls: IntoIterator<Item = Clause>,
     {
         anyhow::ensure!(
-            matches!(opts.enumeration, EnumOptions::NoEnum),
+            matches!(kernel_opts.enumeration, EnumOptions::NoEnum),
             "cannot enumerate with IHS algorithm"
         );
         let builder = Hss::Builder::new(objs.iter().map(|obj| obj.iter()));
@@ -102,26 +104,24 @@ where
         let clauses: Vec<_> = clauses.into_iter().collect();
 
         // Seed constraints over objective variables
-        let obj_vars: RsHashSet<_> = objs
-            .iter()
-            .flat_map(|obj| obj.iter().map(|(lit, _)| lit.var()))
-            .collect();
-        let mut n_seeded = 0;
-        'outer: for cl in &clauses {
-            for lit in cl {
-                if !obj_vars.contains(&lit.var()) {
-                    continue 'outer;
-                }
-            }
-            hitting_set_solver.add_core(cl);
-            n_seeded += 1;
-        }
         let objective_lits: RsHashSet<_> = objs
             .iter()
             .flat_map(|obj| obj.iter().map(|(lit, _)| lit))
             .collect();
+        let mut n_seeded = 0;
+        if opts.seeding {
+            'outer: for cl in &clauses {
+                for lit in cl {
+                    if !objective_lits.contains(lit) && !objective_lits.contains(&!*lit) {
+                        continue 'outer;
+                    }
+                }
+                hitting_set_solver.add_core(cl);
+                n_seeded += 1;
+            }
+        }
 
-        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, opts)?;
+        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, kernel_opts)?;
         Ok(Self {
             kernel,
             hitting_set_solver,
@@ -129,6 +129,7 @@ where
             n_seeded,
             pareto_front: Default::default(),
             candidates: Default::default(),
+            opts,
         })
     }
 }
@@ -167,6 +168,9 @@ where
             let term = self.main_fully_seeded();
             self.kernel.log_routine_end()?;
             return term;
+        }
+        if self.seed_candidates()? {
+            return Done(());
         }
         let mut want_optimal = false;
         loop {
@@ -222,11 +226,10 @@ where
                         self.hitting_set_solver.add_pd_cut(&costs);
                         want_optimal = false;
                     } else {
-                        let Some(last_target) = self.candidates.get_target() else {
-                            unreachable!(
-                                "since the hitting set is not optimal, we must have a target"
-                            );
-                        };
+                        let last_target = self
+                            .candidates
+                            .get_target()
+                            .expect("since the hitting set is not optimal, we must have a target");
                         let new_target = costs.iter().copied().sum::<usize>();
                         self.candidates.insert(solution, costs);
                         if new_target >= last_target {
@@ -278,6 +281,8 @@ where
         }
     }
 
+    /// Separate algorithm branch for when the entire instance was seeded into the hitting set
+    /// solver
     fn main_fully_seeded(&mut self) -> MaybeTerminatedError {
         debug_assert!(
             (self.kernel.stats.n_orig_clauses as f64 / self.n_seeded as f64 - 1.0).abs()
@@ -312,6 +317,22 @@ where
                 }
             }
             self.hitting_set_solver.add_pd_cut(&costs);
+        }
+    }
+
+    /// Initializes the candidates according to the selected strategy
+    fn seed_candidates(&mut self) -> MaybeTerminatedError<bool> {
+        match self.opts.candidate_seeding {
+            CandidateSeeding::None => Done(false),
+            CandidateSeeding::OneSolution => match self.kernel.solve()? {
+                SolverResult::Sat => {
+                    let (costs, solution) = self.kernel.get_solution_and_internal_costs(false)?;
+                    self.candidates.insert(solution, costs);
+                    Done(false)
+                }
+                SolverResult::Unsat => Done(true),
+                SolverResult::Interrupted => unreachable!(),
+            },
         }
     }
 
