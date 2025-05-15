@@ -3,6 +3,9 @@
 //! ## References
 //!
 //! - \[1\] Christoph Jabs and Jeremias Berg and Andreas Niskanen and Matti
+//!   Järvisalo: _From Single-Objective to Multi-Objective Optimization_,
+//!   JAIR 2024.
+//! - \[2\] Christoph Jabs and Jeremias Berg and Andreas Niskanen and Matti
 //!   Järvisalo: _MaxSAT-Based Bi-Objective Boolean Optimization_, SAT 2022.
 
 use std::{fs, io};
