@@ -127,6 +127,7 @@ impl MergeOllRef for (GeneralizedTotalizer, Totalizer) {
 }
 
 /// Core boosting result for a single objective
+#[derive(Debug, Clone)]
 pub struct CbResult {
     pub reform: OllReformulation,
     pub tot_db: TotDb,

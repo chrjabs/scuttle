@@ -8,7 +8,7 @@ use crate::{CompleteSolveResult, IncompleteSolveResult};
 use super::{BuildSolver, HittingSetSolver, VarMap};
 
 pub struct Solver {
-    objectives: Vec<RsHashMap<Lit, usize>>,
+    objectives: Vec<(RsHashMap<Lit, usize>, usize)>,
     map: VarMap<grb::Var>,
     model: Model,
     statistics: super::Statistics,
@@ -24,7 +24,7 @@ impl HittingSetSolver for Solver {
                 .objectives
                 .iter()
                 .zip(multi)
-                .fold(0., |sum, (obj, &mult)| {
+                .fold(0., |sum, ((obj, _), &mult)| {
                     if let Some(&weight) = obj.get(&var.pos_lit()) {
                         return sum + (weight as f64) * mult;
                     }
@@ -100,8 +100,11 @@ impl HittingSetSolver for Solver {
         debug_assert_eq!(costs.len(), self.objectives.len());
         let non_zeroes: Vec<_> = costs
             .iter()
+            .zip(&self.objectives)
             .enumerate()
-            .filter_map(|(idx, &cost)| if cost == 0 { None } else { Some(idx) })
+            .filter_map(
+                |(idx, (&cost, &(_, offset)))| if cost <= offset { None } else { Some(idx) },
+            )
             .collect();
         match non_zeroes.len() {
             // make infeasible
@@ -111,9 +114,10 @@ impl HittingSetSolver for Solver {
                     .expect("failed to add infeasible constraint");
             }
             1 => {
-                let mut bound = (costs[non_zeroes[0]] - 1) as f64;
+                let mut bound =
+                    (costs[non_zeroes[0]] - self.objectives[non_zeroes[0]].1 - 1) as f64;
                 let mut expr = Expr::Constant(0.);
-                for (&lit, &cost) in self.objectives[non_zeroes[0]].iter() {
+                for (&lit, &cost) in self.objectives[non_zeroes[0]].0.iter() {
                     if lit.is_pos() {
                         expr = expr + Expr::Term(cost as f64, self.map[lit.var()]);
                     } else {
@@ -132,9 +136,10 @@ impl HittingSetSolver for Solver {
                     add_binvar!(model, name: "pd-cut-aux").expect("failed to create variable");
 
                 // constraint for first objective
-                let mut bound = (costs[non_zeroes[0]] - 1) as f64;
+                let mut bound =
+                    (costs[non_zeroes[0]] - self.objectives[non_zeroes[0]].1 - 1) as f64;
                 let mut expr = Expr::Constant(0.);
-                for (&lit, &cost) in self.objectives[non_zeroes[0]].iter() {
+                for (&lit, &cost) in self.objectives[non_zeroes[0]].0.iter() {
                     if lit.is_pos() {
                         expr = expr + Expr::Term(cost as f64, self.map[lit.var()]);
                     } else {
@@ -147,9 +152,10 @@ impl HittingSetSolver for Solver {
                     .expect("failed to add PD cut indicator");
 
                 // constraint for second objective
-                let mut bound = (costs[non_zeroes[1]] - 1) as f64;
+                let mut bound =
+                    (costs[non_zeroes[1]] - self.objectives[non_zeroes[1]].1 - 1) as f64;
                 let mut expr = Expr::Constant(0.);
-                for (&lit, &cost) in self.objectives[non_zeroes[1]].iter() {
+                for (&lit, &cost) in self.objectives[non_zeroes[1]].0.iter() {
                     if lit.is_pos() {
                         expr = expr + Expr::Term(cost as f64, self.map[lit.var()]);
                     } else {
@@ -171,9 +177,9 @@ impl HittingSetSolver for Solver {
                     .collect();
                 // indicator constraints for each objective
                 for (nz_idx, (obj_idx, &aux)) in non_zeroes.into_iter().zip(&auxs).enumerate() {
-                    let mut bound = (costs[obj_idx] - 1) as f64;
+                    let mut bound = (costs[obj_idx] - self.objectives[obj_idx].1 - 1) as f64;
                     let mut expr = Expr::Constant(0.);
-                    for (&lit, &cost) in self.objectives[obj_idx].iter() {
+                    for (&lit, &cost) in self.objectives[obj_idx].0.iter() {
                         if lit.is_pos() {
                             expr = expr + Expr::Term(cost as f64, self.map[lit.var()]);
                         } else {
@@ -202,6 +208,52 @@ impl HittingSetSolver for Solver {
         }
     }
 
+    fn change_objectives<Outer, Inner>(&mut self, objectives: Outer)
+    where
+        Outer: IntoIterator<Item = (Inner, usize)>,
+        Inner: IntoIterator<Item = (Lit, usize)>,
+    {
+        let _n_old_objs = self.objectives.len();
+        self.objectives = objectives
+            .into_iter()
+            .map(|(inner, offset)| (inner.into_iter().collect(), offset))
+            .collect();
+        debug_assert_eq!(_n_old_objs, self.objectives.len());
+        let mut vars: Vec<Var> = self
+            .objectives
+            .iter()
+            .flat_map(|(obj, _)| obj.keys().copied().map(Lit::var))
+            .collect();
+        vars.sort_unstable();
+        vars.dedup();
+        // clear old objective weights
+        for (_, &gv) in self.map.iter() {
+            self.model
+                .set_obj_attr(attr::Obj, &gv, 0.)
+                .expect("failed to set objective coefficient");
+        }
+        // update objectives
+        for var in vars {
+            let weight = self.objectives.iter().fold(0., |sum, (obj, _)| {
+                if let Some(&weight) = obj.get(&var.pos_lit()) {
+                    return sum + (weight as f64);
+                }
+                if let Some(&weight) = obj.get(&var.neg_lit()) {
+                    return sum - (weight as f64);
+                }
+                sum
+            });
+            let model = &mut self.model;
+            let gv = self.map.ensure_mapped(var, |v| {
+                add_binvar!(model, name: &format!("{v}"), obj: weight)
+                    .expect("failed to create Gurobi variable")
+            });
+            self.model
+                .set_obj_attr(attr::Obj, &gv, weight)
+                .expect("failed to set objective coefficient");
+        }
+    }
+
     fn statistics(&self) -> super::Statistics {
         self.statistics
     }
@@ -209,7 +261,7 @@ impl HittingSetSolver for Solver {
     fn objectives(&self) -> impl Iterator<Item = impl Iterator<Item = (Lit, usize)>> {
         self.objectives
             .iter()
-            .map(|o| o.iter().map(|(&l, &w)| (l, w)))
+            .map(|(o, _)| o.iter().map(|(&l, &w)| (l, w)))
     }
 
     fn learn_unit(&mut self, unit: Lit) {
@@ -371,7 +423,7 @@ impl BuildSolver for Builder {
             });
         }
         Solver {
-            objectives,
+            objectives: objectives.into_iter().map(|o| (o, 0)).collect(),
             map,
             model,
             statistics: super::Statistics::default(),

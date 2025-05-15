@@ -10,7 +10,7 @@ use crate::{CompleteSolveResult, IncompleteSolveResult};
 use super::{BuildSolver, HittingSetSolver, VarMap};
 
 pub struct Solver {
-    objectives: Vec<RsHashMap<Lit, usize>>,
+    objectives: Vec<(RsHashMap<Lit, usize>, usize)>,
     map: VarMap<Col>,
     state: State,
     statistics: super::Statistics,
@@ -35,37 +35,37 @@ impl HittingSetSolver for Solver {
         match &mut self.state {
             State::Init { problem, .. } => {
                 for (var, &col) in self.map.iter() {
-                    let weight = self
-                        .objectives
-                        .iter()
-                        .zip(multi)
-                        .fold(0., |sum, (obj, &mult)| {
-                            if let Some(&weight) = obj.get(&var.pos_lit()) {
-                                return sum + (weight as f64) * mult;
-                            }
-                            if let Some(&weight) = obj.get(&var.neg_lit()) {
-                                return sum - (weight as f64) * mult;
-                            }
-                            sum
-                        });
+                    let weight =
+                        self.objectives
+                            .iter()
+                            .zip(multi)
+                            .fold(0., |sum, ((obj, _), &mult)| {
+                                if let Some(&weight) = obj.get(&var.pos_lit()) {
+                                    return sum + (weight as f64) * mult;
+                                }
+                                if let Some(&weight) = obj.get(&var.neg_lit()) {
+                                    return sum - (weight as f64) * mult;
+                                }
+                                sum
+                            });
                     problem.change_column_cost(col, weight);
                 }
             }
             State::Main(model) => {
                 for (var, &col) in self.map.iter() {
-                    let weight = self
-                        .objectives
-                        .iter()
-                        .zip(multi)
-                        .fold(0., |sum, (obj, &mult)| {
-                            if let Some(&weight) = obj.get(&var.pos_lit()) {
-                                return sum + (weight as f64) * mult;
-                            }
-                            if let Some(&weight) = obj.get(&var.neg_lit()) {
-                                return sum - (weight as f64) * mult;
-                            }
-                            sum
-                        });
+                    let weight =
+                        self.objectives
+                            .iter()
+                            .zip(multi)
+                            .fold(0., |sum, ((obj, _), &mult)| {
+                                if let Some(&weight) = obj.get(&var.pos_lit()) {
+                                    return sum + (weight as f64) * mult;
+                                }
+                                if let Some(&weight) = obj.get(&var.neg_lit()) {
+                                    return sum - (weight as f64) * mult;
+                                }
+                                sum
+                            });
                     model.change_column_cost(col, weight);
                 }
             }
@@ -121,20 +121,23 @@ impl HittingSetSolver for Solver {
         debug_assert_eq!(costs.len(), self.objectives.len());
         let non_zeroes: Vec<_> = costs
             .iter()
+            .zip(&self.objectives)
             .enumerate()
-            .filter_map(|(idx, &cost)| if cost == 0 { None } else { Some(idx) })
+            .filter_map(
+                |(idx, (&cost, &(_, offset)))| if cost <= offset { None } else { Some(idx) },
+            )
             .collect();
         match non_zeroes.len() {
             // make infeasible
             0 => self.state.add_row(1.., []),
             1 => {
-                let obj = &self.objectives[non_zeroes[0]];
+                let obj = &self.objectives[non_zeroes[0]].0;
                 let cost = costs[non_zeroes[0]];
                 let sub_cost = obj.iter().fold(
                     0,
                     |sub, (lit, &cost)| if lit.is_neg() { sub + cost } else { sub },
                 );
-                let bound = (cost - 1) as f64 - sub_cost as f64;
+                let bound = (cost - self.objectives[non_zeroes[0]].1 - 1) as f64 - sub_cost as f64;
                 self.state.add_row(
                     ..=bound,
                     obj.iter().map(|(&lit, &cost)| {
@@ -154,13 +157,13 @@ impl HittingSetSolver for Solver {
                 let aux = self.state.new_binary_col(0.);
 
                 // constraint for first objective
-                let obj = &self.objectives[non_zeroes[0]];
+                let obj = &self.objectives[non_zeroes[0]].0;
                 let cost = costs[non_zeroes[0]];
                 let sub_cost = obj.iter().fold(
                     0,
                     |sub, (lit, &cost)| if lit.is_neg() { sub + cost } else { sub },
                 );
-                let bound = (cost - 1) as f64 - sub_cost as f64;
+                let bound = (cost - self.objectives[non_zeroes[0]].1 - 1) as f64 - sub_cost as f64;
                 let aux_coeff = obj.iter().fold(
                     0,
                     |max, (lit, &cost)| if lit.is_pos() { max + cost } else { max },
@@ -169,6 +172,7 @@ impl HittingSetSolver for Solver {
                 self.state.add_row(
                     ..=bound,
                     self.objectives[non_zeroes[0]]
+                        .0
                         .iter()
                         .map(|(&lit, &cost)| {
                             (
@@ -183,13 +187,13 @@ impl HittingSetSolver for Solver {
                         .chain([(aux, -aux_coeff)]),
                 );
                 // constraint for second objective
-                let obj = &self.objectives[non_zeroes[1]];
+                let obj = &self.objectives[non_zeroes[1]].0;
                 let cost = costs[non_zeroes[1]];
                 let sub_cost = obj.iter().fold(
                     0,
                     |sub, (lit, &cost)| if lit.is_neg() { sub + cost } else { sub },
                 );
-                let bound = (cost - 1) as f64 - sub_cost as f64;
+                let bound = (cost - self.objectives[non_zeroes[1]].1 - 1) as f64 - sub_cost as f64;
                 let aux_coeff = obj.iter().fold(
                     0,
                     |max, (lit, &cost)| if lit.is_pos() { max + cost } else { max },
@@ -198,6 +202,7 @@ impl HittingSetSolver for Solver {
                 self.state.add_row(
                     ..=bound + aux_coeff,
                     self.objectives[non_zeroes[1]]
+                        .0
                         .iter()
                         .map(|(&lit, &cost)| {
                             (
@@ -216,13 +221,13 @@ impl HittingSetSolver for Solver {
                 let auxs: Vec<_> = (0..p).map(|_| self.state.new_binary_col(0.)).collect();
                 // reified constraints for each objective
                 for (obj_idx, &aux) in non_zeroes.into_iter().zip(&auxs) {
-                    let obj = &self.objectives[obj_idx];
+                    let obj = &self.objectives[obj_idx].0;
                     let cost = costs[obj_idx];
                     let sub_cost = obj.iter().fold(
                         0,
                         |sub, (lit, &cost)| if lit.is_neg() { sub + cost } else { sub },
                     );
-                    let bound = (cost - 1) as f64 - sub_cost as f64;
+                    let bound = (cost - self.objectives[obj_idx].1 - 1) as f64 - sub_cost as f64;
                     let aux_coeff = obj.iter().fold(
                         0,
                         |max, (lit, &cost)| if lit.is_pos() { max + cost } else { max },
@@ -251,6 +256,50 @@ impl HittingSetSolver for Solver {
         }
     }
 
+    fn change_objectives<Outer, Inner>(&mut self, objectives: Outer)
+    where
+        Outer: IntoIterator<Item = (Inner, usize)>,
+        Inner: IntoIterator<Item = (Lit, usize)>,
+    {
+        let _n_old_objs = self.objectives.len();
+        self.objectives = objectives
+            .into_iter()
+            .map(|(inner, offset)| (inner.into_iter().collect(), offset))
+            .collect();
+        debug_assert_eq!(_n_old_objs, self.objectives.len());
+        let mut vars: Vec<Var> = self
+            .objectives
+            .iter()
+            .flat_map(|(obj, _)| obj.keys().copied().map(Lit::var))
+            .collect();
+        vars.sort_unstable();
+        vars.dedup();
+        match &mut self.state {
+            State::Init { problem, .. } => {
+                // clear old objective weights
+                for (_, &col) in self.map.iter() {
+                    problem.change_column_cost(col, 0.);
+                }
+                // update objectives
+                for var in vars {
+                    let weight = self.objectives.iter().fold(0., |sum, (obj, _)| {
+                        if let Some(&weight) = obj.get(&var.pos_lit()) {
+                            return sum + (weight as f64);
+                        }
+                        if let Some(&weight) = obj.get(&var.neg_lit()) {
+                            return sum - (weight as f64);
+                        }
+                        sum
+                    });
+                    let col = self.map.ensure_mapped(var, |_| problem.add_integer_column(weight, 0..=1));
+                    problem.change_column_cost(col, weight);
+                }
+            }
+            State::Main(_) => todo!("since this is only used in core boosting, the solver should alwasy be in the Init state"),
+            State::Working => unreachable!("working state should never happen externally"),
+        }
+    }
+
     fn statistics(&self) -> super::Statistics {
         self.statistics
     }
@@ -258,7 +307,7 @@ impl HittingSetSolver for Solver {
     fn objectives(&self) -> impl Iterator<Item = impl Iterator<Item = (Lit, usize)>> {
         self.objectives
             .iter()
-            .map(|o| o.iter().map(|(&l, &w)| (l, w)))
+            .map(|(o, _)| o.iter().map(|(&l, &w)| (l, w)))
     }
 
     fn learn_unit(&mut self, unit: Lit) {
@@ -321,7 +370,7 @@ impl Solver {
         for l in start {
             if let Some(col) = self.map.map(l.var()) {
                 if !optimal {
-                    for obj in &self.objectives {
+                    for (obj, _) in &self.objectives {
                         if let Some(&weight) = obj.get(&l) {
                             if l.is_pos() {
                                 target += weight as f64;
@@ -479,7 +528,7 @@ impl BuildSolver for Builder {
             map.ensure_mapped(var, |_| problem.add_integer_column(weight, 0..=1));
         }
         Solver {
-            objectives: self.objectives,
+            objectives: self.objectives.into_iter().map(|o| (o, 0)).collect(),
             map,
             state: State::Init {
                 problem,

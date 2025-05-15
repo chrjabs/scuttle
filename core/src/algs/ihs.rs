@@ -4,17 +4,20 @@ use std::io;
 
 use hitting_sets::{BuildSolver, CompleteSolveResult, HittingSetSolver, IncompleteSolveResult};
 use rustsat::{
+    encodings::{nodedb::NodeLike, totdb::Semantics},
     solvers::{
         DefaultInitializer, Initialize, Learn, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Cl, Clause, Lit, RsHashSet, Var},
+    types::{Assignment, Cl, Clause, Lit, RsHashSet, TernaryVal, Var},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
+    algs::{coreboosting::CbResult, coreguided::ReformData},
     archive::Archive,
-    options::{CandidateSeeding, EnumOptions, IhsOptions},
+    options::{CandidateSeeding, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions},
+    termination::ensure,
     types::{Objective, ParetoFront, VarManager},
     CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
     MaybeTerminatedError::{self, Done},
@@ -29,6 +32,7 @@ pub struct ParetoIhs<O, Hss, OInit = DefaultInitializer, BCG = fn(Assignment) ->
     objective_lits: RsHashSet<Lit>,
     max_obj_var: Var,
     n_seeded: usize,
+    cb_performed: bool,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
     /// Archive of candidate solutions
@@ -130,6 +134,7 @@ where
             objective_lits,
             max_obj_var,
             n_seeded,
+            cb_performed: false,
             pareto_front: Default::default(),
             candidates: Default::default(),
             opts,
@@ -163,8 +168,9 @@ where
                 self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64,
             )?;
         }
-        if (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
-            < f64::EPSILON
+        if !self.cb_performed
+            && (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
+                < f64::EPSILON
         {
             let term = self.main_fully_seeded();
             self.kernel.log_routine_end()?;
@@ -375,7 +381,7 @@ where
                 logger.log_hitting_set(cost, true)?;
             }
             self.kernel.check_termination()?;
-            let (costs, solution) = self.hitting_set_to_solution_and_internal_costs(hitting_set)?;
+            let (costs, solution) = self.hitting_set_to_solution_and_internal_costs(hitting_set);
             // store solution
             self.kernel
                 .yield_solutions(costs.clone(), &[], solution, &mut self.pareto_front)?;
@@ -400,19 +406,29 @@ where
         }
     }
 
-    fn hitting_set_to_solution_and_internal_costs(
-        &mut self,
-        hitting_set: Vec<Lit>,
-    ) -> anyhow::Result<(Vec<usize>, Assignment)> {
-        let mut sol: Assignment = hitting_set.into_iter().collect();
-        let costs = (0..self.kernel.objs.len())
+    fn compute_internal_costs(&self, solution: &Assignment) -> Vec<usize> {
+        (0..self.kernel.objs.len())
             .map(|idx| {
-                self.kernel
-                    .get_cost_with_heuristic_improvements(idx, &mut sol, false)
+                let mut cost = 0;
+                for (l, w) in self.kernel.objs[idx].iter() {
+                    let val = solution.lit_value(l);
+                    if val == TernaryVal::True {
+                        cost += w;
+                    }
+                }
+                cost
             })
-            .collect::<Result<Vec<usize>, _>>()?;
+            .collect()
+    }
+
+    fn hitting_set_to_solution_and_internal_costs(
+        &self,
+        hitting_set: Vec<Lit>,
+    ) -> (Vec<usize>, Assignment) {
+        let sol: Assignment = hitting_set.into_iter().collect();
+        let costs = self.compute_internal_costs(&sol);
         debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
-        Ok((costs, sol))
+        (costs, sol)
     }
 
     fn minimize_core(&mut self, core: Vec<Lit>) -> MaybeTerminatedError<Vec<Lit>> {
@@ -459,128 +475,76 @@ where
     Hss: HittingSetSolver + 'slv,
     BCG: Fn(Assignment) -> Clause,
 {
-    fn core_boost(&mut self, _opts: crate::CoreBoostingOptions) -> MaybeTerminatedError<bool> {
-        // NOTE: in this case core boosting just means extracting cores over the individual
-        // objectives first
-        self.kernel.log_routine_start("core boost")?;
-        for obj_idx in 0..self.kernel.stats.n_objs {
-            let mut mults = vec![0.0; self.kernel.stats.n_objs];
-            mults[obj_idx] = 1.0;
-            self.hitting_set_solver.change_multipliers(&mults);
-            let mut ub = None;
+    type Options = IhsCbOptions;
 
-            self.kernel.log_routine_start("ihs")?;
-            let mut want_optimal = false;
-            loop {
-                self.kernel.log_routine_start("extract hitting set")?;
+    fn core_boost(&mut self, opts: Self::Options) -> MaybeTerminatedError<bool> {
+        ensure!(
+            self.kernel.stats.n_solve_calls == 0,
+            "cannot perform core boosting after solve has been called"
+        );
+        let Some(cb_res) = self.kernel.core_boost()? else {
+            return Done(false);
+        };
+        self.cb_performed = true;
+        self.kernel.check_termination()?;
 
-                let hitting_set_answer: IncompleteSolveResult = if let Some((sol, _)) = &ub {
-                    if want_optimal {
-                        self.hitting_set_solver.optimal_hitting_set(sol).into()
-                    } else {
-                        self.hitting_set_solver.hitting_set(sol)
-                    }
-                } else {
-                    self.hitting_set_solver.optimal_hitting_set(None).into()
-                };
+        self.kernel.log_routine_start("cb post treatment")?;
 
-                let (cost, mut hitting_set, is_optimal) = match hitting_set_answer {
-                    IncompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set, true),
-                    IncompleteSolveResult::Infeasible => {
-                        self.kernel.log_routine_end()?;
-                        self.kernel.log_routine_end()?;
-                        self.kernel.log_routine_end()?;
-                        return Done(false);
-                    }
-                    IncompleteSolveResult::Feasible(cost, hitting_set) => {
-                        (cost, hitting_set, false)
-                    }
-                };
-
-                self.kernel.log_routine_end()?;
-                if let Some(logger) = &mut self.kernel.logger {
-                    logger.log_hitting_set(cost, is_optimal)?;
-                }
-                self.kernel.check_termination()?;
-                hitting_set.retain(|lit| self.objective_lits.contains(&!*lit));
-                match self.kernel.solve_assumps(&hitting_set)? {
-                    SolverResult::Sat => {
-                        let (costs, solution) =
-                            self.kernel.get_solution_and_internal_costs(false)?;
-                        if is_optimal {
-                            // found optimal solution
-                            self.candidates.insert(solution, costs);
-                            // this objective is done now
-                            break;
-                        } else {
-                            let Some((sol, cost)) = &mut ub else {
-                                unreachable!(
-                                    "since the hitting set is not optimal, we must have a target"
-                                );
-                            };
-                            if costs[obj_idx] < *cost {
-                                *sol = solution.clone();
-                                *cost = costs[obj_idx];
-                            } else {
-                                want_optimal = true;
-                            }
-                            self.candidates.insert(solution, costs);
-                        }
-                    }
-                    SolverResult::Unsat => {
-                        loop {
-                            let core = self.kernel.oracle.core()?;
-                            if core.is_empty() {
-                                self.kernel.log_routine_end()?;
-                                return Done(false);
-                            }
-                            let core = self.minimize_core(core)?;
-                            let core = Cl::new(&core);
-                            self.hitting_set_solver.add_core(core);
-                            // NOTE: core is in same order as hitting set, we can therefore remove the
-                            // core literals in a single sweep
-                            let mut core_idx = 0;
-                            hitting_set.retain(|&lit| {
-                                while core_idx < core.len() && core[core_idx] < !lit {
-                                    core_idx += 1;
-                                }
-                                if core_idx >= core.len() || !lit != core[core_idx] {
-                                    return true;
-                                }
-                                false
-                            });
-                            if hitting_set.is_empty() {
-                                break;
-                            }
-                            match self.kernel.solve_assumps(&hitting_set)? {
-                                SolverResult::Sat => {
-                                    let (costs, solution) =
-                                        self.kernel.get_solution_and_internal_costs(true)?;
-                                    if let Some((sol, cost)) = &mut ub {
-                                        if costs[obj_idx] < *cost {
-                                            *sol = solution.clone();
-                                            *cost = costs[obj_idx];
-                                        }
-                                    } else {
-                                        ub = Some((solution.clone(), costs[obj_idx]));
-                                    };
-                                    self.candidates.insert(solution, costs);
-                                    break;
-                                }
-                                SolverResult::Unsat => {}
-                                SolverResult::Interrupted => unreachable!(),
-                            }
-                        }
-                        want_optimal = false;
-                    }
-                    SolverResult::Interrupted => unreachable!(),
-                }
-            }
-            self.kernel.log_routine_end()?;
+        if opts.treatment == IhsCbTreatment::Ignore {
+            self.objective_lits.clear();
         }
+
+        let mut reform_objs = Vec::with_capacity(cb_res.len());
+        for CbResult {
+            reform,
+            solution,
+            mut tot_db,
+        } in cb_res
+        {
+            if let Some(solution) = solution {
+                let costs = self.compute_internal_costs(&solution);
+                self.candidates.insert(solution, costs);
+            }
+
+            if opts.treatment == IhsCbTreatment::Ignore {
+                let mut reform_obj = Vec::with_capacity(reform.inactives.len());
+                for (&lit, &weight) in &reform.inactives {
+                    reform_obj.push((lit, weight));
+                    self.objective_lits.insert(lit);
+                    self.max_obj_var = std::cmp::max(self.max_obj_var, lit.var());
+                    if let Some(&ReformData {
+                        root,
+                        oidx,
+                        tot_weight,
+                        ..
+                    }) = reform.reformulations.get(&lit)
+                    {
+                        debug_assert_ne!(weight, 0);
+                        debug_assert!(oidx < tot_db[root].len());
+                        for idx in oidx + 1..tot_db[root].len() {
+                            let lit = tot_db.define_unweighted(
+                                root,
+                                idx,
+                                Semantics::If,
+                                &mut self.kernel.oracle,
+                                &mut self.kernel.var_manager,
+                            )?;
+                            reform_obj.push((lit, tot_weight));
+                            self.objective_lits.insert(lit);
+                            self.max_obj_var = std::cmp::max(self.max_obj_var, lit.var());
+                        }
+                    }
+                }
+                reform_objs.push((reform_obj, reform.offset));
+            }
+        }
+
+        if opts.treatment == IhsCbTreatment::Ignore {
+            self.hitting_set_solver.change_objectives(reform_objs);
+        }
+
         self.kernel.log_routine_end()?;
-        let mults = vec![1.0; self.kernel.stats.n_objs];
-        self.hitting_set_solver.change_multipliers(&mults);
+
         Done(true)
     }
 }
