@@ -16,7 +16,9 @@ use rustsat::{
     instances::fio,
     solvers::{SolverResult, SolverStats},
 };
-use scuttle_core::options::{CandidateSeeding, CoreMinimization, IhsOptions};
+use scuttle_core::options::{
+    CandidateSeeding, CoreMinimization, IhsCbOptions, IhsCbTreatment, IhsOptions,
+};
 use scuttle_core::prepro::FileFormat;
 use scuttle_core::{
     options::{
@@ -73,8 +75,6 @@ struct CliArgs {
     #[arg(long, default_value_t = CadicalConfig::Default, global = true)]
     cadical_config: CadicalConfig,
     #[command(flatten)]
-    cb: CoreBoostingArgs,
-    #[command(flatten)]
     enumeration: EnumArgs,
     #[command(flatten)]
     prepro: PreproArgs,
@@ -82,10 +82,13 @@ struct CliArgs {
     limits: LimitArgs,
     #[command(flatten)]
     log: LogArgs,
+    /// Whether to perform core boosting before running the algorithm
+    #[arg(long, default_value_t = Bool::True, global = true, help_heading = "Core-boosting options")]
+    core_boosting: Bool,
 }
 
 impl CliArgs {
-    fn kernel_opts(&self, store_cnf: bool) -> KernelOptions {
+    fn kernel_opts(&self) -> KernelOptions {
         KernelOptions {
             enumeration: match self.enumeration.enumeration {
                 EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
@@ -103,7 +106,7 @@ impl CliArgs {
             solution_guided_search: self.solution_guided_search.into(),
             core_minimization: self.core_minimization,
             core_exhaustion: self.core_exhaustion.into(),
-            store_cnf,
+            store_cnf: false,
         }
     }
 }
@@ -114,6 +117,8 @@ enum AlgorithmCommand {
     #[command(alias = "pmin")]
     PMinimal {
         #[command(flatten)]
+        cb: CoreBoostingArgs,
+        #[command(flatten)]
         file: FileArgs,
         #[command(flatten)]
         proof: ProofArgs,
@@ -121,6 +126,8 @@ enum AlgorithmCommand {
     /// BiOptSat Linear Sat-Unsat - Jabs et al. SAT'22
     #[command(alias = "bos")]
     Bioptsat {
+        #[command(flatten)]
+        cb: CoreBoostingArgs,
         #[command(flatten)]
         obj_encs: ObjEncArgs,
         #[command(flatten)]
@@ -131,6 +138,8 @@ enum AlgorithmCommand {
     /// Lower-bounding search - Cortes et al. TACAS'23
     #[command(alias = "lb")]
     LowerBounding {
+        #[command(flatten)]
+        cb: CoreBoostingArgs,
         /// Log fence updates
         #[arg(long)]
         log_fence: bool,
@@ -161,6 +170,8 @@ enum AlgorithmCommand {
         #[arg(long, default_value_t = CandidateSeeding::default())]
         candidate_seeding: CandidateSeeding,
         #[command(flatten)]
+        cb: IhsCoreBoostingArgs,
+        #[command(flatten)]
         file: FileArgs,
     },
 }
@@ -178,9 +189,6 @@ struct ObjEncArgs {
 #[derive(Args, Copy, Clone)]
 #[command(next_help_heading = "Core-boosting options")]
 struct CoreBoostingArgs {
-    /// Whether to perform core boosting before running the algorithm
-    #[arg(long, default_value_t = Bool::True, global = true)]
-    core_boosting: Bool,
     /// If true, don't merge OLL totalizers into GTE but ignore the totalizer structure.
     #[arg(long, default_value_t = CoreBoostingOptions::default().rebase.into(), global = true)]
     rebase_encodings: Bool,
@@ -198,13 +206,7 @@ struct CoreBoostingArgs {
 }
 
 impl CoreBoostingArgs {
-    fn parse(
-        self,
-        #[cfg(feature = "maxpre")] prepro_techs: String,
-    ) -> (Option<CoreBoostingOptions>, bool) {
-        if self.core_boosting == Bool::False {
-            return (None, false);
-        }
+    fn parse(self, #[cfg(feature = "maxpre")] prepro_techs: String) -> (CoreBoostingOptions, bool) {
         let after = if self.reset_after_cb.into() {
             AfterCbOptions::Reset
         } else {
@@ -218,12 +220,27 @@ impl CoreBoostingArgs {
         };
         let store_cnf = self.inprocessing.into() || self.reset_after_cb.into();
         (
-            Some(CoreBoostingOptions {
+            CoreBoostingOptions {
                 rebase: self.rebase_encodings.into(),
                 after,
-            }),
+            },
             store_cnf,
         )
+    }
+}
+
+#[derive(Args, Copy, Clone)]
+struct IhsCoreBoostingArgs {
+    /// How core boosting should be treated in the IHS algorithm
+    #[arg(long, default_value_t = IhsCbTreatment::default())]
+    ihs_cb_treatment: IhsCbTreatment,
+}
+
+impl From<IhsCoreBoostingArgs> for IhsCbOptions {
+    fn from(val: IhsCoreBoostingArgs) -> Self {
+        IhsCbOptions {
+            treatment: val.ihs_cb_treatment,
+        }
     }
 }
 
@@ -591,7 +608,7 @@ pub enum Algorithm {
         HittingSetSolver,
         KernelOptions,
         IhsOptions,
-        Option<CoreBoostingOptions>,
+        Option<IhsCbOptions>,
     ),
 }
 
@@ -635,13 +652,21 @@ impl Cli {
             })
         };
         let args = CliArgs::parse();
-        let (cb, store_cnf) = args.cb.parse(
-            #[cfg(feature = "maxpre")]
-            args.prepro.maxpre_techniques.clone(),
-        );
-        let kernel_opts = args.kernel_opts(store_cnf);
+        let mut kernel_opts = args.kernel_opts();
         match args.command {
-            AlgorithmCommand::PMinimal { file, proof } => {
+            AlgorithmCommand::PMinimal { cb, file, proof } => {
+                let cb = if args.core_boosting.into() {
+                    let (cbo, store) = cb.parse(
+                        #[cfg(feature = "maxpre")]
+                        args.prepro.maxpre_techniques.clone(),
+                    );
+                    if store {
+                        kernel_opts.store_cnf = true;
+                    }
+                    Some(cbo)
+                } else {
+                    None
+                };
                 let proof_paths = proof.proof_paths();
                 Cli {
                     limits: args.limits.into(),
@@ -671,10 +696,23 @@ impl Cli {
                 }
             }
             AlgorithmCommand::Bioptsat {
+                cb,
                 file,
                 proof,
                 obj_encs,
             } => {
+                let cb = if args.core_boosting.into() {
+                    let (cbo, store) = cb.parse(
+                        #[cfg(feature = "maxpre")]
+                        args.prepro.maxpre_techniques.clone(),
+                    );
+                    if store {
+                        kernel_opts.store_cnf = true;
+                    }
+                    Some(cbo)
+                } else {
+                    None
+                };
                 let proof_paths = proof.proof_paths();
                 Cli {
                     limits: args.limits.into(),
@@ -709,10 +747,23 @@ impl Cli {
                 }
             }
             AlgorithmCommand::LowerBounding {
+                cb,
                 file,
                 proof,
                 log_fence,
             } => {
+                let cb = if args.core_boosting.into() {
+                    let (cbo, store) = cb.parse(
+                        #[cfg(feature = "maxpre")]
+                        args.prepro.maxpre_techniques.clone(),
+                    );
+                    if store {
+                        kernel_opts.store_cnf = true;
+                    }
+                    Some(cbo)
+                } else {
+                    None
+                };
                 let proof_paths = proof.proof_paths();
                 Cli {
                     limits: args.limits.into(),
@@ -751,6 +802,7 @@ impl Cli {
                 seeding,
                 ihs_wce,
                 candidate_seeding,
+                cb,
                 file,
             } => Cli {
                 limits: args.limits.into(),
@@ -787,7 +839,11 @@ impl Cli {
                         wce: ihs_wce.into(),
                         candidate_seeding,
                     },
-                    cb,
+                    if args.core_boosting.into() {
+                        Some(cb.into())
+                    } else {
+                        None
+                    },
                 ),
                 proof_paths: None,
             },

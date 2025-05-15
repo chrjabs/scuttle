@@ -129,8 +129,10 @@ pub trait Solve: KernelFunctions {
 
 /// Core boosting interface
 pub trait CoreBoost {
+    type Options = CoreBoostingOptions;
+
     /// Performs core boosting. Returns false if instance is unsat.    
-    fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool>;
+    fn core_boost(&mut self, opts: Self::Options) -> MaybeTerminatedError<bool>;
 }
 
 /// Shared functionality provided by the [`Kernel`]

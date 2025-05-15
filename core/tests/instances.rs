@@ -406,7 +406,10 @@ where
     Ok(alg.pareto_front())
 }
 
-fn run_cb_test<Alg>(inst: Instance, cb_opts: CoreBoostingOptions) -> Result<ParetoFront, Failed>
+fn run_cb_test<Alg>(
+    inst: Instance,
+    cb_opts: <Alg as CoreBoost>::Options,
+) -> Result<ParetoFront, Failed>
 where
     Alg: InitDefaultBlock + Solve + CoreBoost,
 {
@@ -458,7 +461,7 @@ where
 fn run_certified_cb_test<Alg>(
     inst: Instance,
     proof: Proof<BufWriter<File>>,
-    cb_opts: CoreBoostingOptions,
+    cb_opts: <Alg as CoreBoost>::Options,
 ) -> Result<ParetoFront, Failed>
 where
     Alg: InitCert<ProofWriter = BufWriter<File>> + InitCertDefaultBlock + Solve + CoreBoost,

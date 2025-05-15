@@ -169,6 +169,52 @@ impl HittingSetSolver for Solver {
         }
     }
 
+    fn change_objectives<Outer, Inner>(&mut self, objectives: Outer)
+    where
+        Outer: IntoIterator<Item = Inner>,
+        Inner: IntoIterator<Item = (Lit, usize)>,
+    {
+        let _n_old_objs = self.objectives.len();
+        self.objectives = objectives
+            .into_iter()
+            .map(|inner| inner.into_iter().collect())
+            .collect();
+        debug_assert_eq!(_n_old_objs, self.objectives.len());
+        let mut vars: Vec<Var> = self
+            .objectives
+            .iter()
+            .flat_map(|obj| obj.keys().copied().map(Lit::var))
+            .collect();
+        vars.sort_unstable();
+        vars.dedup();
+        // clear old objective weights
+        for (_, &gv) in self.map.iter() {
+            self.model
+                .set_obj_attr(attr::Obj, &gv, 0.)
+                .expect("failed to set objective coefficient");
+        }
+        // update objectives
+        for var in vars {
+            let weight = self.objectives.iter().fold(0., |sum, obj| {
+                if let Some(&weight) = obj.get(&var.pos_lit()) {
+                    return sum + (weight as f64);
+                }
+                if let Some(&weight) = obj.get(&var.neg_lit()) {
+                    return sum - (weight as f64);
+                }
+                sum
+            });
+            let model = &mut self.model;
+            let gv = self.map.ensure_mapped(var, |v| {
+                add_binvar!(model, name: &format!("{v}"), obj: weight)
+                    .expect("failed to create Gurobi variable")
+            });
+            self.model
+                .set_obj_attr(attr::Obj, &gv, weight)
+                .expect("failed to set objective coefficient");
+        }
+    }
+
     fn statistics(&self) -> super::Statistics {
         self.statistics
     }

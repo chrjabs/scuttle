@@ -306,3 +306,26 @@ impl fmt::Display for CandidateSeeding {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IhsCbOptions {
+    pub treatment: IhsCbTreatment,
+}
+
+/// Core boosting treatment in the IHS algorithm
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+pub enum IhsCbTreatment {
+    /// Ignore the knowledge that core boosting has been performed and simply extract cores over
+    /// the reformulated objective
+    #[default]
+    Ignore,
+}
+
+impl fmt::Display for IhsCbTreatment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IhsCbTreatment::Ignore => write!(f, "ignore"),
+        }
+    }
+}

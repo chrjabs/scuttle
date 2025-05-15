@@ -10,6 +10,7 @@ use rustsat::{
         totdb::{Db as TotDb, Node},
     },
     solvers::{Initialize, SolveIncremental, SolveStats},
+    types::Assignment,
 };
 use scuttle_proc::oracle_bounds;
 
@@ -125,6 +126,13 @@ impl MergeOllRef for (GeneralizedTotalizer, Totalizer) {
     }
 }
 
+/// Core boosting result for a single objective
+pub struct CbResult {
+    pub reform: OllReformulation,
+    pub tot_db: TotDb,
+    pub solution: Option<Assignment>,
+}
+
 impl<'learn, 'term, ProofW, OInit, BCG>
     Kernel<rustsat_cadical::CaDiCaL<'learn, 'term>, ProofW, OInit, BCG>
 where
@@ -133,22 +141,24 @@ where
     /// Performs core boosting on the instance by executing single-objective OLL
     /// on each objective individually. Returns the OLL reformulations or
     /// [`None`], if unsat.
-    pub fn core_boost(&mut self) -> MaybeTerminatedError<Option<Vec<(OllReformulation, TotDb)>>> {
+    pub fn core_boost(&mut self) -> MaybeTerminatedError<Option<Vec<CbResult>>> {
         self.log_routine_start("core boost")?;
         let mut unsat = false;
         let mut res = Vec::with_capacity(self.stats.n_objs);
         for obj_idx in 0..self.stats.n_objs {
             let mut reform = (&self.objs[obj_idx]).into();
             let mut tot_db = TotDb::default();
-            if !matches!(self.objs[obj_idx], Objective::Constant { .. }) {
+            let solution = if !matches!(self.objs[obj_idx], Objective::Constant { .. }) {
                 match self.oll(&mut reform, &[], &mut tot_db, true)? {
-                    Some(_) => (), // TODO: maybe make use of solution?
+                    Some(sol) => Some(sol),
                     None => {
                         unsat = true;
                         break;
                     }
-                };
-            }
+                }
+            } else {
+                None
+            };
 
             if let Some(super::proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
                 let proof = self.oracle.proof_tracer_mut(pt_handle).proof_mut();
@@ -214,11 +224,15 @@ where
 
             self.objs[obj_idx].set_reform_id(reform.reform_id);
             self.objs[obj_idx].set_lower_bound(reform.offset);
-            res.push((reform, tot_db));
+            res.push(CbResult {
+                reform,
+                tot_db,
+                solution,
+            });
         }
         self.log_routine_end()?;
         if let Some(logger) = &mut self.logger {
-            let ideal: Vec<_> = res.iter().map(|reform| reform.0.offset).collect();
+            let ideal: Vec<_> = res.iter().map(|res| res.reform.offset).collect();
             logger.log_ideal(&ideal)?;
         }
         Done(if unsat { None } else { Some(res) })

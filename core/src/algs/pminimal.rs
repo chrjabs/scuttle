@@ -37,6 +37,7 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
+    algs::coreboosting::CbResult,
     options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
     termination::ensure,
     types::{ParetoFront, VarManager},
@@ -376,7 +377,13 @@ where
             }
         };
         self.kernel.log_routine_start("merge encodings")?;
-        for (oidx, (reform, mut tot_db)) in cb_res.into_iter().enumerate() {
+        for (
+            oidx,
+            CbResult {
+                reform, mut tot_db, ..
+            },
+        ) in cb_res.into_iter().enumerate()
+        {
             if reset_dbs {
                 debug_assert!(self.kernel.proof_stuff.is_none());
                 tot_db.reset_vars();

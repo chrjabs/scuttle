@@ -78,6 +78,12 @@ pub trait HittingSetSolver {
     /// Adds a PD cut to the hitting set solver
     fn add_pd_cut(&mut self, costs: &[usize]);
 
+    /// Changes the objectives in the solver
+    fn change_objectives<Outer, Inner>(&mut self, objectives: Outer)
+    where
+        Outer: IntoIterator<Item = Inner>,
+        Inner: IntoIterator<Item = (Lit, usize)>;
+
     /// Gets the statistics of the hitting set solver
     fn statistics(&self) -> Statistics;
 }
