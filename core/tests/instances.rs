@@ -4,7 +4,7 @@ use libtest_mimic::{Arguments, Failed};
 use pigeons::Proof;
 use scuttle_core::{
     algs::{InitDefaultBlock, Solve},
-    options::EnumOptions,
+    options::{EnumOptions, IhsOptions},
     types::{Instance, ParetoFront},
     CoreBoost, CoreBoostingOptions, Init, InitCert, InitCertDefaultBlock, KernelOptions,
 };
@@ -80,13 +80,16 @@ fn main() {
     }
 
     let vars = [
-        ("", KernelOptions::default()),
+        ("", (KernelOptions::default(), IhsOptions::default())),
         (
             "core-min",
-            KernelOptions {
-                core_minimization: true,
-                ..KernelOptions::default()
-            },
+            (
+                KernelOptions {
+                    core_minimization: true,
+                    ..KernelOptions::default()
+                },
+                IhsOptions::default(),
+            ),
         ),
     ];
     for (id, opts) in vars {
