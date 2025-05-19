@@ -6,7 +6,8 @@
 *
 * ignore-test:p-minimal:enum
 * ignore-test:lower-bounding:enum
-* ignore-test:pareto-ihs
+* ignore-test:pareto-ihs<highs>
+* ignore-test:pareto-ihs<gurobi>
 *
 * non-dominated points
 * nd (8, 0, 0, 0, 0, 7, 2), 768

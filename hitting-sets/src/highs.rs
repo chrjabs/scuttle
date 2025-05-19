@@ -190,8 +190,7 @@ impl HittingSetSolver for Solver {
             p => {
                 let auxs: Vec<_> = (0..p).map(|_| self.state.new_binary_col(0.)).collect();
                 // reified constraints for each objective
-                for (nz_idx, obj_idx) in non_zeroes.into_iter().enumerate() {
-                    let aux = auxs[nz_idx];
+                for (obj_idx, &aux) in non_zeroes.into_iter().zip(&auxs) {
                     let obj = &self.objectives[obj_idx];
                     let cost = costs[obj_idx];
                     let sub_cost = obj.iter().fold(
@@ -285,7 +284,7 @@ impl Solver {
             return IncompleteSolveResult::Infeasible;
         }
         if solved.status() == HighsModelStatus::ObjectiveTarget {
-            assert!(target_value.is_some());
+            debug_assert!(target_value.is_some());
             let solution = solved.get_solution();
             let cost = solved.get_objective_value();
             let mut model = Model::from(solved);
@@ -385,7 +384,7 @@ impl BuildSolver for Builder {
                 }
                 sum
             });
-            map.ensure_mapped(var, || problem.add_integer_column(weight, 0..=1));
+            map.ensure_mapped(var, |_| problem.add_integer_column(weight, 0..=1));
         }
         Solver {
             objectives: self.objectives,

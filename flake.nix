@@ -2,7 +2,7 @@
   description = "Rust library for tools and encodings related to SAT solving library";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs";
     systems.url = "github:nix-systems/default-linux";
 
     nix-config.url = "github:chrjabs/nix-config";
@@ -23,12 +23,13 @@
     pkgsFor = lib.genAttrs (import systems) (system: (import nixpkgs {
       inherit system;
       overlays = [(import rust-overlay)] ++ builtins.attrValues nix-config.overlays;
+      config.allowUnfree = true;
     }));
     forEachSystem = f: lib.genAttrs (import systems) (system: f pkgsFor.${system});
   in {
     devShells = forEachSystem (pkgs: {
       default = let
-        libs = with pkgs; [openssl xz bzip2];
+        libs = with pkgs; [openssl xz bzip2 gurobi];
       in
         pkgs.mkShell rec {
           nativeBuildInputs = with pkgs; [
@@ -45,6 +46,7 @@
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath libs;
           PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig/";
           VERIPB_CHECKER = lib.getExe pkgs.veripb;
+          GUROBI_HOME = pkgs.gurobi;
         };
     });
 

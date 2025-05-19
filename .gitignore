@@ -3,3 +3,5 @@
 /proc/Cargo.lock
 /core/target
 /core/Cargo.lock
+/.env
+gurobi.log

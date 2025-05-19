@@ -142,6 +142,9 @@ enum AlgorithmCommand {
     },
     /// Paretop-k IHS
     ParetoIhs {
+        /// The hitting set solver to use
+        #[arg(long)]
+        hitting_set_solver: HittingSetSolver,
         /// Log extracted hitting set values
         #[arg(long)]
         log_hitting_sets: bool,
@@ -218,6 +221,25 @@ impl CoreBoostingArgs {
             }),
             store_cnf,
         )
+    }
+}
+
+#[derive(ValueEnum, Copy, Clone)]
+pub enum HittingSetSolver {
+    /// The HiGHS MIP solver
+    Highs,
+    #[cfg(feature = "gurobi")]
+    /// The Gurobi MIP solver
+    Gurobi,
+}
+
+impl fmt::Display for HittingSetSolver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HittingSetSolver::Highs => write!(f, "highs"),
+            #[cfg(feature = "gurobi")]
+            HittingSetSolver::Gurobi => write!(f, "gurobi"),
+        }
     }
 }
 
@@ -562,7 +584,12 @@ pub enum Algorithm {
         Option<CoreBoostingOptions>,
     ),
     LowerBounding(KernelOptions, Option<CoreBoostingOptions>),
-    ParetoIhs(KernelOptions, IhsOptions, Option<CoreBoostingOptions>),
+    ParetoIhs(
+        HittingSetSolver,
+        KernelOptions,
+        IhsOptions,
+        Option<CoreBoostingOptions>,
+    ),
 }
 
 impl fmt::Display for Algorithm {
@@ -715,6 +742,7 @@ impl Cli {
                 }
             }
             AlgorithmCommand::ParetoIhs {
+                hitting_set_solver,
                 log_hitting_sets,
                 log_seeding_ratio,
                 seeding,
@@ -748,6 +776,7 @@ impl Cli {
                     ..args.log.into()
                 },
                 alg: Algorithm::ParetoIhs(
+                    hitting_set_solver,
                     kernel_opts,
                     IhsOptions {
                         seeding: seeding.into(),
@@ -874,7 +903,8 @@ impl Cli {
                     Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
                     Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
                 }
-                Algorithm::ParetoIhs(kernel_opts, opts, cb_opts) => {
+                Algorithm::ParetoIhs(hitting_set_solver, kernel_opts, opts, cb_opts) => {
+                    Self::print_parameter(&mut buffer, "hitting-set-solver", hitting_set_solver)?;
                     Self::print_parameter(
                         &mut buffer,
                         "enumeration",
@@ -1499,7 +1529,7 @@ impl<'a, C: fmt::Display> fmt::Display for VecPrinter<'a, C> {
                 write!(f, ", ")?
             };
             write!(f, "{cost}")?;
-            Ok(false)
+            Ok::<bool, fmt::Error>(false)
         })?;
         write!(f, ")")
     }

@@ -15,7 +15,7 @@ use scuttle_core::{
 };
 
 mod cli;
-use cli::{Algorithm, CadicalConfig, CardEncoding, Cli, PbEncoding};
+use cli::{Algorithm, CadicalConfig, CardEncoding, Cli, HittingSetSolver, PbEncoding};
 
 /// The SAT solver used
 type Oracle = CaDiCaL<'static, 'static>;
@@ -35,8 +35,7 @@ type Lb<OInit = CaDiCaLDefaultInit> = LowerBounding<
     OInit,
 >;
 /// Paretop-k IHS instantiation used
-type Ihs<OInit = CaDiCaLDefaultInit> =
-    ParetoIhs<Oracle, hitting_sets::HighsSolver, io::BufWriter<fs::File>, OInit>;
+type Ihs<Hss, OInit = CaDiCaLDefaultInit> = ParetoIhs<Oracle, Hss, io::BufWriter<fs::File>, OInit>;
 
 macro_rules! run {
     // with proof
@@ -202,8 +201,19 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
         Algorithm::LowerBounding(opts, ref cb_opts) => {
             dispatch_options!(Lb, inst, proof, prepro, reindexer, opts, cb_opts, cli)
         }
-        Algorithm::ParetoIhs(kernel_opts, opts, ref cb_opts) => {
-            dispatch_options!(no-proof: Ihs, inst, prepro, reindexer, (kernel_opts, opts), cb_opts, cli)
+        Algorithm::ParetoIhs(hitting_set_solver, kernel_opts, opts, ref cb_opts) => {
+            match hitting_set_solver {
+                HittingSetSolver::Highs => {
+                    type IhsSlv<OInit = CaDiCaLDefaultInit> = Ihs<hitting_sets::HighsSolver, OInit>;
+                    dispatch_options!(no-proof: IhsSlv, inst, prepro, reindexer, (kernel_opts, opts), cb_opts, cli)
+                }
+                #[cfg(feature = "gurobi")]
+                HittingSetSolver::Gurobi => {
+                    type IhsSlv<OInit = CaDiCaLDefaultInit> =
+                        Ihs<hitting_sets::GurobiSolver, OInit>;
+                    dispatch_options!(no-proof: IhsSlv, inst, prepro, reindexer, (kernel_opts, opts), cb_opts, cli)
+                }
+            }
         }
     }
     Ok(())

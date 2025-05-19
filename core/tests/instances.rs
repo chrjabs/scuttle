@@ -95,12 +95,29 @@ fn main() {
     for (id, opts) in vars {
         tests.extend(
             TestSetup::new(
-                "pareto-ihs",
+                "pareto-ihs<highs>",
                 id,
                 run_test::<
                     scuttle_core::ParetoIhs<
                         rustsat_cadical::CaDiCaL<'static, 'static>,
                         hitting_sets::HighsSolver,
+                    >,
+                >,
+                opts,
+            )
+            .collect_tests(),
+        );
+    }
+    #[cfg(feature = "gurobi")]
+    for (id, opts) in vars {
+        tests.extend(
+            TestSetup::new(
+                "pareto-ihs<gurobi>",
+                id,
+                run_test::<
+                    scuttle_core::ParetoIhs<
+                        rustsat_cadical::CaDiCaL<'static, 'static>,
+                        hitting_sets::GurobiSolver,
                     >,
                 >,
                 opts,

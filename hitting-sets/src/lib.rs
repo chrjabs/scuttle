@@ -13,6 +13,11 @@ mod highs;
 #[cfg(feature = "highs")]
 pub use highs::{Builder as HighsBuilder, Solver as HighsSolver};
 
+#[cfg(feature = "gurobi")]
+mod gurobi;
+#[cfg(feature = "gurobi")]
+pub use gurobi::{Builder as GurobiBuilder, Solver as GurobiSolver};
+
 pub const EPSILON: f64 = 0.05;
 pub const TRUE: f64 = 1. - EPSILON;
 pub const FALSE: f64 = 0. + EPSILON;

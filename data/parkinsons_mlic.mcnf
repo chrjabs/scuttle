@@ -11,7 +11,8 @@ c ignore-test:p-minimal:cert:all-heur
 c ignore-test:p-minimal:cert:other-reserve
 c ignore-test:p-minimal:cert:other-sol-guided
 c ignore-test:lower-bounding:cert:cb-rebase
-c ignore-test:pareto-ihs
+c ignore-test:pareto-ihs<highs>
+c ignore-test:pareto-ihs<gurobi>
 c 
 c non-dominated points:
 c nd (0, 147)

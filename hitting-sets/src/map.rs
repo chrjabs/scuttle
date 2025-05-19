@@ -43,13 +43,13 @@ where
     /// - If the negated literal is already part of the map
     pub fn ensure_mapped<New>(&mut self, external: Var, mut if_not: New) -> T
     where
-        New: FnMut() -> T,
+        New: FnMut(Var) -> T,
     {
         if let Some(Some(mapped)) = self.forward.get(external.idx()) {
             assert_eq!(external, self[mapped]);
             return mapped.clone();
         }
-        let mapped = if_not();
+        let mapped = if_not(external);
         assert_eq!(mapped.index(), self.backward.len());
         self.backward.push(external);
         if self.forward.len() <= external.idx() {
