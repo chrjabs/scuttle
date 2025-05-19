@@ -365,6 +365,25 @@ impl Objective {
             | Objective::Constant { reform_id, .. } => *reform_id = new_reform_id,
         }
     }
+
+    /// Gets the weight of a literal in the objective
+    ///
+    /// NOTE: this is quite inefficient (linear search) for unweighted objectives, so avoid if
+    /// possible
+    pub fn weight(&self, lit: Lit) -> usize {
+        match self {
+            Objective::Weighted { lits, .. } => *lits.get(&lit).unwrap_or(&0),
+            Objective::Unweighted { lits, .. } => {
+                for l in lits {
+                    if *l == lit {
+                        return 1;
+                    }
+                }
+                0
+            }
+            Objective::Constant { .. } => 0,
+        }
+    }
 }
 
 pub enum ObjIter<'a> {

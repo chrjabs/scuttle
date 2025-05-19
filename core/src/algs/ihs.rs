@@ -443,6 +443,7 @@ where
     type Options = IhsCbOptions;
 
     fn core_boost(&mut self, opts: Self::Options) -> MaybeTerminatedError<bool> {
+        panic!("currently buggy");
         ensure!(
             self.kernel.stats.n_solve_calls == 0,
             "cannot perform core boosting after solve has been called"
