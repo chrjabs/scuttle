@@ -111,6 +111,7 @@ impl CliArgs {
 #[derive(Subcommand, Clone)]
 enum AlgorithmCommand {
     /// P-Minimal model enumeration - Soh et al. CP'17
+    #[command(alias = "pmin")]
     PMinimal {
         #[command(flatten)]
         file: FileArgs,
@@ -118,6 +119,7 @@ enum AlgorithmCommand {
         proof: ProofArgs,
     },
     /// BiOptSat Linear Sat-Unsat - Jabs et al. SAT'22
+    #[command(alias = "bos")]
     Bioptsat {
         #[command(flatten)]
         obj_encs: ObjEncArgs,
@@ -127,6 +129,7 @@ enum AlgorithmCommand {
         proof: ProofArgs,
     },
     /// Lower-bounding search - Cortes et al. TACAS'23
+    #[command(alias = "lb")]
     LowerBounding {
         /// Log fence updates
         #[arg(long)]
@@ -137,6 +140,7 @@ enum AlgorithmCommand {
         proof: ProofArgs,
     },
     /// Paretop-k IHS
+    #[command(alias = "ihs")]
     ParetoIhs {
         /// The hitting set solver to use
         #[arg(long)]

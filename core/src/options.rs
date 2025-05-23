@@ -38,8 +38,10 @@ pub enum CoreMinimization {
     #[default]
     None,
     /// Core trimming, i.e., heuristic minimization
+    #[cfg_attr(feature = "clap", value(alias = "heuristic"))]
     Trimming,
     /// Full-fleged core minimization
+    #[cfg_attr(feature = "clap", value(alias = "true"))]
     Full,
 }
 
@@ -136,6 +138,7 @@ impl Default for HeurImprOptions {
 pub enum HeurImprWhen {
     /// Never perform solution improvement
     #[default]
+    #[cfg_attr(feature = "clap", value(alias = "false"))]
     Never,
     /// Always perform solution improvement
     Always,
@@ -288,6 +291,7 @@ pub struct IhsOptions {
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum CandidateSeeding {
     /// Don't see any candidates
+    #[cfg_attr(feature = "clap", value(alias = "false"))]
     None,
     /// Find a first candidate through a SAT call without assumptions
     #[default]
