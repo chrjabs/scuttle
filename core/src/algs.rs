@@ -117,7 +117,14 @@ pub trait Solve: KernelFunctions {
     /// early termination reason.
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError;
     /// Gets all statistics from the solver
-    fn all_stats(&self) -> (Stats, Option<SolverStats>, Option<Vec<EncodingStats>>);
+    fn all_stats(
+        &self,
+    ) -> (
+        Stats,
+        Option<SolverStats>,
+        Option<Vec<EncodingStats>>,
+        Option<hitting_sets::Statistics>,
+    );
 }
 
 /// Core boosting interface

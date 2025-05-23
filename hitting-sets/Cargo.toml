@@ -8,5 +8,6 @@ default = ["highs"]
 highs = ["dep:highs"]
 
 [dependencies]
+cpu-time.workspace = true
 highs = { workspace = true, optional = true }
 rustsat.workspace = true

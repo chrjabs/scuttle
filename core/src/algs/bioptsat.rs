@@ -92,12 +92,14 @@ where
         crate::Stats,
         Option<SolverStats>,
         Option<Vec<EncodingStats>>,
+        Option<hitting_sets::Statistics>,
     ) {
         use crate::ExtendedSolveStats;
         (
             self.kernel.stats,
             Some(self.oracle_stats()),
             Some(self.encoding_stats()),
+            None,
         )
     }
 }

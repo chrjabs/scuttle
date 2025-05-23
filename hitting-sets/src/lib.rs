@@ -72,6 +72,9 @@ pub trait HittingSetSolver {
 
     /// Adds a PD cut to the hitting set solver
     fn add_pd_cut(&mut self, costs: &[usize]);
+
+    /// Gets the statistics of the hitting set solver
+    fn statistics(&self) -> Statistics;
 }
 
 /// Trait for initializing a new solver
@@ -94,4 +97,11 @@ pub trait BuildSolver {
     ///
     /// The default value shall be `1`
     fn threads(&mut self, threads: u32) -> &mut Self;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Statistics {
+    pub solve_time: std::time::Duration,
+    pub n_solves: usize,
+    pub n_cores: usize,
 }

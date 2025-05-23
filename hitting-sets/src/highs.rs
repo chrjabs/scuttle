@@ -13,6 +13,7 @@ pub struct Solver {
     objectives: Vec<RsHashMap<Lit, usize>>,
     map: VarMap<Col>,
     state: State,
+    statistics: super::Statistics,
 }
 
 #[derive(Default)]
@@ -72,6 +73,7 @@ impl HittingSetSolver for Solver {
     }
 
     fn add_core(&mut self, core: &Cl) {
+        self.statistics.n_cores += 1;
         let bound = core
             .iter()
             .fold(1, |b, lit| if lit.is_neg() { b - 1 } else { b });
@@ -224,6 +226,10 @@ impl HittingSetSolver for Solver {
             }
         }
     }
+
+    fn statistics(&self) -> super::Statistics {
+        self.statistics
+    }
 }
 
 #[inline]
@@ -257,6 +263,8 @@ impl Solver {
     }
 
     fn solve(&mut self, target_value: Option<usize>) -> IncompleteSolveResult {
+        self.statistics.n_solves += 1;
+        let start = cpu_time::ProcessTime::now();
         if matches!(self.state, State::Init { .. }) {
             self.transition_to_main();
         }
@@ -273,6 +281,7 @@ impl Solver {
                 model.set_option("objective_target", -f64::INFINITY);
             }
             self.state = State::Main(model);
+            self.statistics.solve_time += start.elapsed();
             return IncompleteSolveResult::Infeasible;
         }
         if solved.status() == HighsModelStatus::ObjectiveTarget {
@@ -283,6 +292,7 @@ impl Solver {
             model.set_option("objective_target", -f64::INFINITY);
             self.state = State::Main(model);
             let hitting_set = collect_hitting_set(&solution, &self.map);
+            self.statistics.solve_time += start.elapsed();
             return IncompleteSolveResult::Feasible(cost, hitting_set);
         }
         assert_eq!(solved.status(), HighsModelStatus::Optimal);
@@ -294,6 +304,7 @@ impl Solver {
         }
         self.state = State::Main(model);
         let hitting_set = collect_hitting_set(&solution, &self.map);
+        self.statistics.solve_time += start.elapsed();
         IncompleteSolveResult::Optimal(cost, hitting_set)
     }
 }
@@ -383,6 +394,7 @@ impl BuildSolver for Builder {
                 problem,
                 options: self.options,
             },
+            statistics: super::Statistics::default(),
         }
     }
 

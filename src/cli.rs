@@ -1054,6 +1054,33 @@ impl Cli {
         Ok(())
     }
 
+    pub fn print_hitting_set_solver_stats(
+        &self,
+        stats: hitting_sets::Statistics,
+    ) -> Result<(), IOError> {
+        if self.print_stats {
+            let mut buffer = self.stdout.buffer();
+            Self::start_block(&mut buffer)?;
+            buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
+            write!(buffer, "Hitting Set Solver Stats")?;
+            buffer.reset()?;
+            buffer.set_color(ColorSpec::new().set_bold(true))?;
+            writeln!(buffer, ": ")?;
+            buffer.reset()?;
+            let hitting_sets::Statistics {
+                n_cores,
+                n_solves,
+                solve_time,
+            } = stats;
+            Self::print_parameter(&mut buffer, "n-cores", n_cores)?;
+            Self::print_parameter(&mut buffer, "n-solve-calls", n_solves)?;
+            Self::print_parameter(&mut buffer, "cpu-solve-time", DurPrinter::new(solve_time))?;
+            Self::end_block(&mut buffer)?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
+
     fn print_non_dom<S: Clone + Eq + fmt::Display>(
         &self,
         buffer: &mut Buffer,

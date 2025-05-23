@@ -302,7 +302,7 @@ where
 
     cli.print_pareto_front(pareto_front)?;
 
-    let (stats, ostats, estats) = alg.all_stats();
+    let (stats, ostats, estats, hss_stats) = alg.all_stats();
     cli.print_stats(stats)?;
     // Get extended stats for solver that supports stats
     if let Some(stats) = ostats {
@@ -310,6 +310,9 @@ where
     }
     if let Some(stats) = estats {
         cli.print_encoding_stats(stats)?;
+    }
+    if let Some(stats) = hss_stats {
+        cli.print_hitting_set_solver_stats(stats)?;
     }
     #[cfg(feature = "maxpre")]
     if let Some(prepro) = prepro {
