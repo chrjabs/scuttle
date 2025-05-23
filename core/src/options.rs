@@ -17,10 +17,8 @@ pub struct KernelOptions {
     pub heuristic_improvements: HeurImprOptions,
     /// Solution-guided search (aka phasing solutions)
     pub solution_guided_search: bool,
-    /// Core trimming (in core-guided algorithms)
-    pub core_trimming: bool,
-    /// Core minimization (in core-guided algorithms)
-    pub core_minimization: bool,
+    /// Core minimization
+    pub core_minimization: CoreMinimization,
     /// Core exhaustion (in OLL)
     pub core_exhaustion: bool,
     /// Store the original clauses
@@ -30,6 +28,38 @@ pub struct KernelOptions {
 impl KernelOptions {
     pub fn set_enumeration(&mut self, enumeration: EnumOptions) {
         self.enumeration = enumeration;
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+pub enum CoreMinimization {
+    /// No core minimization
+    #[default]
+    None,
+    /// Core trimming, i.e., heuristic minimization
+    Trimming,
+    /// Full-fleged core minimization
+    Full,
+}
+
+impl fmt::Display for CoreMinimization {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CoreMinimization::None => write!(f, "none"),
+            CoreMinimization::Trimming => write!(f, "trimming"),
+            CoreMinimization::Full => write!(f, "full"),
+        }
+    }
+}
+
+impl CoreMinimization {
+    pub fn trimming(self) -> bool {
+        matches!(self, Self::Trimming)
+    }
+
+    pub fn minimization(self) -> bool {
+        matches!(self, Self::Full)
     }
 }
 

@@ -16,7 +16,7 @@ use rustsat::{
     instances::fio,
     solvers::{SolverResult, SolverStats},
 };
-use scuttle_core::options::{CandidateSeeding, IhsOptions};
+use scuttle_core::options::{CandidateSeeding, CoreMinimization, IhsOptions};
 use scuttle_core::prepro::FileFormat;
 use scuttle_core::{
     options::{
@@ -63,12 +63,9 @@ struct CliArgs {
     /// When to perform solution tightening
     #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening, global = true)]
     solution_tightening: HeurImprWhen,
-    /// Whether to perform core trimming in core-guided algorithms
-    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_trimming), global = true)]
-    core_trimming: Bool,
-    /// Whether to perform core trimming in core-guided algorithms
-    #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_minimization), global = true)]
-    core_minimization: Bool,
+    /// What type of core minimization to perform
+    #[arg(long, default_value_t = CoreMinimization::default(), global = true)]
+    core_minimization: CoreMinimization,
     /// Whether to perform core exhaustion in OLL
     #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_exhaustion), global = true)]
     core_exhaustion: Bool,
@@ -104,8 +101,7 @@ impl CliArgs {
                 solution_tightening: self.solution_tightening,
             },
             solution_guided_search: self.solution_guided_search.into(),
-            core_trimming: self.core_trimming.into(),
-            core_minimization: self.core_minimization.into(),
+            core_minimization: self.core_minimization,
             core_exhaustion: self.core_exhaustion.into(),
             store_cnf,
         }

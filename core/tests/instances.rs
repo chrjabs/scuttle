@@ -4,7 +4,7 @@ use libtest_mimic::{Arguments, Failed};
 use pigeons::Proof;
 use scuttle_core::{
     algs::{InitDefaultBlock, Solve},
-    options::{EnumOptions, IhsOptions},
+    options::{CoreMinimization, EnumOptions, IhsOptions},
     types::{Instance, ParetoFront},
     CoreBoost, CoreBoostingOptions, Init, InitCert, InitCertDefaultBlock, KernelOptions,
 };
@@ -85,7 +85,7 @@ fn main() {
             "core-min",
             (
                 KernelOptions {
-                    core_minimization: true,
+                    core_minimization: CoreMinimization::Full,
                     ..KernelOptions::default()
                 },
                 IhsOptions::default(),

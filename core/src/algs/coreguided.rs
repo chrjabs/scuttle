@@ -662,7 +662,7 @@ where
         base_assumps: &[Lit],
         mut proof_id: Option<pigeons::AbsConstraintId>,
     ) -> MaybeTerminatedError<(Vec<Lit>, Option<pigeons::AbsConstraintId>)> {
-        if !self.opts.core_minimization {
+        if !self.opts.core_minimization.minimization() {
             return Done((core, proof_id));
         }
         if core.len() <= 1 {
@@ -731,7 +731,7 @@ where
         base_assumps: &[Lit],
         mut proof_id: Option<pigeons::AbsConstraintId>,
     ) -> MaybeTerminatedError<(Vec<Lit>, Option<pigeons::AbsConstraintId>)> {
-        if !self.opts.core_trimming {
+        if !self.opts.core_minimization.trimming() {
             return Done((core, proof_id));
         }
         if core.len() <= 1 {
