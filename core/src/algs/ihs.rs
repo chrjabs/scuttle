@@ -7,7 +7,7 @@ use rustsat::{
     solvers::{
         DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
     },
-    types::{Assignment, Cl, Clause, Lit, RsHashSet},
+    types::{Assignment, Cl, Clause, Lit, RsHashSet, Var},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
@@ -34,6 +34,7 @@ pub struct ParetoIhs<
     kernel: Kernel<O, ProofW, OInit, BCG>,
     hitting_set_solver: Hss,
     objective_lits: RsHashSet<Lit>,
+    max_obj_var: Var,
     n_seeded: usize,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
@@ -106,10 +107,16 @@ where
         let clauses: Vec<_> = clauses.into_iter().collect();
 
         // Seed constraints over objective variables
-        let objective_lits: RsHashSet<_> = objs
-            .iter()
-            .flat_map(|obj| obj.iter().map(|(lit, _)| lit))
-            .collect();
+        let mut objective_lits = RsHashSet::default();
+        let mut max_obj_var = Var::new(0);
+        for obj in &objs {
+            for (lit, _) in obj.iter() {
+                if lit.var() > max_obj_var {
+                    max_obj_var = lit.var();
+                }
+                objective_lits.insert(lit);
+            }
+        }
         let mut n_seeded = 0;
         if opts.seeding {
             'outer: for cl in &clauses {
@@ -128,6 +135,7 @@ where
             kernel,
             hitting_set_solver,
             objective_lits,
+            max_obj_var,
             n_seeded,
             pareto_front: Default::default(),
             candidates: Default::default(),
@@ -175,6 +183,20 @@ where
             return Done(());
         }
         let mut want_optimal = false;
+        let joint_objective = {
+            let mut jobj = vec![0; self.max_obj_var.idx() + 1];
+            for obj in &self.kernel.objs {
+                for (lit, weight) in obj.iter() {
+                    let mut weight =
+                        isize::try_from(weight).expect("weight does not fit in `isize`");
+                    if lit.is_neg() {
+                        weight *= -1;
+                    }
+                    jobj[lit.vidx()] += weight;
+                }
+            }
+            jobj
+        };
         loop {
             self.kernel.log_routine_start("extract hitting set")?;
 
@@ -205,6 +227,12 @@ where
             }
             self.kernel.check_termination()?;
             hitting_set.retain(|lit| self.objective_lits.contains(&!*lit));
+            // sort hitting set by weight for core minimization
+            if self.kernel.opts.core_minimization.minimization() {
+                // NOTE: we _intentionally_ use stable sort here, so that we preserve literal order
+                // on equal weight
+                hitting_set.sort_by_key(|l| -joint_objective[l.vidx()].abs());
+            }
             match self.kernel.solve_assumps(&hitting_set)? {
                 SolverResult::Sat => {
                     let (costs, solution) = self.kernel.get_solution_and_internal_costs(false)?;
@@ -234,28 +262,79 @@ where
                     }
                 }
                 SolverResult::Unsat => {
+                    let mut wce_obj = if self.opts.wce {
+                        joint_objective.clone()
+                    } else {
+                        vec![]
+                    };
                     loop {
                         let core = self.kernel.oracle.core()?;
                         if core.is_empty() {
                             self.kernel.log_routine_end()?;
                             return Done(());
                         }
+                        let orig_len = core.len();
                         let (core, _) = self.kernel.trim_core(core, &[], None)?;
                         let (core, _) = self.kernel.minimize_core(core, &[], None)?;
                         let core = Cl::new(&core);
                         self.hitting_set_solver.add_core(core);
-                        // NOTE: core is in same order as hitting set, we can therefore remove the
-                        // core literals in a single sweep
-                        let mut core_idx = 0;
-                        hitting_set.retain(|&lit| {
-                            while core_idx < core.len() && core[core_idx] < !lit {
-                                core_idx += 1;
+                        let _len_before = hitting_set.len();
+                        if self.opts.wce {
+                            let min_cost = core.iter().fold(isize::MAX, |min, lit| {
+                                std::cmp::min(wce_obj[lit.vidx()].abs(), min)
+                            });
+                            if let Some(log) = &mut self.kernel.logger {
+                                log.log_core(min_cost.unsigned_abs(), orig_len, core.len())?;
                             }
-                            if core_idx >= core.len() || !lit != core[core_idx] {
-                                return true;
+                            for lit in core {
+                                if lit.is_pos() {
+                                    wce_obj[lit.vidx()] -= min_cost;
+                                } else {
+                                    wce_obj[lit.vidx()] += min_cost;
+                                }
                             }
-                            false
-                        });
+                            hitting_set.retain(|&lit| wce_obj[lit.vidx()] != 0);
+                        } else {
+                            if let Some(log) = &mut self.kernel.logger {
+                                log.log_core(usize::MAX, orig_len, core.len())?;
+                            }
+                            // NOTE: core is in same order as hitting set, we can therefore remove the
+                            // core literals in a single sweep, knowing that the
+                            // with core minimization, the assumptions are ordered by weight,
+                            // otherwise by literal (from the hitting set solver)
+                            let mut core_idx = 0;
+                            if self.kernel.opts.core_minimization.minimization() {
+                                hitting_set.retain(|&lit| {
+                                    while core_idx < core.len()
+                                        && (joint_objective[core[core_idx].vidx()].abs()
+                                            > joint_objective[lit.vidx()].abs()
+                                            || (joint_objective[core[core_idx].vidx()].abs()
+                                                == joint_objective[lit.vidx()].abs()
+                                                && core[core_idx] < !lit))
+                                    {
+                                        core_idx += 1;
+                                    }
+                                    if core_idx >= core.len() || !lit != core[core_idx] {
+                                        return true;
+                                    }
+                                    false
+                                });
+                            } else {
+                                hitting_set.retain(|&lit| {
+                                    while core_idx < core.len() && core[core_idx] < !lit {
+                                        core_idx += 1;
+                                    }
+                                    if core_idx >= core.len() || !lit != core[core_idx] {
+                                        return true;
+                                    }
+                                    false
+                                });
+                            };
+                        }
+                        debug_assert!(
+                            hitting_set.len() < _len_before,
+                            "something should be removed from the assumptions"
+                        );
                         if hitting_set.is_empty() {
                             break;
                         }

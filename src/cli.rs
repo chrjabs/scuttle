@@ -150,6 +150,9 @@ enum AlgorithmCommand {
         /// Whether to seed constraints over only objective variables into the hitting set solver
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().seeding))]
         seeding: Bool,
+        /// Whether to use weight-aware core extraction in the IHS algorithm
+        #[arg(long, default_value_t = Bool::from(IhsOptions::default().wce))]
+        ihs_wce: Bool,
         /// Candidate seeding
         #[arg(long, default_value_t = CandidateSeeding::default())]
         candidate_seeding: CandidateSeeding,
@@ -742,6 +745,7 @@ impl Cli {
                 log_hitting_sets,
                 log_seeding_ratio,
                 seeding,
+                ihs_wce,
                 candidate_seeding,
                 file,
             } => Cli {
@@ -776,6 +780,7 @@ impl Cli {
                     kernel_opts,
                     IhsOptions {
                         seeding: seeding.into(),
+                        wce: ihs_wce.into(),
                         candidate_seeding,
                     },
                     cb,

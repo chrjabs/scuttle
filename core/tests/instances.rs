@@ -91,6 +91,29 @@ fn main() {
                 IhsOptions::default(),
             ),
         ),
+        (
+            "wce",
+            (
+                KernelOptions::default(),
+                IhsOptions {
+                    wce: true,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
+        (
+            "core-min-wce",
+            (
+                KernelOptions {
+                    core_minimization: CoreMinimization::Full,
+                    ..KernelOptions::default()
+                },
+                IhsOptions {
+                    wce: true,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
     ];
     for (id, opts) in vars {
         tests.extend(

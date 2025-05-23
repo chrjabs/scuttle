@@ -13,6 +13,7 @@ c meta:n-objs=2,enum-data=false
 c ignore-test:p-minimal
 c ignore-test:bioptsat
 c ignore-test:lower-bounding
+c ignore-test:pareto-ihs<highs>:wce
 c
 c non-dominated points
 c nd (345, 6125)

@@ -675,6 +675,7 @@ where
 
         // **Note**: this assumes that the core is ordered by weight
         let sorted_core: Vec<_> = core.iter().rev().copied().collect();
+        let mut altered = false;
 
         #[cfg(feature = "limit-conflicts")]
         self.oracle.limit_conflicts(Some(1000))?;
@@ -687,6 +688,7 @@ where
             }));
             let ret = self.solve_assumps(&assumps)?;
             if ret == Unsat {
+                altered = true;
                 core = self.oracle.core()?;
                 if !base_assumps.is_empty() {
                     // filter out base assumptions
@@ -716,6 +718,11 @@ where
                 };
             }
             assumps.drain(base_assumps.len()..);
+        }
+
+        // reverse core again to preserve original literal order
+        if altered {
+            core.reverse();
         }
 
         #[cfg(feature = "limit-conflicts")]

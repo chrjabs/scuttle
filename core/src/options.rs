@@ -279,6 +279,8 @@ pub struct IhsOptions {
     pub seeding: bool,
     /// The candidate seeding options
     pub candidate_seeding: CandidateSeeding,
+    /// Whether to use weight-aware core extraction in the IHS algorithm
+    pub wce: bool,
 }
 
 /// Candidate seeding options for the IHS algorithm
