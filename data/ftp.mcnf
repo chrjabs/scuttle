@@ -10,7 +10,9 @@ c ( 490 490 ) soft clauses
 c objective offsets: ( 0 0 )
 c
 c meta:n-objs=2,enum-data=false
-c ignore-test
+c ignore-test:p-minimal
+c ignore-test:bioptsat
+c ignore-test:lower-bounding
 c
 c non-dominated points
 c nd (345, 6125)

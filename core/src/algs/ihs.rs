@@ -207,8 +207,7 @@ where
             hitting_set.retain(|lit| self.objective_lits.contains(&!*lit));
             match self.kernel.solve_assumps(&hitting_set)? {
                 SolverResult::Sat => {
-                    let (mut costs, solution) =
-                        self.kernel.get_solution_and_internal_costs(false)?;
+                    let (costs, solution) = self.kernel.get_solution_and_internal_costs(false)?;
                     if is_optimal {
                         // found pareto-optimal solution
                         self.candidates.remove_dominated(&costs);
@@ -220,11 +219,6 @@ where
                             &mut self.pareto_front,
                         )?;
                         // introduce PD cut in the hitting set solver
-                        for (obj, cost) in self.kernel.objs.iter().zip(&mut costs) {
-                            if let Objective::Unweighted { unit_weight, .. } = obj {
-                                *cost *= *unit_weight;
-                            }
-                        }
                         self.hitting_set_solver.add_pd_cut(&costs);
                         want_optimal = false;
                     } else {
@@ -307,17 +301,11 @@ where
                 logger.log_hitting_set(cost, true)?;
             }
             self.kernel.check_termination()?;
-            let (mut costs, solution) =
-                self.hitting_set_to_solution_and_internal_costs(hitting_set)?;
+            let (costs, solution) = self.hitting_set_to_solution_and_internal_costs(hitting_set)?;
             // store solution
             self.kernel
                 .yield_solutions(costs.clone(), &[], solution, &mut self.pareto_front)?;
             // introduce PD cut in the hitting set solver
-            for (obj, cost) in self.kernel.objs.iter().zip(&mut costs) {
-                if let Objective::Unweighted { unit_weight, .. } = obj {
-                    *cost *= *unit_weight;
-                }
-            }
             self.hitting_set_solver.add_pd_cut(&costs);
         }
     }

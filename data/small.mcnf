@@ -2,9 +2,6 @@ c A Small MCNF example
 c 
 c meta:n-objs=2
 c
-c ignore-test:pareto-ihs<highs>
-c ignore-test:pareto-ihs<gurobi>
-c 
 c non-dominated points:
 c nd (0, 4), 1
 c nd (2, 2), 1
