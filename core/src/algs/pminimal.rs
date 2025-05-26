@@ -37,6 +37,8 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
+    algs::coreboosting::CbResult,
+    archive::Archive,
     options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
     termination::ensure,
     types::{ParetoFront, VarManager},
@@ -74,6 +76,8 @@ pub struct PMinimal<
     obj_encs: Vec<ObjEncoding<PBE, CE>>,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
+    /// Archive of starting points from core boosting
+    starting_points: Archive<Assignment>,
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG> super::Solve
@@ -242,6 +246,7 @@ where
             kernel,
             obj_encs,
             pareto_front: Default::default(),
+            starting_points: Archive::default(),
         }
     }
 }
@@ -264,25 +269,28 @@ where
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
         self.kernel.log_routine_start("p-minimal")?;
         loop {
-            // Find minimization starting point
-            let res = self.kernel.solve()?;
-            if SolverResult::Unsat == res {
-                self.kernel.log_routine_end()?;
-                return Done(());
-            }
-            self.kernel.check_termination()?;
+            let (costs, solution) = if let Some((costs, sol)) = self.starting_points.pop() {
+                (costs, sol)
+            } else {
+                // Find minimization starting point
+                let res = self.kernel.solve()?;
+                if SolverResult::Unsat == res {
+                    self.kernel.log_routine_end()?;
+                    return Done(());
+                }
+                self.kernel.check_termination()?;
 
-            // Minimize solution
-            let (costs, solution) = self.kernel.get_solution_and_internal_costs(
-                self.kernel
-                    .opts
-                    .heuristic_improvements
-                    .solution_tightening
-                    .wanted(Phase::OuterLoop),
-            )?;
+                self.kernel.get_solution_and_internal_costs(
+                    self.kernel
+                        .opts
+                        .heuristic_improvements
+                        .solution_tightening
+                        .wanted(Phase::OuterLoop),
+                )?
+            };
             self.kernel.log_candidate(&costs, Phase::OuterLoop)?;
             self.kernel.check_termination()?;
-            self.kernel.phase_solution(solution.clone())?;
+            self.kernel.phase_solution(&solution)?;
             let (costs, solution, block_switch) =
                 self.kernel
                     .p_minimization(costs, solution, &[], &mut self.obj_encs)?;
@@ -291,6 +299,7 @@ where
                 .kernel
                 .enforce_dominating(&costs, &mut self.obj_encs)?
                 .collect();
+            self.starting_points.remove_dominated(&costs);
             self.kernel.yield_solutions(
                 costs.clone(),
                 &assumps,
@@ -376,7 +385,15 @@ where
             }
         };
         self.kernel.log_routine_start("merge encodings")?;
-        for (oidx, (reform, mut tot_db)) in cb_res.into_iter().enumerate() {
+        for (
+            oidx,
+            CbResult {
+                reform,
+                mut tot_db,
+                solution,
+            },
+        ) in cb_res.into_iter().enumerate()
+        {
             if reset_dbs {
                 debug_assert!(self.kernel.proof_stuff.is_none());
                 tot_db.reset_vars();
@@ -402,6 +419,12 @@ where
 
                 self.obj_encs[oidx] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
             }
+
+            if let Some(solution) = solution {
+                let costs = self.kernel.compute_costs(&solution);
+                self.starting_points.insert(solution, costs);
+            }
+
             self.kernel.check_termination()?;
         }
         self.kernel.log_routine_end()?;
@@ -562,7 +585,7 @@ where
             )?;
             self.log_candidate(&costs, Phase::Minimization)?;
             self.check_termination()?;
-            self.phase_solution(solution.clone())?;
+            self.phase_solution(&solution)?;
         }
     }
 

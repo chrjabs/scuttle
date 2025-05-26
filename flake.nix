@@ -39,7 +39,15 @@
             cmake
             (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
             cargo-nextest
-            veripb
+            (veripb.overrideAttrs rec {
+              version = "version2-250409";
+              src = fetchFromGitLab {
+                owner = "MIAOresearch";
+                repo = "VeriPB";
+                rev = "e70eaf1ba5654750ebe34bb4b3c4f89fe9c956b0";
+                hash = "sha256-kSZLFukQpE/Pza4hRighlJ71YRXdvEe826WM6FexId4=";
+              };
+            })
           ];
           buildInputs = libs;
           LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";

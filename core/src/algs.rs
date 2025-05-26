@@ -621,6 +621,26 @@ where
     }
 }
 
+impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
+where
+    ProofW: io::Write,
+{
+    /// Performs heuristic solution improvement and computes the improved
+    /// (internal) cost for one objective
+    fn compute_costs(&mut self, sol: &Assignment) -> Vec<usize> {
+        let mut costs = vec![0; self.stats.n_objs];
+        for (obj, cost) in self.objs.iter().zip(costs.iter_mut()) {
+            for (l, w) in obj.iter() {
+                let val = sol.lit_value(l);
+                if val == TernaryVal::True {
+                    *cost += w;
+                }
+            }
+        }
+        costs
+    }
+}
+
 #[cfg(feature = "phasing")]
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
@@ -629,11 +649,11 @@ where
 {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
-    fn phase_solution(&mut self, solution: Assignment) -> anyhow::Result<()> {
+    fn phase_solution(&mut self, solution: &Assignment) -> anyhow::Result<()> {
         if !self.opts.solution_guided_search {
             return Ok(());
         }
-        for lit in solution.into_iter() {
+        for lit in solution {
             self.oracle.phase_lit(lit)?;
         }
         Ok(())
@@ -656,7 +676,7 @@ where
 impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG> {
     /// If solution-guided search is turned on, phases the entire solution in
     /// the oracle
-    fn phase_solution(&mut self, _solution: Assignment) -> anyhow::Result<()> {
+    fn phase_solution(&mut self, _solution: &Assignment) -> anyhow::Result<()> {
         Ok(())
     }
 

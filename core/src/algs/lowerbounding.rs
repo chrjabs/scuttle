@@ -29,6 +29,7 @@ use rustsat::{
 use scuttle_proc::KernelFunctions;
 
 use crate::{
+    algs::coreboosting::CbResult,
     options::{AfterCbOptions, CoreBoostingOptions},
     termination::ensure,
     types::{NonDomPoint, ParetoFront, VarManager},
@@ -365,7 +366,13 @@ where
             }
         };
         self.kernel.log_routine_start("merge encodings")?;
-        for (oidx, (reform, mut tot_db)) in cb_res.into_iter().enumerate() {
+        for (
+            oidx,
+            CbResult {
+                reform, mut tot_db, ..
+            },
+        ) in cb_res.into_iter().enumerate()
+        {
             if reset_dbs {
                 debug_assert!(self.kernel.proof_stuff.is_none());
                 tot_db.reset_vars();
@@ -499,7 +506,7 @@ where
             )?;
             self.log_candidate(&costs, Phase::OuterLoop)?;
             self.check_termination()?;
-            self.phase_solution(solution.clone())?;
+            self.phase_solution(&solution)?;
             let (costs, solution, block_switch) =
                 self.p_minimization(costs, solution, base_assumps, obj_encs)?;
 

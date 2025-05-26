@@ -257,8 +257,8 @@ where
     // Extend witness to encoding variables under strict semantics
     // TODO: avoid clone
     let fixed_witness: Vec<Axiom<AnyVar>> = {
-        // NOTE: assignments from `extend_assignment` have precendence, as they weill overwrite
-        // assignments coming from the witness
+        // NOTE: assignments from `extend_assignment` have precendence, as they weill ovrwrite
+        // assignments comming from the witness
         let mut fixed_witness: Assignment = witness
             .iter()
             .chain(
@@ -303,6 +303,8 @@ where
                 }
             }
         }
+        // assuming that all remaining don't cares are fully exhausted totalizers from OLL
+        fixed_witness.replace_dont_care(true);
         fixed_witness
             .into_iter()
             .map(axiom)

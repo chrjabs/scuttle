@@ -30,6 +30,7 @@ use rustsat::{
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
+    algs::coreboosting::CbResult,
     options::{AfterCbOptions, CoreBoostingOptions},
     termination::ensure,
     types::{NonDomPoint, ParetoFront, VarManager},
@@ -66,6 +67,8 @@ pub struct BiOptSat<
     obj_encs: [ObjEncoding<PBE, CE>; 2],
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
+    /// Starting point solution from core boosting
+    starting_point: Option<(usize, Assignment)>,
 }
 
 impl<'learn, 'term, ProofW, OInit, BCG> super::Solve
@@ -246,6 +249,7 @@ where
             kernel,
             obj_encs: [inc_enc, dec_enc],
             pareto_front: Default::default(),
+            starting_point: None,
         }
     }
 }
@@ -269,7 +273,7 @@ where
             (0, 1),
             &mut self.obj_encs,
             &[],
-            None,
+            self.starting_point.take(),
             (None, None),
             |_| None,
             &mut self.pareto_front,
@@ -310,7 +314,15 @@ where
             }
         };
         self.kernel.log_routine_start("merge encodings")?;
-        for (oidx, (reform, mut tot_db)) in cb_res.into_iter().enumerate() {
+        for (
+            oidx,
+            CbResult {
+                reform,
+                mut tot_db,
+                solution,
+            },
+        ) in cb_res.into_iter().enumerate()
+        {
             if reset_dbs {
                 debug_assert!(self.kernel.proof_stuff.is_none());
                 tot_db.reset_vars();
@@ -335,6 +347,9 @@ where
                 }
 
                 if oidx == 0 {
+                    if let Some(solution) = solution {
+                        self.starting_point = Some((reform.offset, solution));
+                    }
                     self.obj_encs[0] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
                 } else {
                     self.obj_encs[1] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);

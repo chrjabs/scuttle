@@ -22,6 +22,11 @@ impl<S> Archive<S> {
     pub fn remove_dominated(&mut self, costs: &[usize]) {
         self.0.retain(|e| !weakly_dominates(costs, &e.costs));
     }
+
+    /// Pops the next element from the archive
+    pub fn pop(&mut self) -> Option<(Vec<usize>, S)> {
+        self.0.pop().map(|e| (e.costs, e.sol))
+    }
 }
 
 #[derive(Debug, Clone)]
