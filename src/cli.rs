@@ -16,7 +16,7 @@ use rustsat::{
     instances::fio,
     solvers::{SolverResult, SolverStats},
 };
-use scuttle_core::options::{CandidateSeeding, CoreMinimization, IhsOptions};
+use scuttle_core::options::{CandidateSeeding, CoreMinimization, IhsOptions, Stratification};
 use scuttle_core::prepro::FileFormat;
 use scuttle_core::{
     options::{
@@ -72,6 +72,18 @@ struct CliArgs {
     /// Whether to perform core exhaustion in OLL
     #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_exhaustion), global = true)]
     core_exhaustion: Bool,
+    /// Stratification in core-based algorithms
+    ///
+    /// Possible values:
+    /// - `none`
+    /// - `all`
+    /// - any combination of the following, separated by `+`
+    ///     - `strat`
+    ///     - `exp-strat`
+    ///     - `multi-level`
+    ///     - `dist`
+    #[arg(long, alias = "strat", default_value_t = KernelOptions::default().stratification, global = true)]
+    stratification: Stratification,
     /// The CaDiCaL profile to use
     #[arg(long, default_value_t = CadicalConfig::Default, global = true)]
     cadical_config: CadicalConfig,
@@ -108,6 +120,7 @@ impl CliArgs {
             core_minimization: self.core_minimization,
             core_exhaustion: self.core_exhaustion.into(),
             store_cnf,
+            stratification: self.stratification,
         }
     }
 }
@@ -375,6 +388,9 @@ struct LogArgs {
     /// Log inprocessing
     #[arg(long, global = true)]
     log_inprocessing: bool,
+    /// Log stratification levels
+    #[arg(long, global = true)]
+    log_strat_level: bool,
 }
 
 impl From<LogArgs> for LoggerConfig {
@@ -394,6 +410,7 @@ impl From<LogArgs> for LoggerConfig {
             log_inpro: value.log_inprocessing || value.verbosity >= 1,
             log_hitting_sets: false,
             log_seeding_ratio: false,
+            log_strat_level: value.log_strat_level || value.verbosity >= 2,
         }
     }
 }
@@ -1206,6 +1223,7 @@ struct LoggerConfig {
     log_inpro: bool,
     log_hitting_sets: bool,
     log_seeding_ratio: bool,
+    log_strat_level: bool,
 }
 
 pub struct CliLogger {
@@ -1215,7 +1233,7 @@ pub struct CliLogger {
 }
 
 impl WriteSolverLog for CliLogger {
-    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> anyhow::Result<()> {
+    fn log_candidate(&self, costs: &[usize], phase: Phase) -> anyhow::Result<()> {
         if self.config.log_candidates {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1233,7 +1251,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_oracle_call(&mut self, result: SolverResult) -> anyhow::Result<()> {
+    fn log_oracle_call(&self, result: SolverResult) -> anyhow::Result<()> {
         if self.config.log_oracle_calls {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1250,7 +1268,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_solution(&mut self) -> anyhow::Result<()> {
+    fn log_solution(&self) -> anyhow::Result<()> {
         if self.config.log_solutions {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1266,7 +1284,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> anyhow::Result<()> {
+    fn log_non_dominated(&self, non_dominated: &NonDomPoint) -> anyhow::Result<()> {
         if self.config.log_non_dom {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1286,7 +1304,7 @@ impl WriteSolverLog for CliLogger {
 
     #[cfg(feature = "sol-tightening")]
     fn log_heuristic_obj_improvement(
-        &mut self,
+        &self,
         obj_idx: usize,
         apparent_cost: usize,
         improved_cost: usize,
@@ -1309,7 +1327,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_fence(&mut self, fence: &[usize]) -> anyhow::Result<()> {
+    fn log_fence(&self, fence: &[usize]) -> anyhow::Result<()> {
         if self.config.log_fence {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1363,7 +1381,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_ideal(&mut self, ideal: &[usize]) -> anyhow::Result<()> {
+    fn log_ideal(&self, ideal: &[usize]) -> anyhow::Result<()> {
         if self.config.log_bound_points {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -1380,7 +1398,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_nadir(&mut self, nadir: &[usize]) -> anyhow::Result<()> {
+    fn log_nadir(&self, nadir: &[usize]) -> anyhow::Result<()> {
         if self.config.log_bound_points {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -1397,7 +1415,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_core(&mut self, weight: usize, len: usize, red_len: usize) -> anyhow::Result<()> {
+    fn log_core(&self, weight: usize, len: usize, red_len: usize) -> anyhow::Result<()> {
         if self.config.log_cores {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1412,7 +1430,7 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_core_exhaustion(&mut self, exhausted: usize, weight: usize) -> anyhow::Result<()> {
+    fn log_core_exhaustion(&self, exhausted: usize, weight: usize) -> anyhow::Result<()> {
         if self.config.log_cores {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1425,7 +1443,7 @@ impl WriteSolverLog for CliLogger {
     }
 
     fn log_inprocessing(
-        &mut self,
+        &self,
         cls_before_after: (usize, usize),
         fixed_lits: usize,
         obj_range_before_after: Vec<(usize, usize)>,
@@ -1462,14 +1480,14 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_message(&mut self, msg: &str) -> anyhow::Result<()> {
+    fn log_message(&self, msg: &str) -> anyhow::Result<()> {
         let mut buffer = self.stdout.buffer();
         writeln!(buffer, "{msg}")?;
         self.stdout.print(&buffer)?;
         Ok(())
     }
 
-    fn log_hitting_set(&mut self, hitting_set_val: f64, optimal: bool) -> anyhow::Result<()> {
+    fn log_hitting_set(&self, hitting_set_val: f64, optimal: bool) -> anyhow::Result<()> {
         if self.config.log_hitting_sets {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
@@ -1485,13 +1503,25 @@ impl WriteSolverLog for CliLogger {
         Ok(())
     }
 
-    fn log_seeding_ratio(&mut self, ratio: f64) -> anyhow::Result<()> {
+    fn log_seeding_ratio(&self, ratio: f64) -> anyhow::Result<()> {
         if self.config.log_seeding_ratio {
             let mut buffer = self.stdout.buffer();
             buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
             write!(buffer, "seeding ratio")?;
             buffer.reset()?;
             writeln!(buffer, ": {ratio}")?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
+
+    fn log_strat_level(&self, strat_level: usize, reason: &str) -> anyhow::Result<()> {
+        if self.config.log_strat_level {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
+            write!(buffer, "stratification level")?;
+            buffer.reset()?;
+            writeln!(buffer, ": {strat_level} ({reason})")?;
             self.stdout.print(&buffer)?;
         }
         Ok(())

@@ -1,6 +1,6 @@
 //! # Core-Guided Search Functionality
 
-use std::io;
+use std::{collections::BTreeMap, io};
 
 use cadical_veripb_tracer::CadicalCertCollector;
 use pigeons::{AbsConstraintId, ConstraintId, OperationSequence};
@@ -232,6 +232,7 @@ where
     /// - Weight-aware core extraction
     /// - Core trimming
     /// - Core exhaustion
+    /// - Stratification
     ///
     /// When using base assumptions, the user has to guarantee that a potential
     /// subsequent call is only made with tighter constraints.
@@ -271,6 +272,14 @@ where
         // cores and fully built totalizers
         let mut reform_ids = vec![];
 
+        // current stratification level, and sum of weights _below_ that level
+        let mut strat_level = match &mut reform.inactives {
+            Inactives::Weighted(inacts) => {
+                self.next_strat_level(inacts.values().copied(), usize::MAX)?
+            }
+            _ => 1,
+        };
+
         loop {
             match &mut reform.inactives {
                 Inactives::Weighted(inacts) => {
@@ -279,7 +288,7 @@ where
                         .sort_unstable_by_key(|&l| -(inacts[&!l] as isize));
                     // Remove assumptions that turned active
                     while assumps.len() > base_assumps.len()
-                        && inacts[&!assumps[assumps.len() - 1]] == 0
+                        && inacts[&!assumps[assumps.len() - 1]] < strat_level
                     {
                         assumps.pop();
                     }
@@ -295,7 +304,7 @@ where
             match self.solve_assumps(&assumps)? {
                 Interrupted => unreachable!(),
                 Sat => {
-                    if unreform_cores.is_empty() {
+                    if unreform_cores.is_empty() && strat_level == 1 {
                         let sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
                         reform.inactives.final_cleanup();
 
@@ -372,6 +381,15 @@ where
 
                         self.log_routine_end()?;
                         return Done(Some(sol));
+                    } else if unreform_cores.is_empty() {
+                        let Inactives::Weighted(inacts) = &reform.inactives else {
+                            unreachable!("stratification only happens on weighted instances");
+                        };
+                        strat_level =
+                            self.next_strat_level(inacts.values().copied(), strat_level)?;
+                        assumps.drain(base_assumps.len()..);
+                        assumps.extend(reform.inactives.assumps());
+                        continue;
                     }
                     // NOTE: hardening is not sound for core boosting
 
@@ -557,6 +575,110 @@ where
                         reform_ids.push((core_id, core_weight));
                     }
                 }
+            }
+        }
+    }
+
+    fn next_strat_level<I>(&self, weights: I, mut strat_level: usize) -> anyhow::Result<usize>
+    where
+        I: Iterator<Item = usize>,
+    {
+        if !self.opts.stratification.do_strat() {
+            return Ok(1);
+        }
+        // initialization phase
+        let mut weight_levels = BTreeMap::default();
+        let mut n_softs = 0;
+        let mut levels_left = 0;
+        let mut sum_weights = 0;
+        for weight in weights {
+            if weight < strat_level {
+                n_softs += 1;
+                sum_weights += weight;
+                if !weight_levels.contains_key(&weight) {
+                    levels_left += 1;
+                }
+                // TODO: consider properly dealing with lazy reformulations here
+            }
+            if let Some(count) = weight_levels.get_mut(&weight) {
+                *count += 1;
+            } else {
+                weight_levels.insert(weight, 1);
+            }
+        }
+        let total_levels = weight_levels.len();
+        let mut sum_weights_selected = 0;
+        let mut n_softs_selected = 0;
+        if strat_level == usize::MAX {
+            let Some((&max_weight, _)) = weight_levels.range(..).next_back() else {
+                if let Some(logger) = &self.logger {
+                    logger.log_strat_level(1, "done")?;
+                }
+                return Ok(1);
+            };
+            strat_level = max_weight;
+        };
+        let orig_strat_level = strat_level;
+
+        loop {
+            let Some((&weight, &count)) = weight_levels.range(..strat_level).next_back() else {
+                // exhausted all levels
+                if let Some(logger) = &self.logger {
+                    logger.log_strat_level(1, "done")?;
+                }
+                return Ok(1);
+            };
+            let old_strat_level = strat_level;
+
+            strat_level = weight;
+            sum_weights -= count * weight;
+            n_softs -= count;
+            sum_weights_selected += count * weight;
+            n_softs_selected += count;
+            levels_left -= 1;
+
+            if levels_left == 0 {
+                debug_assert_eq!(sum_weights, 0);
+                debug_assert_eq!(n_softs, 0);
+                if let Some(logger) = &self.logger {
+                    logger.log_strat_level(1, "done")?;
+                }
+                return Ok(1);
+            }
+
+            if self.opts.stratification.distance_based
+                && sum_weights_selected.abs_diff(strat_level * n_softs_selected)
+                    >= sum_weights.abs_diff(strat_level * n_softs)
+            {
+                strat_level = old_strat_level;
+
+                if let Some(logger) = &self.logger {
+                    logger.log_strat_level(strat_level, "dist")?;
+                }
+                return Ok(strat_level);
+            }
+
+            if self.opts.stratification.multi_level && strat_level > sum_weights {
+                if let Some(logger) = &self.logger {
+                    logger.log_strat_level(strat_level, "multi-level")?;
+                }
+                return Ok(strat_level);
+            }
+
+            if self.opts.stratification.stratification && 2 * n_softs > levels_left * total_levels {
+                if let Some(logger) = &self.logger {
+                    logger.log_strat_level(strat_level, "strat")?;
+                }
+                return Ok(strat_level);
+            }
+
+            if self.opts.stratification.exponential_weight_stratification
+                && 2 * strat_level < orig_strat_level
+            {
+                if let Some(logger) = &self.logger {
+                    logger.log_strat_level(strat_level, "exp-strat")?;
+                }
+                return Ok(strat_level);
             }
         }
     }

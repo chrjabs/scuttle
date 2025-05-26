@@ -23,6 +23,8 @@ pub struct KernelOptions {
     pub core_minimization: CoreMinimization,
     /// Core exhaustion (in OLL)
     pub core_exhaustion: bool,
+    /// Stratification
+    pub stratification: Stratification,
     /// Store the original clauses
     pub store_cnf: bool,
 }
@@ -65,6 +67,110 @@ impl CoreMinimization {
 
     pub fn minimization(self) -> bool {
         matches!(self, Self::Full)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Stratification {
+    pub stratification: bool,
+    pub exponential_weight_stratification: bool,
+    pub distance_based: bool,
+    pub multi_level: bool,
+}
+
+impl Default for Stratification {
+    fn default() -> Self {
+        Self {
+            stratification: true,
+            exponential_weight_stratification: false,
+            distance_based: false,
+            multi_level: true,
+        }
+    }
+}
+
+impl fmt::Display for Stratification {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.do_strat() {
+            return write!(f, "none");
+        }
+        let mut started = false;
+        if self.stratification {
+            write!(f, "strat")?;
+            started = true;
+        }
+        if self.exponential_weight_stratification {
+            write!(f, "{}exp-strat", if started { "+" } else { "" })?;
+            started = true;
+        }
+        if self.distance_based {
+            write!(f, "{}dist", if started { "+" } else { "" })?;
+            started = true;
+        }
+        if self.multi_level {
+            write!(f, "{}multi-level", if started { "+" } else { "" })?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error, Clone)]
+#[error("Invalid stratification token: `{0}`")]
+pub struct StratParseError(String);
+
+impl std::str::FromStr for Stratification {
+    type Err = StratParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "all" {
+            return Ok(Stratification {
+                stratification: true,
+                exponential_weight_stratification: true,
+                distance_based: true,
+                multi_level: true,
+            });
+        }
+        if s == "default" {
+            return Ok(Stratification::default());
+        }
+        let mut strat = Stratification {
+            stratification: false,
+            exponential_weight_stratification: false,
+            distance_based: false,
+            multi_level: false,
+        };
+        if s == "none" {
+            return Ok(strat);
+        }
+        for tok in s.split('+') {
+            match tok {
+                "strat" | "stratification" => {
+                    strat.stratification = true;
+                }
+                "exp-strat"
+                | "exponential-stratification"
+                | "exponential-weight-stratification" => {
+                    strat.exponential_weight_stratification = true;
+                }
+                "multi-level" | "multi-level-optimization" | "mlo" | "blo" => {
+                    strat.multi_level = true;
+                }
+                "dist" | "distance-based" => {
+                    strat.distance_based = true;
+                }
+                _ => return Err(StratParseError(tok.to_string())),
+            }
+        }
+        Ok(strat)
+    }
+}
+
+impl Stratification {
+    pub fn do_strat(self) -> bool {
+        self.stratification
+            || self.exponential_weight_stratification
+            || self.distance_based
+            || self.multi_level
     }
 }
 

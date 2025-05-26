@@ -103,23 +103,23 @@ pub struct EncodingStats {
 /// A logger to attach to a solver
 pub trait WriteSolverLog {
     /// Adds a candidate cost point to the log
-    fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> anyhow::Result<()>;
+    fn log_candidate(&self, costs: &[usize], phase: Phase) -> anyhow::Result<()>;
     /// Adds an oracle call to the log
-    fn log_oracle_call(&mut self, result: SolverResult) -> anyhow::Result<()>;
+    fn log_oracle_call(&self, result: SolverResult) -> anyhow::Result<()>;
     /// Adds a solution to the log
-    fn log_solution(&mut self) -> anyhow::Result<()>;
+    fn log_solution(&self) -> anyhow::Result<()>;
     /// Adds a non-dominated point to the log
-    fn log_non_dominated(&mut self, pareto_point: &NonDomPoint) -> anyhow::Result<()>;
+    fn log_non_dominated(&self, pareto_point: &NonDomPoint) -> anyhow::Result<()>;
     #[cfg(feature = "sol-tightening")]
     /// Adds a heuristic objective improvement to the log
     fn log_heuristic_obj_improvement(
-        &mut self,
+        &self,
         obj_idx: usize,
         apparent_cost: usize,
         improved_cost: usize,
     ) -> anyhow::Result<()>;
     /// Adds a fence change in the lower-bounding algorithm to the log
-    fn log_fence(&mut self, fence: &[usize]) -> anyhow::Result<()>;
+    fn log_fence(&self, fence: &[usize]) -> anyhow::Result<()>;
     /// Adds a new routine starting to the log
     fn log_routine_start(&mut self, desc: &'static str) -> anyhow::Result<()>;
     /// Adds a new routine ending to the log
@@ -127,24 +127,26 @@ pub trait WriteSolverLog {
     /// Adds end of solving to the log
     fn log_end_solve(&mut self) -> anyhow::Result<()>;
     /// Adds an updated ideal point to the log
-    fn log_ideal(&mut self, ideal: &[usize]) -> anyhow::Result<()>;
+    fn log_ideal(&self, ideal: &[usize]) -> anyhow::Result<()>;
     /// Adds an updated nadir point to the log
-    fn log_nadir(&mut self, nadir: &[usize]) -> anyhow::Result<()>;
+    fn log_nadir(&self, nadir: &[usize]) -> anyhow::Result<()>;
     /// Adds an extracted core to the log
-    fn log_core(&mut self, weight: usize, len: usize, red_len: usize) -> anyhow::Result<()>;
+    fn log_core(&self, weight: usize, len: usize, red_len: usize) -> anyhow::Result<()>;
     /// Adds a core exhaustion to the log
-    fn log_core_exhaustion(&mut self, exhausted: usize, weight: usize) -> anyhow::Result<()>;
+    fn log_core_exhaustion(&self, exhausted: usize, weight: usize) -> anyhow::Result<()>;
     /// Adds an inprocessing step to the log
     fn log_inprocessing(
-        &mut self,
+        &self,
         cls_before_after: (usize, usize),
         fixed_lits: usize,
         obj_range_before_after: Vec<(usize, usize)>,
     ) -> anyhow::Result<()>;
     /// Logs any string
-    fn log_message(&mut self, msg: &str) -> anyhow::Result<()>;
+    fn log_message(&self, msg: &str) -> anyhow::Result<()>;
     /// Logs a hitting set value
-    fn log_hitting_set(&mut self, hitting_set_val: f64, optimal: bool) -> anyhow::Result<()>;
+    fn log_hitting_set(&self, hitting_set_val: f64, optimal: bool) -> anyhow::Result<()>;
     /// Log the seeding ratio of the hitting set algorithm
-    fn log_seeding_ratio(&mut self, ratio: f64) -> anyhow::Result<()>;
+    fn log_seeding_ratio(&self, ratio: f64) -> anyhow::Result<()>;
+    /// Log stratification level
+    fn log_strat_level(&self, strat_level: usize, reason: &str) -> anyhow::Result<()>;
 }
