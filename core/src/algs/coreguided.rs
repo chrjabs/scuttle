@@ -752,6 +752,7 @@ where
         while core.len() > 1 {
             let size_before = core.len();
             assumps.extend(core.iter().map(|&l| !l));
+            self.rng.shuffle(&mut assumps[base_assumps.len()..]);
             let ret = self.solve_assumps(&assumps)?;
             debug_assert_eq!(ret, Unsat);
             core = self.oracle.core()?;

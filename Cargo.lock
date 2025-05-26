@@ -1092,6 +1092,7 @@ dependencies = [
  "anyhow",
  "cadical-veripb-tracer",
  "clap",
+ "fastrand",
  "hitting-sets",
  "itertools 0.14.0",
  "libtest-mimic",

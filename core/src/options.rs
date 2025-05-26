@@ -9,6 +9,8 @@ use crate::Phase;
 /// Solver-wide configuration options
 #[derive(Clone, Copy, Default, Debug)]
 pub struct KernelOptions {
+    /// Seed for random operations
+    pub random_seed: u64,
     /// The Pareto point enumeration mode
     pub enumeration: EnumOptions,
     /// Reserve encoding variables in advance
@@ -36,6 +38,7 @@ impl KernelOptions {
 pub enum CoreMinimization {
     /// No core minimization
     #[default]
+    #[cfg_attr(feature = "clap", value(alias = "false"))]
     None,
     /// Core trimming, i.e., heuristic minimization
     #[cfg_attr(feature = "clap", value(alias = "heuristic"))]

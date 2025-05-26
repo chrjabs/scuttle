@@ -970,6 +970,7 @@ where
                 obj_bound_constrs: RsHashMap::default(),
             }),
             _factory: PhantomData,
+            rng: fastrand::Rng::with_seed(opts.random_seed),
         })
     }
 }

@@ -54,6 +54,9 @@ const STYLES: styling::Styles = styling::Styles::styled()
 struct CliArgs {
     #[command(subcommand)]
     command: AlgorithmCommand,
+    /// The random seed to use for random operations
+    #[arg(long, default_value_t = KernelOptions::default().random_seed, global = true)]
+    random_seed: u64,
     /// Reserve variables for the encodings in advance
     #[arg(long, default_value_t = Bool::from(KernelOptions::default().reserve_enc_vars), global = true)]
     reserve_encoding_vars: Bool,
@@ -87,6 +90,7 @@ struct CliArgs {
 impl CliArgs {
     fn kernel_opts(&self, store_cnf: bool) -> KernelOptions {
         KernelOptions {
+            random_seed: self.random_seed,
             enumeration: match self.enumeration.enumeration {
                 EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
                 EnumOptionsArg::Solutions => {

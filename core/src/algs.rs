@@ -217,6 +217,8 @@ where
     proof_stuff: Option<proofs::ProofStuff<ProofW>>,
     /// Phantom marker for oracle factory
     _factory: PhantomData<OInit>,
+    /// The random number generator to use
+    rng: fastrand::Rng,
 }
 
 #[oracle_bounds]
@@ -326,6 +328,7 @@ where
             oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
             proof_stuff: None,
             _factory: PhantomData,
+            rng: fastrand::Rng::with_seed(opts.random_seed),
         })
     }
 }
