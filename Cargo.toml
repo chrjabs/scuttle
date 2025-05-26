@@ -16,17 +16,14 @@ highs = "1.9.0"
 hitting-sets = { path = "./hitting-sets" }
 itertools = "0.14.0"
 libtest-mimic = "0.8.1"
-maxpre = { version = "0.2.3", path = "./maxpre-rs", features = ["multiopt"] }
-pigeons = { version = "0.1.1", path = "./rustsat/pigeons" }
-rustsat = { version = "0.7.1", path = "./rustsat", features = [
+maxpre = { version = "0.2.3", features = ["multiopt"] }
+pigeons = "0.1.1"
+rustsat = { version = "0.7.1", features = [
   "multiopt",
   "internals",
   "proof-logging",
 ] }
-rustsat-cadical = { version = "0.7.1", path = "./rustsat/cadical", features = [
-  "v2-1-3",
-  "pigeons",
-] }
+rustsat-cadical = { version = "0.7.1", features = ["v2-1-3", "pigeons"] }
 signal-hook = "0.3.17"
 scuttle-core = { version = "0.4.0", path = "./core" }
 scuttle-proc = { version = "0.2", path = "./proc" }
@@ -77,3 +74,6 @@ debug = 1
 [patch.crates-io]
 highs = { git = "https://github.com/chrjabs/highs.git", branch = "integer-vars" }
 highs-sys = { git = "https://github.com/chrjabs/highs-sys.git", branch = "bindgen-0.71" }
+rustsat = { git = "https://github.com/chrjabs/rustsat.git", branch = "scuttle" }
+rustsat-cadical = { git = "https://github.com/chrjabs/rustsat.git", branch = "scuttle" }
+pigeons = { git = "https://github.com/chrjabs/rustsat.git", branch = "scuttle" }

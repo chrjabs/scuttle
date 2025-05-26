@@ -583,6 +583,9 @@ mod setup {
                         return Decision::Skip;
                     }
                 };
+                if line.trim() == "no-test" {
+                    return Decision::Skip;
+                }
                 if line.trim() == "ignore-test" {
                     return Decision::Ignore;
                 }
@@ -629,6 +632,9 @@ mod setup {
                     match path.extension() {
                         Some(ext) if ext == OsStr::new("mcnf") || ext == OsStr::new("opb") => {
                             let name = path.file_stem().unwrap().to_str().unwrap().to_string();
+                            if name == "empty" {
+                                continue;
+                            }
                             let dec = self.ignore_or_skip(&path);
                             if dec == Decision::Skip {
                                 // eprintln!("filtered out file `{path:?}` for {}", self.kind());

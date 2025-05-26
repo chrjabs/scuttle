@@ -1123,9 +1123,6 @@ end"#;
             )
             .unwrap();
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        verify_proof(
-            format!("{manifest}/../rustsat/data/empty.opb"),
-            proof_file.path(),
-        );
+        verify_proof(format!("{manifest}/data/empty.opb"), proof_file.path());
     }
 }

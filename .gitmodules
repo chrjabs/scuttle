@@ -1,6 +1,0 @@
-[submodule "rustsat"]
-	path = rustsat
-	url = git@github.com:chrjabs/rustsat.git
-[submodule "maxpre-rs"]
-	path = maxpre-rs
-	url = git@github.com:chrjabs/maxpre-rs.git
