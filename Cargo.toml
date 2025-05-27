@@ -12,7 +12,7 @@ clap = { version = "4.5.36", features = ["derive", "cargo", "color"] }
 cpu-time = "1.0.0"
 concolor-clap = "0.1.0"
 fastrand = "2.3.0"
-grb = { version = "3.0.1", features = ["gurobi12"] }
+grb = "3.0.1"
 highs = "1.9.0"
 hitting-sets = { path = "./hitting-sets" }
 itertools = "0.14.0"
@@ -60,10 +60,11 @@ termcolor.workspace = true
 thiserror.workspace = true
 
 [features]
-default = ["gurobi"]
+default = ["gurobi12"]
 sol-tightening = ["scuttle-core/sol-tightening"]
 maxpre = ["dep:maxpre", "scuttle-core/maxpre"]
-gurobi = ["scuttle-core/gurobi"]
+gurobi9 = ["scuttle-core/gurobi9"]
+gurobi12 = ["scuttle-core/gurobi12"]
 
 [profile.release]
 lto = true
@@ -73,6 +74,7 @@ inherits = "release"
 debug = 1
 
 [patch.crates-io]
+grb = { git = "https://github.com/chrjabs/rust-grb.git", branch = "gurobi-9-support" }
 highs = { git = "https://github.com/chrjabs/highs.git", branch = "integer-vars" }
 highs-sys = { git = "https://github.com/chrjabs/highs-sys.git", branch = "bindgen-0.71" }
 rustsat = { git = "https://github.com/chrjabs/rustsat.git", branch = "scuttle" }

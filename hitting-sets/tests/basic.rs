@@ -131,7 +131,7 @@ mod highs {
     }
 }
 
-#[cfg(feature = "gurobi")]
+#[cfg(any(feature = "gurobi9", feature = "gurobi12"))]
 mod gurobi {
     #[test]
     fn cores() {

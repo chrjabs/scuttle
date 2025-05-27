@@ -247,10 +247,12 @@ impl CoreBoostingArgs {
 #[derive(ValueEnum, Copy, Clone, Default)]
 pub enum HittingSetSolver {
     /// The HiGHS MIP solver
-    #[cfg_attr(not(feature = "gurobi"), default)]
+    #[cfg_attr(not(any(feature = "gurobi9", feature = "gurobi12")), default)]
     Highs,
-    #[cfg(feature = "gurobi")]
-    #[cfg_attr(feature = "gurobi", default)]
+    #[cfg(any(feature = "gurobi9", feature = "gurobi12"))]
+    #[cfg_attr(any(feature = "gurobi9", feature = "gurobi12"), default)]
+    #[cfg_attr(any(feature = "gurobi9"), value(alias = "gurobi9"))]
+    #[cfg_attr(any(feature = "gurobi12"), value(alias = "gurobi12"))]
     /// The Gurobi MIP solver
     Gurobi,
 }
@@ -259,8 +261,10 @@ impl fmt::Display for HittingSetSolver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             HittingSetSolver::Highs => write!(f, "highs"),
-            #[cfg(feature = "gurobi")]
-            HittingSetSolver::Gurobi => write!(f, "gurobi"),
+            #[cfg(feature = "gurobi9")]
+            HittingSetSolver::Gurobi => write!(f, "gurobi9"),
+            #[cfg(feature = "gurobi12")]
+            HittingSetSolver::Gurobi => write!(f, "gurobi12"),
         }
     }
 }

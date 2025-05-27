@@ -36,7 +36,8 @@ check-non-dominance = []
 verbose-proofs = ["cadical-veripb-tracer/verbose", "rustsat/verbose-proofs"]
 clap = ["dep:clap"]
 maxpre = ["dep:maxpre"]
-gurobi = ["hitting-sets/gurobi"]
+gurobi9 = ["hitting-sets/gurobi9"]
+gurobi12 = ["hitting-sets/gurobi12"]
 
 [[test]]
 name = "instances"

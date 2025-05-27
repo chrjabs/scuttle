@@ -131,7 +131,7 @@ fn main() {
             .collect_tests(),
         );
     }
-    #[cfg(feature = "gurobi")]
+    #[cfg(any(feature = "gurobi9", feature = "gurobi12"))]
     for (id, opts) in vars {
         tests.extend(
             TestSetup::new(

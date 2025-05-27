@@ -6,7 +6,8 @@ edition = "2021"
 [features]
 default = ["highs"]
 highs = ["dep:highs"]
-gurobi = ["dep:grb"]
+gurobi9 = ["dep:grb", "grb/gurobi9"]
+gurobi12 = ["dep:grb", "grb/gurobi12"]
 
 [dependencies]
 cpu-time.workspace = true

@@ -466,8 +466,7 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 [[package]]
 name = "grb"
 version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9834f67c380d91552cfaa9ac309dde5b53c0d783254992ac37e4bcc12cfa2518"
+source = "git+https://github.com/chrjabs/rust-grb.git?branch=gurobi-9-support#5f936f113239d98c72b61e7d765b3b5676989a4a"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -475,7 +474,8 @@ dependencies = [
  "csv",
  "fnv",
  "grb-macro",
- "grb-sys2",
+ "grb-sys2 10.2.2",
+ "grb-sys2 12.1.2",
  "proc-macro2",
  "quote",
  "serde",
@@ -491,6 +491,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "grb-sys2"
+version = "10.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21ffbc24a9a4b5548d60a1435950a51808bba5ddb56f2f4c2e44d0b3420f3d43"
+dependencies = [
+ "anyhow",
 ]
 
 [[package]]
@@ -771,9 +780,9 @@ dependencies = [
 
 [[package]]
 name = "libloading"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a793df0d7afeac54f95b471d3af7f0d4fb975699f972341a4b76988d49cdf0c"
+checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
  "windows-targets 0.53.0",

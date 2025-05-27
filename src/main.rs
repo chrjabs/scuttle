@@ -207,7 +207,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
                     type IhsSlv<OInit = CaDiCaLDefaultInit> = Ihs<hitting_sets::HighsSolver, OInit>;
                     dispatch_options!(no-proof: IhsSlv, inst, prepro, reindexer, (kernel_opts, opts), cb_opts, cli)
                 }
-                #[cfg(feature = "gurobi")]
+                #[cfg(any(feature = "gurobi9", feature = "gurobi12"))]
                 HittingSetSolver::Gurobi => {
                     type IhsSlv<OInit = CaDiCaLDefaultInit> =
                         Ihs<hitting_sets::GurobiSolver, OInit>;
