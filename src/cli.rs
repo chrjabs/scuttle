@@ -160,7 +160,7 @@ enum AlgorithmCommand {
     #[command(alias = "ihs")]
     ParetoIhs {
         /// The hitting set solver to use
-        #[arg(long)]
+        #[arg(long, default_value_t = HittingSetSolver::default())]
         hitting_set_solver: HittingSetSolver,
         /// Log extracted hitting set values
         #[arg(long)]
@@ -244,11 +244,13 @@ impl CoreBoostingArgs {
     }
 }
 
-#[derive(ValueEnum, Copy, Clone)]
+#[derive(ValueEnum, Copy, Clone, Default)]
 pub enum HittingSetSolver {
     /// The HiGHS MIP solver
+    #[cfg_attr(not(feature = "gurobi"), default)]
     Highs,
     #[cfg(feature = "gurobi")]
+    #[cfg_attr(feature = "gurobi", default)]
     /// The Gurobi MIP solver
     Gurobi,
 }
