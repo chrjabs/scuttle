@@ -258,6 +258,8 @@ impl BuildSolver for Builder {
             .expect("failed to silence Gurobi");
         env.set(param::LogToConsole, 0)
             .expect("failed to silence Gurobi");
+        env.set(param::Threads, 1)
+            .expect("failed to set parameter `Threads` for Gurobi");
         Builder {
             objectives,
             env: env.start().expect("failed to start Gurobi environment"),
@@ -298,12 +300,13 @@ impl BuildSolver for Builder {
         }
     }
 
-    fn threads(&mut self, threads: u32) -> &mut Self {
+    fn threads(&mut self, threads: super::Threads) -> &mut Self {
+        let threads = match threads {
+            crate::Threads::Auto => 0,
+            crate::Threads::N(non_zero) => i32::from(non_zero.get()),
+        };
         self.env
-            .set(
-                param::Threads,
-                i32::try_from(threads).expect("`threads` must be at most `i32::MAX`"),
-            )
+            .set(param::Threads, threads)
             .expect("failed to set parameter `Threads` for Gurobi");
         self
     }

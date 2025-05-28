@@ -14,3 +14,4 @@ cpu-time.workspace = true
 grb = { workspace = true, optional = true }
 highs = { workspace = true, optional = true }
 rustsat.workspace = true
+thiserror.workspace = true

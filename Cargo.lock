@@ -558,6 +558,7 @@ dependencies = [
  "grb",
  "highs",
  "rustsat",
+ "thiserror",
 ]
 
 [[package]]

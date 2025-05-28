@@ -102,7 +102,8 @@ where
             matches!(kernel_opts.enumeration, EnumOptions::NoEnum),
             "cannot enumerate with IHS algorithm"
         );
-        let builder = Hss::Builder::new(objs.iter().map(|obj| obj.iter()));
+        let mut builder = Hss::Builder::new(objs.iter().map(|obj| obj.iter()));
+        builder.threads(opts.hss_threads);
         let mut hitting_set_solver = builder.init();
         let clauses: Vec<_> = clauses.into_iter().collect();
 

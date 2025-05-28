@@ -162,6 +162,9 @@ enum AlgorithmCommand {
         /// The hitting set solver to use
         #[arg(long, default_value_t = HittingSetSolver::default())]
         hitting_set_solver: HittingSetSolver,
+        /// The number of threads for the hitting set solver
+        #[arg(long, default_value_t = hitting_sets::Threads::default())]
+        hss_threads: hitting_sets::Threads,
         /// Log extracted hitting set values
         #[arg(long)]
         log_hitting_sets: bool,
@@ -778,6 +781,7 @@ impl Cli {
                 seeding,
                 ihs_wce,
                 candidate_seeding,
+                hss_threads,
                 file,
             } => Cli {
                 limits: args.limits.into(),
@@ -813,6 +817,7 @@ impl Cli {
                         seeding: seeding.into(),
                         wce: ihs_wce.into(),
                         candidate_seeding,
+                        hss_threads,
                     },
                     cb,
                 ),

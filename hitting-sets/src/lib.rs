@@ -3,6 +3,8 @@
 //! This crate contains a uniform interface to various hitting set solvers intended to be used in
 //! IHS-style MaxSAT algorithms.
 
+use std::{fmt, num::NonZero, str};
+
 use rustsat::types::{Cl, Lit};
 
 mod map;
@@ -56,6 +58,49 @@ impl From<CompleteSolveResult> for IncompleteSolveResult {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum Threads {
+    Auto,
+    N(NonZero<u16>),
+}
+
+impl fmt::Display for Threads {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Threads::Auto => write!(f, "auto"),
+            Threads::N(n) => write!(f, "{n}"),
+        }
+    }
+}
+
+impl Default for Threads {
+    fn default() -> Self {
+        Threads::N(NonZero::new(1).unwrap())
+    }
+}
+
+#[derive(Debug, thiserror::Error, Clone)]
+pub enum ThreadsParseError {
+    #[error("Thread must bei either a positive integer or `auto`")]
+    NonInt(#[from] std::num::ParseIntError),
+    #[error("Number of threads must be positive")]
+    Zero,
+}
+
+impl str::FromStr for Threads {
+    type Err = ThreadsParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "auto" {
+            return Ok(Threads::Auto);
+        }
+        let Some(n) = NonZero::new(u16::from_str(s)?) else {
+            return Err(ThreadsParseError::Zero);
+        };
+        Ok(Threads::N(n))
+    }
+}
+
 /// Trait specifying the unified interface to various hitting set solvers
 pub trait HittingSetSolver {
     /// The type that can be used to build a solver of this type
@@ -101,7 +146,7 @@ pub trait BuildSolver {
     /// # Default
     ///
     /// The default value shall be `1`
-    fn threads(&mut self, threads: u32) -> &mut Self;
+    fn threads(&mut self, threads: Threads) -> &mut Self;
 }
 
 #[derive(Debug, Clone, Copy, Default)]

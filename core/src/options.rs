@@ -2,7 +2,7 @@
 //!
 //! This module contains all configuration options or the $P$-minimal solver.
 
-use std::fmt;
+use std::{fmt, str};
 
 use crate::Phase;
 
@@ -118,7 +118,7 @@ impl fmt::Display for Stratification {
 #[error("Invalid stratification token: `{0}`")]
 pub struct StratParseError(String);
 
-impl std::str::FromStr for Stratification {
+impl str::FromStr for Stratification {
     type Err = StratParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -387,6 +387,8 @@ impl fmt::Display for SubProblemSize {
 /// IHS algorithm options
 #[derive(Clone, Copy, Debug, Default)]
 pub struct IhsOptions {
+    /// The number of threads for the hitting set solver
+    pub hss_threads: hitting_sets::Threads,
     /// Seeding constraints over only objective variables into the hitting set solver
     pub seeding: bool,
     /// The candidate seeding options
