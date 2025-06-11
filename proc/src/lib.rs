@@ -32,18 +32,28 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
 
     // Check whether type has generic named O that is assumed to be the oracle
     #[cfg(feature = "interrupt-oracle")]
-    {
+    let has_proof = {
         let mut found_oracle = false;
+        let mut found_proof = false;
         for gen in ast.generics.type_params() {
             if gen.ident == "O" {
                 found_oracle = true;
-                break;
+                if found_proof {
+                    break;
+                }
+            }
+            if gen.ident == "ProofW" {
+                found_proof = true;
+                if found_oracle {
+                    break;
+                }
             }
         }
         if !found_oracle {
             panic!("KernelFunctions derive needs a generic for the oracle type called 'O'")
         }
-    }
+        found_proof
+    };
 
     let kernel = if let Some(kernel) = opts.kernel {
         kernel
@@ -55,9 +65,11 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
     ast.generics.make_where_clause();
     let obounds = "where";
     #[cfg(feature = "interrupt-oracle")]
-    let obounds = format!(
-        "{obounds} O: rustsat::solvers::Interrupt, ProofW: std::io::Write,"
-    );
+    let obounds = if has_proof {
+        format!("{obounds} O: rustsat::solvers::Interrupt, ProofW: std::io::Write,")
+    } else {
+        format!("{obounds} O: rustsat::solvers::Interrupt,")
+    };
     let obounds: TokenStream = obounds.parse().unwrap();
     let obounds: syn::WhereClause = parse_macro_input!(obounds);
     ast.generics

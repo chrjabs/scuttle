@@ -22,16 +22,8 @@ use crate::{
 use super::Kernel;
 
 #[derive(KernelFunctions)]
-pub struct ParetoIhs<
-    O,
-    Hss,
-    ProofW = io::BufWriter<std::fs::File>,
-    OInit = DefaultInitializer,
-    BCG = fn(Assignment) -> Clause,
-> where
-    ProofW: io::Write,
-{
-    kernel: Kernel<O, ProofW, OInit, BCG>,
+pub struct ParetoIhs<O, Hss, OInit = DefaultInitializer, BCG = fn(Assignment) -> Clause> {
+    kernel: Kernel<O, io::BufWriter<std::fs::File>, OInit, BCG>,
     hitting_set_solver: Hss,
     objective_lits: RsHashSet<Lit>,
     max_obj_var: Var,
@@ -43,11 +35,9 @@ pub struct ParetoIhs<
     opts: IhsOptions,
 }
 
-impl<Hss, ProofW, OInit, BCG> super::Solve
-    for ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, ProofW, OInit, BCG>
+impl<Hss, OInit, BCG> super::Solve for ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, OInit, BCG>
 where
     Hss: HittingSetSolver,
-    ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
 {
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
@@ -74,11 +64,10 @@ where
 }
 
 #[oracle_bounds]
-impl<O, Hss, ProofW, OInit, BCG> super::Init for ParetoIhs<O, Hss, ProofW, OInit, BCG>
+impl<O, Hss, OInit, BCG> super::Init for ParetoIhs<O, Hss, OInit, BCG>
 where
     O: SolveIncremental,
     Hss: HittingSetSolver,
-    ProofW: io::Write,
     OInit: Initialize<O>,
     BCG: Fn(Assignment) -> Clause,
 {
@@ -145,10 +134,9 @@ where
     }
 }
 
-impl<O, Hss, ProofW, OInit, BCG> ExtendedSolveStats for ParetoIhs<O, Hss, ProofW, OInit, BCG>
+impl<O, Hss, OInit, BCG> ExtendedSolveStats for ParetoIhs<O, Hss, OInit, BCG>
 where
     O: SolveStats,
-    ProofW: io::Write,
 {
     fn oracle_stats(&self) -> SolverStats {
         self.kernel.oracle.stats()
@@ -159,10 +147,9 @@ where
     }
 }
 
-impl<Hss, ProofW, OInit, BCG> ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, ProofW, OInit, BCG>
+impl<Hss, OInit, BCG> ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, OInit, BCG>
 where
     Hss: HittingSetSolver,
-    ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
 {
     /// The solving algorithm main routine.
@@ -422,11 +409,9 @@ where
     }
 }
 
-impl<Hss, ProofW, OInit, BCG> CoreBoost
-    for ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, ProofW, OInit, BCG>
+impl<Hss, OInit, BCG> CoreBoost for ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, OInit, BCG>
 where
     Hss: HittingSetSolver,
-    ProofW: io::Write + 'static,
     BCG: Fn(Assignment) -> Clause,
 {
     fn core_boost(&mut self, _opts: crate::CoreBoostingOptions) -> MaybeTerminatedError<bool> {

@@ -35,7 +35,7 @@ type Lb<OInit = CaDiCaLDefaultInit> = LowerBounding<
     OInit,
 >;
 /// Paretop-k IHS instantiation used
-type Ihs<Hss, OInit = CaDiCaLDefaultInit> = ParetoIhs<Oracle, Hss, io::BufWriter<fs::File>, OInit>;
+type Ihs<Hss, OInit = CaDiCaLDefaultInit> = ParetoIhs<Oracle, Hss, OInit>;
 
 macro_rules! run {
     // with proof
