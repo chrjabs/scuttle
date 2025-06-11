@@ -39,6 +39,7 @@ use crate::{
 pub mod bioptsat;
 pub mod ihs;
 pub mod lowerbounding;
+pub mod mippd;
 pub mod pminimal;
 
 mod coreboosting;
@@ -152,7 +153,7 @@ pub struct Interrupter {
     term_flag: Arc<AtomicBool>,
     /// The terminator of the underlying SAT oracle
     #[cfg(feature = "interrupt-oracle")]
-    oracle_interrupter: Arc<Mutex<Box<dyn rustsat::solvers::InterruptSolver + Send>>>,
+    oracle_interrupter: Option<Arc<Mutex<Box<dyn rustsat::solvers::InterruptSolver + Send>>>>,
 }
 
 #[cfg(feature = "interrupt-oracle")]
@@ -160,7 +161,9 @@ impl Interrupter {
     /// Interrupts the solver asynchronously
     pub fn interrupt(&mut self) {
         self.term_flag.store(true, Ordering::Relaxed);
-        self.oracle_interrupter.lock().unwrap().interrupt();
+        if let Some(oracle_interrupter) = &mut self.oracle_interrupter {
+            oracle_interrupter.lock().unwrap().interrupt();
+        }
     }
 }
 
@@ -523,7 +526,7 @@ where
     fn interrupter(&mut self) -> Interrupter {
         Interrupter {
             term_flag: self.term_flag.clone(),
-            oracle_interrupter: self.oracle_interrupter.clone(),
+            oracle_interrupter: Some(self.oracle_interrupter.clone()),
         }
     }
 }

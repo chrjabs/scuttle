@@ -6,7 +6,8 @@ use scuttle_core::{
     algs::{InitDefaultBlock, Solve},
     options::{CoreMinimization, EnumOptions, IhsOptions},
     types::{Instance, ParetoFront},
-    CoreBoost, CoreBoostingOptions, Init, InitCert, InitCertDefaultBlock, KernelOptions,
+    CoreBoost, CoreBoostingOptions, Init, InitCert, InitCertDefaultBlock, KernelFunctions,
+    KernelOptions,
 };
 
 use setup::TestSetup;
@@ -148,6 +149,26 @@ fn main() {
             .collect_tests(),
         );
     }
+
+    tests.extend(
+        TestSetup::new(
+            "mip-pd<highs>",
+            "",
+            run_mippd_test::<hitting_sets::HighsSolver>,
+            hitting_sets::Threads::default(),
+        )
+        .collect_tests(),
+    );
+    #[cfg(any(feature = "gurobi9", feature = "gurobi12"))]
+    tests.extend(
+        TestSetup::new(
+            "mip-pd<gurobi>",
+            "",
+            run_mippd_test::<hitting_sets::GurobiSolver>,
+            hitting_sets::Threads::default(),
+        )
+        .collect_tests(),
+    );
 
     let vars = [
         ("cb", CoreBoostingOptions::default()),
@@ -483,6 +504,26 @@ where
             scuttle_core::MaybeTerminatedError::Error(e) => {
                 return Err(format!("solving error: {e}").into())
             }
+        }
+    }
+    Ok(alg.pareto_front())
+}
+
+fn run_mippd_test<Hss>(
+    inst: Instance,
+    threads: hitting_sets::Threads,
+) -> Result<ParetoFront, Failed>
+where
+    Hss: hitting_sets::HittingSetSolver,
+{
+    let mut alg = scuttle_core::MipPd::<Hss>::from_instance_default_blocking(inst, threads)?;
+    match alg.solve(scuttle_core::Limits::none()) {
+        scuttle_core::MaybeTerminatedError::Done(_) => (),
+        scuttle_core::MaybeTerminatedError::Terminated(t) => {
+            return Err(format!("solving terminated early: {t}").into())
+        }
+        scuttle_core::MaybeTerminatedError::Error(e) => {
+            return Err(format!("solving error: {e}").into())
         }
     }
     Ok(alg.pareto_front())

@@ -215,6 +215,59 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
                 }
             }
         }
+        Algorithm::MipPd(mip_solver, threads) => match mip_solver {
+            HittingSetSolver::Highs => {
+                let mut alg = scuttle_core::MipPd::<hitting_sets::HighsSolver>::from_instance_default_blocking(inst, threads)?;
+
+                // === Set up CLI interaction ===
+                // Set up signal handling
+                let mut interrupter = alg.interrupter();
+                let mut signals = signal_hook::iterator::Signals::new([
+                    signal_hook::consts::SIGTERM,
+                    signal_hook::consts::SIGINT,
+                    signal_hook::consts::SIGXCPU,
+                    signal_hook::consts::SIGABRT,
+                ])?;
+                // Thread for catching incoming signals
+                thread::spawn(move || {
+                    for _ in signals.forever() {
+                        interrupter.interrupt();
+                    }
+                });
+
+                alg.attach_logger(cli.new_cli_logger());
+
+                handle_termination(alg.solve(cli.limits), cli)?;
+
+                post_solve(alg, cli, prepro, reindexer)?;
+            }
+            #[cfg(any(feature = "gurobi9", feature = "gurobi12"))]
+            HittingSetSolver::Gurobi => {
+                let mut alg = scuttle_core::MipPd::<hitting_sets::GurobiSolver>::from_instance_default_blocking(inst, threads)?;
+
+                // === Set up CLI interaction ===
+                // Set up signal handling
+                let mut interrupter = alg.interrupter();
+                let mut signals = signal_hook::iterator::Signals::new([
+                    signal_hook::consts::SIGTERM,
+                    signal_hook::consts::SIGINT,
+                    signal_hook::consts::SIGXCPU,
+                    signal_hook::consts::SIGABRT,
+                ])?;
+                // Thread for catching incoming signals
+                thread::spawn(move || {
+                    for _ in signals.forever() {
+                        interrupter.interrupt();
+                    }
+                });
+
+                alg.attach_logger(cli.new_cli_logger());
+
+                handle_termination(alg.solve(cli.limits), cli)?;
+
+                post_solve(alg, cli, prepro, reindexer)?;
+            }
+        },
     }
     Ok(())
 }

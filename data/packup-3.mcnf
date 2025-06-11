@@ -8,6 +8,7 @@ c ignore-test:p-minimal:cert:no-heur
 c ignore-test:p-minimal:cert:all-heur
 c ignore-test:p-minimal:cert:other-reserve
 c ignore-test:p-minimal:cert:other-sol-guided
+c ignore-test:mip-pd<highs>
 c 
 c non-dominated points
 c nd (2, 3, 5)

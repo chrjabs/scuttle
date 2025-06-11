@@ -183,6 +183,18 @@ enum AlgorithmCommand {
         #[command(flatten)]
         file: FileArgs,
     },
+    /// MIP with PD cuts
+    #[command(alias = "mip")]
+    MipPd {
+        /// The hitting set solver to use
+        #[arg(long, default_value_t = HittingSetSolver::default())]
+        mip_solver: HittingSetSolver,
+        /// The number of threads for the hitting set solver
+        #[arg(long, default_value_t = hitting_sets::Threads::default())]
+        threads: hitting_sets::Threads,
+        #[command(flatten)]
+        file: FileArgs,
+    },
 }
 
 #[derive(Args, Copy, Clone)]
@@ -623,6 +635,7 @@ pub enum Algorithm {
         IhsOptions,
         Option<CoreBoostingOptions>,
     ),
+    MipPd(HittingSetSolver, hitting_sets::Threads),
 }
 
 impl fmt::Display for Algorithm {
@@ -632,6 +645,7 @@ impl fmt::Display for Algorithm {
             Algorithm::BiOptSat(..) => write!(f, "bioptsat"),
             Algorithm::LowerBounding(..) => write!(f, "lower-bounding"),
             Algorithm::ParetoIhs(..) => write!(f, "pareto-ihs"),
+            Algorithm::MipPd(..) => write!(f, "mip-pd"),
         }
     }
 }
@@ -823,6 +837,36 @@ impl Cli {
                 ),
                 proof_paths: None,
             },
+            AlgorithmCommand::MipPd {
+                mip_solver,
+                threads,
+                file,
+            } => Cli {
+                limits: args.limits.into(),
+                file_format: file.file_format,
+                opb_options: fio::opb::Options {
+                    first_var_idx: file.first_var_idx,
+                    ..Default::default()
+                },
+                inst_path: file.inst_path.clone(),
+                #[cfg(feature = "maxpre")]
+                preprocessing: args.prepro.preprocessing.into(),
+                #[cfg(feature = "maxpre")]
+                maxpre_techniques: args.prepro.maxpre_techniques.clone(),
+                reindexing: args.prepro.reindexing.into(),
+                #[cfg(feature = "maxpre")]
+                maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
+                cadical_config: args.cadical_config,
+                stdout: stdout(args.log.color),
+                stderr: stderr(args.log.color),
+                print_solver_config: args.log.print_solver_config,
+                print_solutions: args.log.print_solutions,
+                print_stats: !args.log.no_print_stats,
+                color: args.log.color,
+                logger_config: args.log.into(),
+                alg: Algorithm::MipPd(mip_solver, threads),
+                proof_paths: None,
+            },
         }
     }
 
@@ -953,6 +997,11 @@ impl Cli {
                         "candidate-seeding",
                         opts.candidate_seeding,
                     )?;
+                    Self::print_parameter(&mut buffer, "hss-threads", opts.hss_threads)?;
+                }
+                Algorithm::MipPd(mip_solver, threads) => {
+                    Self::print_parameter(&mut buffer, "mip-solver", mip_solver)?;
+                    Self::print_parameter(&mut buffer, "threads", threads)?;
                 }
             }
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;

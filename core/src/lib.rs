@@ -25,6 +25,7 @@ pub use algs::{
 pub use algs::bioptsat::BiOptSat;
 pub use algs::ihs::ParetoIhs;
 pub use algs::lowerbounding::LowerBounding;
+pub use algs::mippd::MipPd;
 pub use algs::pminimal::PMinimal;
 
 pub(crate) mod termination;

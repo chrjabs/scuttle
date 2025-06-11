@@ -55,12 +55,38 @@ impl HittingSetSolver for Solver {
             .expect("failed adding core to Gurobi");
     }
 
+    fn add_clause(&mut self, clause: &Cl) {
+        self.statistics.n_cores += 1;
+        let mut bound = 1.;
+        let mut expr = Expr::Constant(0.);
+        let model = &mut self.model;
+        for lit in clause {
+            if lit.is_pos() {
+                expr = expr
+                    + self.map.ensure_mapped(lit.var(), |v| {
+                        add_binvar!(model, name: &format!("{v}"), obj: 0)
+                            .expect("failed to create Gurobi variable")
+                    });
+            } else {
+                bound -= 1.;
+                expr = expr
+                    - self.map.ensure_mapped(lit.var(), |v| {
+                        add_binvar!(model, name: &format!("{v}"), obj: 0)
+                            .expect("failed to create Gurobi variable")
+                    });
+            }
+        }
+        self.model
+            .add_constr("core", c!(expr >= bound))
+            .expect("failed adding core to Gurobi");
+    }
+
     fn optimal_hitting_set(&mut self) -> CompleteSolveResult {
         self.solve(None).into()
     }
 
     fn hitting_set(&mut self, target_value: usize) -> IncompleteSolveResult {
-        self.solve(Some(target_value)).into()
+        self.solve(Some(target_value))
     }
 
     fn add_pd_cut(&mut self, costs: &[usize]) {

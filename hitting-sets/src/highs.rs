@@ -84,6 +84,24 @@ impl HittingSetSolver for Solver {
         );
     }
 
+    fn add_clause(&mut self, clause: &Cl) {
+        self.statistics.n_cores += 1;
+        let bound = clause
+            .iter()
+            .fold(1, |b, lit| if lit.is_neg() { b - 1 } else { b });
+        let factors: Vec<_> = clause
+            .iter()
+            .map(|lit| {
+                (
+                    self.map
+                        .ensure_mapped(lit.var(), |_| self.state.new_binary_col(0.)),
+                    if lit.is_pos() { 1. } else { -1. },
+                )
+            })
+            .collect();
+        self.state.add_row(bound.., factors);
+    }
+
     fn optimal_hitting_set(&mut self) -> CompleteSolveResult {
         self.solve(None).into()
     }

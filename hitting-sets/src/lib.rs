@@ -114,6 +114,12 @@ pub trait HittingSetSolver {
     /// Adds a new core to the solver
     fn add_core(&mut self, core: &Cl);
 
+    /// Adds a clause to the solver
+    ///
+    /// In contrast to [`HittingSetSolver::add_core`], this does not assume that all variables are
+    /// in the objectives
+    fn add_clause(&mut self, clause: &Cl);
+
     /// Computes an optimal hitting set for the currently given cores
     fn optimal_hitting_set(&mut self) -> CompleteSolveResult;
 
