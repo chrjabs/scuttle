@@ -385,7 +385,7 @@ impl fmt::Display for SubProblemSize {
 }
 
 /// IHS algorithm options
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct IhsOptions {
     /// The number of threads for the hitting set solver
     pub hss_threads: hitting_sets::Threads,
@@ -395,6 +395,17 @@ pub struct IhsOptions {
     pub candidate_seeding: CandidateSeeding,
     /// Whether to use weight-aware core extraction in the IHS algorithm
     pub wce: bool,
+}
+
+impl Default for IhsOptions {
+    fn default() -> Self {
+        Self {
+            hss_threads: Default::default(),
+            seeding: true,
+            candidate_seeding: Default::default(),
+            wce: true,
+        }
+    }
 }
 
 /// Candidate seeding options for the IHS algorithm

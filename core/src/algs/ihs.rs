@@ -170,10 +170,10 @@ where
         self.kernel.log_routine_start("ihs")?;
         if let Some(logger) = &mut self.kernel.logger {
             logger.log_seeding_ratio(
-                self.kernel.stats.n_orig_clauses as f64 / self.n_seeded as f64,
+                self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64,
             )?;
         }
-        if (self.kernel.stats.n_orig_clauses as f64 / self.n_seeded as f64 - 1.0).abs()
+        if (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
             < f64::EPSILON
         {
             let term = self.main_fully_seeded();
@@ -361,7 +361,7 @@ where
     /// solver
     fn main_fully_seeded(&mut self) -> MaybeTerminatedError {
         debug_assert!(
-            (self.kernel.stats.n_orig_clauses as f64 / self.n_seeded as f64 - 1.0).abs()
+            (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
                 < f64::EPSILON
         );
         self.kernel.log_routine_start("ihs (fully seeded)")?;
