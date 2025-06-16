@@ -802,12 +802,17 @@ where
         #[cfg(feature = "limit-conflicts")]
         self.oracle.limit_conflicts(Some(1000))?;
         for drop_lit in sorted_core {
+            let mut dropped = false;
             assumps.extend(core.iter().filter_map(|&l| {
                 if l == drop_lit {
+                    dropped = true;
                     return None;
                 }
                 Some(!l)
             }));
+            if !dropped {
+                continue;
+            }
             let ret = self.solve_assumps(&assumps)?;
             if ret == Unsat {
                 altered = true;
