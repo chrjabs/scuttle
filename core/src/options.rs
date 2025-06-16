@@ -395,6 +395,8 @@ pub struct IhsOptions {
     pub candidate_seeding: CandidateSeeding,
     /// Whether to use weight-aware core extraction in the IHS algorithm
     pub wce: bool,
+    /// Core minimization in the IHS loop
+    pub core_minimization: CoreMinimization,
     /// Use solutions from upper bounds as starting point for the hitting set solver
     pub starting_points: bool,
 }
@@ -406,6 +408,7 @@ impl Default for IhsOptions {
             seeding: true,
             candidate_seeding: Default::default(),
             wce: true,
+            core_minimization: CoreMinimization::Full,
             starting_points: true,
         }
     }

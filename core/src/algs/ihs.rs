@@ -219,7 +219,7 @@ where
             self.kernel.check_termination()?;
             hitting_set.retain(|lit| self.objective_lits.contains(&!*lit));
             // sort hitting set by weight for core minimization
-            if self.kernel.opts.core_minimization.minimization() {
+            if self.opts.core_minimization.minimization() {
                 // NOTE: we _intentionally_ use stable sort here, so that we preserve literal order
                 // on equal weight
                 hitting_set.sort_by_key(|l| -joint_objective[l.vidx()].abs());
@@ -268,8 +268,7 @@ where
                             return Done(());
                         }
                         let orig_len = core.len();
-                        let (core, _) = self.kernel.trim_core(core, &[], None)?;
-                        let (core, _) = self.kernel.minimize_core(core, &[], None)?;
+                        let core = self.minimize_core(core)?;
                         let core = Cl::new(&core);
                         self.hitting_set_solver.add_core(core);
                         let _len_before = hitting_set.len();
@@ -297,7 +296,7 @@ where
                             // with core minimization, the assumptions are ordered by weight,
                             // otherwise by literal (from the hitting set solver)
                             let mut core_idx = 0;
-                            if self.kernel.opts.core_minimization.minimization() {
+                            if self.opts.core_minimization.minimization() {
                                 hitting_set.retain(|&lit| {
                                     while core_idx < core.len()
                                         && (joint_objective[core[core_idx].vidx()].abs()
@@ -413,6 +412,20 @@ where
         debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
         Ok((costs, sol))
     }
+
+    fn minimize_core(&mut self, core: Vec<Lit>) -> MaybeTerminatedError<Vec<Lit>> {
+        std::mem::swap(
+            &mut self.opts.core_minimization,
+            &mut self.kernel.opts.core_minimization,
+        );
+        let (core, _) = self.kernel.trim_core(core, &[], None)?;
+        let (core, _) = self.kernel.minimize_core(core, &[], None)?;
+        std::mem::swap(
+            &mut self.opts.core_minimization,
+            &mut self.kernel.opts.core_minimization,
+        );
+        Done(core)
+    }
 }
 
 impl<Hss, OInit, BCG> CoreBoost for ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, OInit, BCG>
@@ -495,8 +508,7 @@ where
                                 self.kernel.log_routine_end()?;
                                 return Done(false);
                             }
-                            let (core, _) = self.kernel.trim_core(core, &[], None)?;
-                            let (core, _) = self.kernel.minimize_core(core, &[], None)?;
+                            let core = self.minimize_core(core)?;
                             let core = Cl::new(&core);
                             self.hitting_set_solver.add_core(core);
                             // NOTE: core is in same order as hitting set, we can therefore remove the

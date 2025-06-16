@@ -83,34 +83,32 @@ fn main() {
     let vars = [
         ("", (KernelOptions::default(), IhsOptions::default())),
         (
-            "core-min",
-            (
-                KernelOptions {
-                    core_minimization: CoreMinimization::Full,
-                    ..KernelOptions::default()
-                },
-                IhsOptions::default(),
-            ),
-        ),
-        (
-            "wce",
+            "nomin",
             (
                 KernelOptions::default(),
                 IhsOptions {
-                    wce: true,
+                    core_minimization: CoreMinimization::None,
                     ..IhsOptions::default()
                 },
             ),
         ),
         (
-            "core-min-wce",
+            "other-wce",
             (
-                KernelOptions {
-                    core_minimization: CoreMinimization::Full,
-                    ..KernelOptions::default()
-                },
+                KernelOptions::default(),
                 IhsOptions {
-                    wce: true,
+                    wce: !IhsOptions::default().wce,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
+        (
+            "nomin-other-wce",
+            (
+                KernelOptions::default(),
+                IhsOptions {
+                    wce: !IhsOptions::default().wce,
+                    core_minimization: CoreMinimization::None,
                     ..IhsOptions::default()
                 },
             ),

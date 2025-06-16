@@ -811,6 +811,7 @@ where
                 Some(!l)
             }));
             if !dropped {
+                assumps.drain(base_assumps.len()..);
                 continue;
             }
             let ret = self.solve_assumps(&assumps)?;

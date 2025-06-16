@@ -66,9 +66,9 @@ struct CliArgs {
     /// When to perform solution tightening
     #[arg(long, default_value_t = HeurImprOptions::default().solution_tightening, global = true)]
     solution_tightening: HeurImprWhen,
-    /// What type of core minimization to perform
-    #[arg(long, default_value_t = CoreMinimization::default(), global = true)]
-    core_minimization: CoreMinimization,
+    /// What type of core minimization to perform in OLL (core boosting)
+    #[arg(long, alias = "core-minimization", default_value_t = CoreMinimization::default(), global = true)]
+    oll_core_minimization: CoreMinimization,
     /// Whether to perform core exhaustion in OLL
     #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_exhaustion), global = true)]
     core_exhaustion: Bool,
@@ -117,7 +117,7 @@ impl CliArgs {
                 solution_tightening: self.solution_tightening,
             },
             solution_guided_search: self.solution_guided_search.into(),
-            core_minimization: self.core_minimization,
+            core_minimization: self.oll_core_minimization,
             core_exhaustion: self.core_exhaustion.into(),
             store_cnf,
             stratification: self.stratification,
@@ -180,6 +180,9 @@ enum AlgorithmCommand {
         /// Candidate seeding
         #[arg(long, default_value_t = CandidateSeeding::default())]
         candidate_seeding: CandidateSeeding,
+        /// What type of core minimization to perform in the IHS loop
+        #[arg(long, default_value_t = IhsOptions::default().core_minimization, global = true)]
+        ihs_core_minimization: CoreMinimization,
         /// Use upper bound solutions as starting point for the hitting set solver
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().starting_points), global = true)]
         use_starting_points: Bool,
@@ -798,6 +801,7 @@ impl Cli {
                 seeding,
                 ihs_wce,
                 candidate_seeding,
+                ihs_core_minimization,
                 use_starting_points,
                 hss_threads,
                 file,
@@ -836,6 +840,7 @@ impl Cli {
                         wce: ihs_wce.into(),
                         candidate_seeding,
                         hss_threads,
+                        core_minimization: ihs_core_minimization,
                         starting_points: use_starting_points.into(),
                     },
                     cb,
