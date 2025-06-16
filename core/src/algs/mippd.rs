@@ -204,7 +204,7 @@ where
             if let Some(logger) = &mut self.logger {
                 logger.log_routine_start("MIP find solution")?;
             }
-            let hitting_set_answer = self.hitting_set_solver.optimal_hitting_set();
+            let hitting_set_answer = self.hitting_set_solver.optimal_hitting_set(None);
             let (cost, hitting_set) = match hitting_set_answer {
                 CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
                 CompleteSolveResult::Infeasible => {

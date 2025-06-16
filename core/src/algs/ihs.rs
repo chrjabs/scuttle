@@ -93,6 +93,7 @@ where
         );
         let mut builder = Hss::Builder::new(objs.iter().map(|obj| obj.iter()));
         builder.threads(opts.hss_threads);
+        builder.use_starting_points(opts.starting_points);
         let mut hitting_set_solver = builder.init();
         let clauses: Vec<_> = clauses.into_iter().collect();
 
@@ -173,8 +174,8 @@ where
         let mut want_optimal = false;
         let joint_objective = {
             let mut jobj = vec![0; self.max_obj_var.idx() + 1];
-            for obj in &self.kernel.objs {
-                for (lit, weight) in obj.iter() {
+            for obj in self.hitting_set_solver.objectives() {
+                for (lit, weight) in obj {
                     let mut weight =
                         isize::try_from(weight).expect("weight does not fit in `isize`");
                     if lit.is_neg() {
@@ -189,14 +190,16 @@ where
             self.kernel.log_routine_start("extract hitting set")?;
 
             let hitting_set_answer: IncompleteSolveResult =
-                if let Some(target) = self.candidates.get_target() {
+                if let Some(head) = self.candidates.head() {
                     if want_optimal {
-                        self.hitting_set_solver.optimal_hitting_set().into()
+                        self.hitting_set_solver
+                            .optimal_hitting_set(head.sol())
+                            .into()
                     } else {
-                        self.hitting_set_solver.hitting_set(target - 1)
+                        self.hitting_set_solver.hitting_set(head.sol())
                     }
                 } else {
-                    self.hitting_set_solver.optimal_hitting_set().into()
+                    self.hitting_set_solver.optimal_hitting_set(None).into()
                 };
 
             let (cost, mut hitting_set, is_optimal) = match hitting_set_answer {
@@ -238,13 +241,16 @@ where
                         self.hitting_set_solver.add_pd_cut(&costs);
                         want_optimal = false;
                     } else {
-                        let last_target = self
+                        let old_head_cost = self
                             .candidates
-                            .get_target()
-                            .expect("since the hitting set is not optimal, we must have a target");
+                            .head()
+                            .expect("since the hitting set is not optimal, we must have a target")
+                            .costs()
+                            .iter()
+                            .sum();
                         let new_target = costs.iter().copied().sum::<usize>();
                         self.candidates.insert(solution, costs);
-                        if new_target >= last_target {
+                        if new_target >= old_head_cost {
                             want_optimal = true;
                         }
                     }
@@ -354,7 +360,7 @@ where
         self.kernel.log_routine_start("ihs (fully seeded)")?;
         loop {
             self.kernel.log_routine_start("extract hitting set")?;
-            let hitting_set_answer = self.hitting_set_solver.optimal_hitting_set();
+            let hitting_set_answer = self.hitting_set_solver.optimal_hitting_set(None);
             let (cost, hitting_set) = match hitting_set_answer {
                 CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
                 CompleteSolveResult::Infeasible => {
@@ -422,21 +428,21 @@ where
             let mut mults = vec![0.0; self.kernel.stats.n_objs];
             mults[obj_idx] = 1.0;
             self.hitting_set_solver.change_multipliers(&mults);
-            let mut target = None;
+            let mut ub = None;
 
             self.kernel.log_routine_start("ihs")?;
             let mut want_optimal = false;
             loop {
                 self.kernel.log_routine_start("extract hitting set")?;
 
-                let hitting_set_answer: IncompleteSolveResult = if let Some(target) = target {
+                let hitting_set_answer: IncompleteSolveResult = if let Some((sol, _)) = &ub {
                     if want_optimal {
-                        self.hitting_set_solver.optimal_hitting_set().into()
+                        self.hitting_set_solver.optimal_hitting_set(sol).into()
                     } else {
-                        self.hitting_set_solver.hitting_set(target - 1)
+                        self.hitting_set_solver.hitting_set(sol)
                     }
                 } else {
-                    self.hitting_set_solver.optimal_hitting_set().into()
+                    self.hitting_set_solver.optimal_hitting_set(None).into()
                 };
 
                 let (cost, mut hitting_set, is_optimal) = match hitting_set_answer {
@@ -468,13 +474,14 @@ where
                             // this objective is done now
                             break;
                         } else {
-                            let Some(target) = &mut target else {
+                            let Some((sol, cost)) = &mut ub else {
                                 unreachable!(
                                     "since the hitting set is not optimal, we must have a target"
                                 );
                             };
-                            if costs[obj_idx] < *target {
-                                *target = costs[obj_idx];
+                            if costs[obj_idx] < *cost {
+                                *sol = solution.clone();
+                                *cost = costs[obj_idx];
                             } else {
                                 want_optimal = true;
                             }
@@ -511,10 +518,14 @@ where
                                 SolverResult::Sat => {
                                     let (costs, solution) =
                                         self.kernel.get_solution_and_internal_costs(true)?;
-                                    target = Some(std::cmp::min(
-                                        costs[obj_idx],
-                                        target.unwrap_or(usize::MAX),
-                                    ));
+                                    if let Some((sol, cost)) = &mut ub {
+                                        if costs[obj_idx] < *cost {
+                                            *sol = solution.clone();
+                                            *cost = costs[obj_idx];
+                                        }
+                                    } else {
+                                        ub = Some((solution.clone(), costs[obj_idx]));
+                                    };
                                     self.candidates.insert(solution, costs);
                                     break;
                                 }

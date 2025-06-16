@@ -121,16 +121,24 @@ pub trait HittingSetSolver {
     fn add_clause(&mut self, clause: &Cl);
 
     /// Computes an optimal hitting set for the currently given cores
-    fn optimal_hitting_set(&mut self) -> CompleteSolveResult;
+    fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult
+    where
+        I: IntoIterator<Item = Lit>;
 
-    /// Computes a hitting set for the currently given cores under a time limit
-    fn hitting_set(&mut self, target_value: usize) -> IncompleteSolveResult;
+    /// Computes a hitting set for the currently given cores and stops once a solution better than
+    /// the given starting point is found
+    fn hitting_set<I>(&mut self, start: I) -> IncompleteSolveResult
+    where
+        I: IntoIterator<Item = Lit>;
 
     /// Adds a PD cut to the hitting set solver
     fn add_pd_cut(&mut self, costs: &[usize]);
 
     /// Gets the statistics of the hitting set solver
     fn statistics(&self) -> Statistics;
+
+    /// Gets an iterator over the objectives in the hitting set solver
+    fn objectives(&self) -> impl Iterator<Item = impl Iterator<Item = (Lit, usize)>>;
 }
 
 /// Trait for initializing a new solver
@@ -153,6 +161,13 @@ pub trait BuildSolver {
     ///
     /// The default value shall be `1`
     fn threads(&mut self, threads: Threads) -> &mut Self;
+
+    /// Whether to use provided solutions as starting points for search
+    ///
+    /// # Default
+    ///
+    /// The default value shall `true`
+    fn use_starting_points(&mut self, use_start: bool) -> &mut Self;
 }
 
 #[derive(Debug, Clone, Copy, Default)]

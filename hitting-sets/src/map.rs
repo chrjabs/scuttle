@@ -32,6 +32,13 @@ where
         self.forward[var.idx()].as_ref()
     }
 
+    pub fn map(&self, index: Var) -> Option<&T> {
+        if index.idx() >= self.forward.len() {
+            return None;
+        }
+        self.forward[index.idx()].as_ref()
+    }
+
     /// For a variable, returns it's internal representation. If none is tracked, generates a new
     /// one with `if_not`.
     ///

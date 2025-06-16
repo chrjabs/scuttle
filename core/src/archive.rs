@@ -14,8 +14,8 @@ impl<S> Archive<S> {
     }
 
     /// Gets the target value (sum of objectives) of the best candidate
-    pub fn get_target(&self) -> Option<usize> {
-        self.0.peek().map(|e| e.costs.iter().copied().sum())
+    pub fn head(&self) -> Option<&Elem<S>> {
+        self.0.peek()
     }
 
     /// Removes all solutions weakly dominated by the given cost vector from the archive
@@ -30,9 +30,19 @@ impl<S> Archive<S> {
 }
 
 #[derive(Debug, Clone)]
-struct Elem<S> {
+pub struct Elem<S> {
     costs: Vec<usize>,
     sol: S,
+}
+
+impl<S> Elem<S> {
+    pub fn costs(&self) -> &[usize] {
+        &self.costs
+    }
+
+    pub fn sol(&self) -> &S {
+        &self.sol
+    }
 }
 
 impl<S> Ord for Elem<S> {

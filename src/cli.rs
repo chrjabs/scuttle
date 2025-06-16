@@ -160,7 +160,7 @@ enum AlgorithmCommand {
     #[command(alias = "ihs")]
     ParetoIhs {
         /// The hitting set solver to use
-        #[arg(long, default_value_t = HittingSetSolver::default())]
+        #[arg(long, alias = "hss", default_value_t = HittingSetSolver::default())]
         hitting_set_solver: HittingSetSolver,
         /// The number of threads for the hitting set solver
         #[arg(long, default_value_t = hitting_sets::Threads::default())]
@@ -180,6 +180,9 @@ enum AlgorithmCommand {
         /// Candidate seeding
         #[arg(long, default_value_t = CandidateSeeding::default())]
         candidate_seeding: CandidateSeeding,
+        /// Use upper bound solutions as starting point for the hitting set solver
+        #[arg(long, default_value_t = Bool::from(IhsOptions::default().starting_points), global = true)]
+        use_starting_points: Bool,
         #[command(flatten)]
         file: FileArgs,
     },
@@ -795,6 +798,7 @@ impl Cli {
                 seeding,
                 ihs_wce,
                 candidate_seeding,
+                use_starting_points,
                 hss_threads,
                 file,
             } => Cli {
@@ -832,6 +836,7 @@ impl Cli {
                         wce: ihs_wce.into(),
                         candidate_seeding,
                         hss_threads,
+                        starting_points: use_starting_points.into(),
                     },
                     cb,
                 ),

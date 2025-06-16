@@ -12,7 +12,8 @@ fn cores<S: HittingSetSolver>() {
     let mut solver = builder.init();
     solver.add_core(Cl::new(&[lit![1], lit![3]]));
     solver.add_core(Cl::new(&[lit![0], lit![1], lit![2]]));
-    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set() else {
+    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
+    else {
         panic!()
     };
     hitting_set.sort_unstable();
@@ -20,14 +21,16 @@ fn cores<S: HittingSetSolver>() {
     assert_eq!(cost, 1.);
     assert_eq!(hitting_set, vec![!lit![0], lit![1], !lit![2], !lit![3]]);
     solver.add_core(Cl::new(&[lit![0], lit![2]]));
-    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set() else {
+    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
+    else {
         panic!()
     };
     hitting_set.sort_unstable();
     assert_eq!(cost, 2.);
     assert_eq!(hitting_set, vec![!lit![0], lit![1], lit![2], !lit![3]]);
     solver.add_core(Cl::new(&[lit![0], lit![3]]));
-    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set() else {
+    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
+    else {
         panic!()
     };
     hitting_set.sort_unstable();
@@ -49,7 +52,8 @@ fn pd_cuts<S: HittingSetSolver>() {
     solver.add_core(Cl::new(&[lit![0], lit![1], lit![3]]));
     solver.add_core(Cl::new(&[lit![1], lit![2], lit![4]]));
     solver.add_core(Cl::new(&[lit![2], lit![3], lit![4]]));
-    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set() else {
+    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
+    else {
         panic!()
     };
     hitting_set.sort_unstable();
@@ -59,7 +63,8 @@ fn pd_cuts<S: HittingSetSolver>() {
         vec![!lit![0], !lit![1], lit![2], lit![3], !lit![4]]
     );
     solver.add_pd_cut(&[6, 3]);
-    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set() else {
+    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
+    else {
         panic!()
     };
     hitting_set.sort_unstable();
@@ -69,7 +74,8 @@ fn pd_cuts<S: HittingSetSolver>() {
         vec![!lit![0], lit![1], !lit![2], lit![3], !lit![4]]
     );
     solver.add_pd_cut(&[5, 6]);
-    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set() else {
+    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
+    else {
         panic!()
     };
     hitting_set.sort_unstable();
@@ -80,7 +86,7 @@ fn pd_cuts<S: HittingSetSolver>() {
     );
     solver.add_pd_cut(&[4, 8]);
     assert_eq!(
-        solver.optimal_hitting_set(),
+        solver.optimal_hitting_set(None),
         CompleteSolveResult::Infeasible
     );
 }
@@ -94,13 +100,14 @@ fn pd_cuts_2<S: HittingSetSolver>() {
     solver.add_core(Cl::new(&[lit![0], lit![1]]));
     solver.add_core(Cl::new(&[lit![1], lit![2]]));
     solver.add_core(Cl::new(&[lit![2], lit![3]]));
-    let CompleteSolveResult::Optimal(cost, _) = solver.optimal_hitting_set() else {
+    let CompleteSolveResult::Optimal(cost, _) = solver.optimal_hitting_set(None) else {
         panic!()
     };
     assert_eq!(cost, 2.);
     solver.add_pd_cut(&[1, 1]);
     solver.add_pd_cut(&[2, 0]);
-    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set() else {
+    let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
+    else {
         panic!()
     };
     hitting_set.sort_unstable();
@@ -108,7 +115,7 @@ fn pd_cuts_2<S: HittingSetSolver>() {
     assert_eq!(hitting_set, vec![lit![0], !lit![1], lit![2], !lit![3]]);
     solver.add_pd_cut(&[0, 2]);
     assert_eq!(
-        solver.optimal_hitting_set(),
+        solver.optimal_hitting_set(None),
         CompleteSolveResult::Infeasible
     );
 }

@@ -12,6 +12,7 @@ pub struct Solver {
     map: VarMap<grb::Var>,
     model: Model,
     statistics: super::Statistics,
+    use_start: bool,
 }
 
 impl HittingSetSolver for Solver {
@@ -81,12 +82,18 @@ impl HittingSetSolver for Solver {
             .expect("failed adding core to Gurobi");
     }
 
-    fn optimal_hitting_set(&mut self) -> CompleteSolveResult {
-        self.solve(None).into()
+    fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult
+    where
+        I: IntoIterator<Item = Lit>,
+    {
+        self.solve(start, true).into()
     }
 
-    fn hitting_set(&mut self, target_value: usize) -> IncompleteSolveResult {
-        self.solve(Some(target_value))
+    fn hitting_set<I>(&mut self, start: I) -> IncompleteSolveResult
+    where
+        I: IntoIterator<Item = Lit>,
+    {
+        self.solve(start, false)
     }
 
     fn add_pd_cut(&mut self, costs: &[usize]) {
@@ -198,41 +205,66 @@ impl HittingSetSolver for Solver {
     fn statistics(&self) -> super::Statistics {
         self.statistics
     }
+
+    fn objectives(&self) -> impl Iterator<Item = impl Iterator<Item = (Lit, usize)>> {
+        self.objectives
+            .iter()
+            .map(|o| o.iter().map(|(&l, &w)| (l, w)))
+    }
 }
 
 impl Solver {
-    fn solve(&mut self, target_value: Option<usize>) -> IncompleteSolveResult {
+    fn solve<I>(&mut self, start: I, optimal: bool) -> IncompleteSolveResult
+    where
+        I: IntoIterator<Item = Lit>,
+    {
         self.statistics.n_solves += 1;
-        let start = cpu_time::ProcessTime::now();
-        self.set_target(target_value);
+        let start_time = cpu_time::ProcessTime::now();
+
+        // handle starting point
+        let mut target = 0.;
+        self.model.update().expect("failed to update model");
+        for l in start {
+            if let Some(col) = self.map.map(l.var()) {
+                if !optimal && l.is_pos() {
+                    target += self
+                        .model
+                        .get_obj_attr(attr::Obj, col)
+                        .expect("failed to get objective coefficient");
+                };
+                if self.use_start {
+                    self.model
+                        .set_obj_attr(attr::Start, col, if l.is_pos() { 1.0 } else { 0.0 })
+                        .expect("failed to set starting value");
+                }
+            }
+        }
+        let env = self.model.get_env_mut();
+        if optimal {
+            env.set(param::BestObjStop, -f64::INFINITY)
+        } else {
+            env.set(param::BestObjStop, target)
+        }
+        .expect("failed to set target value");
+
         self.model
             .optimize()
             .expect("failed to optimize with Gurobi");
         let status = self.model.status().expect("failed to get model status");
         if status == Status::Infeasible {
-            self.statistics.solve_time += start.elapsed();
+            self.statistics.solve_time += start_time.elapsed();
             return IncompleteSolveResult::Infeasible;
         }
         if status == Status::UserObjLimit {
-            debug_assert!(target_value.is_some());
+            debug_assert!(!optimal);
             let (cost, hitting_set) = self.get_solution();
-            self.statistics.solve_time += start.elapsed();
+            self.statistics.solve_time += start_time.elapsed();
             return IncompleteSolveResult::Feasible(cost, hitting_set);
         };
         debug_assert_eq!(status, Status::Optimal);
         let (cost, hitting_set) = self.get_solution();
-        self.statistics.solve_time += start.elapsed();
+        self.statistics.solve_time += start_time.elapsed();
         IncompleteSolveResult::Optimal(cost, hitting_set)
-    }
-
-    fn set_target(&mut self, target_value: Option<usize>) {
-        let env = self.model.get_env_mut();
-        if let Some(target_value) = target_value {
-            env.set(param::BestObjStop, target_value as f64)
-        } else {
-            env.set(param::BestObjStop, -f64::INFINITY)
-        }
-        .expect("failed to set target value");
     }
 
     fn get_solution(&self) -> (f64, Vec<Lit>) {
@@ -264,6 +296,7 @@ impl Solver {
 pub struct Builder {
     objectives: Vec<RsHashMap<Lit, usize>>,
     env: Env,
+    use_start: bool,
 }
 
 impl BuildSolver for Builder {
@@ -289,11 +322,16 @@ impl BuildSolver for Builder {
         Builder {
             objectives,
             env: env.start().expect("failed to start Gurobi environment"),
+            use_start: true,
         }
     }
 
     fn init(self) -> Self::Solver {
-        let Builder { objectives, env } = self;
+        let Builder {
+            objectives,
+            env,
+            use_start,
+        } = self;
         let mut model =
             Model::with_env("hitting-sets", &env).expect("failed to initialize Gurobi model");
         let mut vars: Vec<Var> = objectives
@@ -323,6 +361,7 @@ impl BuildSolver for Builder {
             map,
             model,
             statistics: super::Statistics::default(),
+            use_start,
         }
     }
 
@@ -334,6 +373,11 @@ impl BuildSolver for Builder {
         self.env
             .set(param::Threads, threads)
             .expect("failed to set parameter `Threads` for Gurobi");
+        self
+    }
+
+    fn use_starting_points(&mut self, use_start: bool) -> &mut Self {
+        self.use_start = use_start;
         self
     }
 }

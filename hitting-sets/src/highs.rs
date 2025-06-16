@@ -14,6 +14,7 @@ pub struct Solver {
     map: VarMap<Col>,
     state: State,
     statistics: super::Statistics,
+    use_start: bool,
 }
 
 #[derive(Default)]
@@ -102,12 +103,18 @@ impl HittingSetSolver for Solver {
         self.state.add_row(bound.., factors);
     }
 
-    fn optimal_hitting_set(&mut self) -> CompleteSolveResult {
-        self.solve(None).into()
+    fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult
+    where
+        I: IntoIterator<Item = Lit>,
+    {
+        self.solve(start, true).into()
     }
 
-    fn hitting_set(&mut self, target_value: usize) -> IncompleteSolveResult {
-        self.solve(Some(target_value))
+    fn hitting_set<I>(&mut self, start: I) -> IncompleteSolveResult
+    where
+        I: IntoIterator<Item = Lit>,
+    {
+        self.solve(start, false)
     }
 
     fn add_pd_cut(&mut self, costs: &[usize]) {
@@ -247,6 +254,12 @@ impl HittingSetSolver for Solver {
     fn statistics(&self) -> super::Statistics {
         self.statistics
     }
+
+    fn objectives(&self) -> impl Iterator<Item = impl Iterator<Item = (Lit, usize)>> {
+        self.objectives
+            .iter()
+            .map(|o| o.iter().map(|(&l, &w)| (l, w)))
+    }
 }
 
 #[inline]
@@ -279,49 +292,82 @@ impl Solver {
         self.state = State::Main(model);
     }
 
-    fn solve(&mut self, target_value: Option<usize>) -> IncompleteSolveResult {
+    fn solve<I>(&mut self, start: I, optimal: bool) -> IncompleteSolveResult
+    where
+        I: IntoIterator<Item = Lit>,
+    {
         self.statistics.n_solves += 1;
-        let start = cpu_time::ProcessTime::now();
+        let start_time = cpu_time::ProcessTime::now();
         if matches!(self.state, State::Init { .. }) {
             self.transition_to_main();
         }
         let State::Main(mut model) = std::mem::take(&mut self.state) else {
             unreachable!();
         };
-        if let Some(target_value) = target_value {
-            model.set_option("objective_target", target_value as f64);
+
+        // handle starting point
+        let mut target = 0.;
+        let mut start_vec = if self.use_start {
+            vec![0.; model.num_cols()]
+        } else {
+            vec![]
+        };
+        for l in start {
+            if let Some(col) = self.map.map(l.var()) {
+                if !optimal {
+                    for obj in &self.objectives {
+                        if let Some(&weight) = obj.get(&l) {
+                            if l.is_pos() {
+                                target += weight as f64;
+                            } else {
+                                target -= weight as f64;
+                            }
+                        }
+                    }
+                };
+                if self.use_start && l.is_pos() {
+                    start_vec[col.index()] = 1.;
+                }
+            }
         }
+        if self.use_start {
+            model.set_solution(Some(&start_vec), None, None, None);
+        }
+        if !optimal {
+            model.set_option("objective_target", target);
+        }
+
         let solved = model.solve();
         if solved.status() == HighsModelStatus::Infeasible {
             let mut model = Model::from(solved);
-            if target_value.is_some() {
+            if !optimal {
                 model.set_option("objective_target", -f64::INFINITY);
             }
             self.state = State::Main(model);
-            self.statistics.solve_time += start.elapsed();
+            self.statistics.solve_time += start_time.elapsed();
             return IncompleteSolveResult::Infeasible;
         }
         if solved.status() == HighsModelStatus::ObjectiveTarget {
-            debug_assert!(target_value.is_some());
+            debug_assert!(!optimal);
             let solution = solved.get_solution();
             let cost = solved.get_objective_value();
             let mut model = Model::from(solved);
             model.set_option("objective_target", -f64::INFINITY);
             self.state = State::Main(model);
             let hitting_set = collect_hitting_set(&solution, &self.map);
-            self.statistics.solve_time += start.elapsed();
+            self.statistics.solve_time += start_time.elapsed();
             return IncompleteSolveResult::Feasible(cost, hitting_set);
         }
         assert_eq!(solved.status(), HighsModelStatus::Optimal);
         let solution = solved.get_solution();
         let cost = solved.get_objective_value();
         let mut model = Model::from(solved);
-        if target_value.is_some() {
+        if !optimal {
             model.set_option("objective_target", -f64::INFINITY);
         }
         self.state = State::Main(model);
         let hitting_set = collect_hitting_set(&solution, &self.map);
-        self.statistics.solve_time += start.elapsed();
+        self.statistics.solve_time += start_time.elapsed();
         IncompleteSolveResult::Optimal(cost, hitting_set)
     }
 }
@@ -356,6 +402,7 @@ impl State {
 pub struct Builder {
     objectives: Vec<RsHashMap<Lit, usize>>,
     options: Options,
+    use_start: bool,
 }
 
 struct Options {
@@ -378,6 +425,7 @@ impl BuildSolver for Builder {
         Builder {
             objectives,
             options: Options { threads: 1 },
+            use_start: true,
         }
     }
 
@@ -412,6 +460,7 @@ impl BuildSolver for Builder {
                 options: self.options,
             },
             statistics: super::Statistics::default(),
+            use_start: self.use_start,
         }
     }
 
@@ -420,6 +469,11 @@ impl BuildSolver for Builder {
             crate::Threads::Auto => 0,
             crate::Threads::N(non_zero) => i32::from(non_zero.get()),
         };
+        self
+    }
+
+    fn use_starting_points(&mut self, use_start: bool) -> &mut Self {
+        self.use_start = use_start;
         self
     }
 }
