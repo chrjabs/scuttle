@@ -149,7 +149,7 @@ enum AlgorithmCommand {
     #[command(alias = "lb")]
     LowerBounding {
         /// Log fence updates
-        #[arg(long)]
+        #[arg(long, help_heading = "Printing options")]
         log_fence: bool,
         #[command(flatten)]
         file: FileArgs,
@@ -163,13 +163,13 @@ enum AlgorithmCommand {
         #[arg(long, alias = "hss", default_value_t = HittingSetSolver::default())]
         hitting_set_solver: HittingSetSolver,
         /// The number of threads for the hitting set solver
-        #[arg(long, default_value_t = hitting_sets::Threads::default())]
+        #[arg(long, alias = "hitting-set-solver-threads", default_value_t = hitting_sets::Threads::default())]
         hss_threads: hitting_sets::Threads,
         /// Log extracted hitting set values
-        #[arg(long)]
+        #[arg(long, help_heading = "Printing options")]
         log_hitting_sets: bool,
         /// Log ratio of seeded constraints
-        #[arg(long)]
+        #[arg(long, help_heading = "Printing options")]
         log_seeding_ratio: bool,
         /// Whether to seed constraints over only objective variables into the hitting set solver
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().seeding))]
@@ -332,10 +332,17 @@ struct PreproArgs {
 #[command(next_help_heading = "Solver limits")]
 struct LimitArgs {
     /// Limit the number of non-dominated points to enumerate (0 is no limit)
-    #[arg(long, default_value_t = 0, global = true)]
+    #[arg(
+        long,
+        alias = "pareto-point-limit",
+        alias = "non-dom-limit",
+        alias = "non-dominated-point-limit",
+        default_value_t = 0,
+        global = true
+    )]
     pp_limit: usize,
     /// Limit the number of solutions to enumerate (0 is no limit)
-    #[arg(long, default_value_t = 0, global = true)]
+    #[arg(long, alias = "solution-limit", default_value_t = 0, global = true)]
     sol_limit: usize,
     /// Limit the number of candidates to consider (0 is not limit)
     #[arg(long, default_value_t = 0, global = true)]
