@@ -260,6 +260,12 @@ impl HittingSetSolver for Solver {
             .iter()
             .map(|o| o.iter().map(|(&l, &w)| (l, w)))
     }
+
+    fn learn_unit(&mut self, unit: Lit) {
+        self.statistics.n_learned_units += 1;
+        let col = self.map[unit.var()];
+        self.state.fix_value(col, unit.is_pos());
+    }
 }
 
 #[inline]
@@ -394,6 +400,26 @@ impl State {
             State::Init { problem, .. } => problem.add_integer_column(factor, 0..=1),
             State::Main(model) => model.add_integer_column(factor, 0..=1, []),
             State::Working => unreachable!("cannot add col in working state"),
+        }
+    }
+
+    fn fix_value(&mut self, col: Col, val: bool) {
+        match self {
+            State::Init { problem, .. } => {
+                if val {
+                    problem.change_column_bounds(col, 1.0..=1.);
+                } else {
+                    problem.change_column_bounds(col, 0.0..=0.);
+                }
+            }
+            State::Main(model) => {
+                if val {
+                    model.change_column_bounds(col, 1.0..=1.);
+                } else {
+                    model.change_column_bounds(col, 0.0..=0.);
+                }
+            }
+            State::Working => unreachable!("cannot learn unit in working state"),
         }
     }
 }

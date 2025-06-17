@@ -5,7 +5,8 @@ use std::io;
 use hitting_sets::{BuildSolver, CompleteSolveResult, HittingSetSolver, IncompleteSolveResult};
 use rustsat::{
     solvers::{
-        DefaultInitializer, Initialize, SolveIncremental, SolveStats, SolverResult, SolverStats,
+        DefaultInitializer, Initialize, Learn, SolveIncremental, SolveStats, SolverResult,
+        SolverStats,
     },
     types::{Assignment, Cl, Clause, Lit, RsHashSet, Var},
 };
@@ -35,9 +36,10 @@ pub struct ParetoIhs<O, Hss, OInit = DefaultInitializer, BCG = fn(Assignment) ->
     opts: IhsOptions,
 }
 
-impl<Hss, OInit, BCG> super::Solve for ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, OInit, BCG>
+impl<'slv, Hss, OInit, BCG> super::Solve
+    for ParetoIhs<rustsat_cadical::CaDiCaL<'_, 'slv>, Hss, OInit, BCG>
 where
-    Hss: HittingSetSolver,
+    Hss: HittingSetSolver + 'slv,
     BCG: Fn(Assignment) -> Clause,
 {
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
@@ -148,9 +150,9 @@ where
     }
 }
 
-impl<Hss, OInit, BCG> ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, OInit, BCG>
+impl<'slv, Hss, OInit, BCG> ParetoIhs<rustsat_cadical::CaDiCaL<'_, 'slv>, Hss, OInit, BCG>
 where
-    Hss: HittingSetSolver,
+    Hss: HittingSetSolver + 'slv,
     BCG: Fn(Assignment) -> Clause,
 {
     /// The solving algorithm main routine.
@@ -224,7 +226,7 @@ where
                 // on equal weight
                 hitting_set.sort_by_key(|l| -joint_objective[l.vidx()].abs());
             }
-            match self.kernel.solve_assumps(&hitting_set)? {
+            match self.oracle_with_unit_learner(&hitting_set)? {
                 SolverResult::Sat => {
                     let (costs, solution) = self.kernel.get_solution_and_internal_costs(false)?;
                     if is_optimal {
@@ -331,7 +333,7 @@ where
                         if hitting_set.is_empty() {
                             break;
                         }
-                        match self.kernel.solve_assumps(&hitting_set)? {
+                        match self.oracle_with_unit_learner(&hitting_set)? {
                             SolverResult::Sat => {
                                 let (costs, solution) =
                                     self.kernel.get_solution_and_internal_costs(true)?;
@@ -426,11 +428,35 @@ where
         );
         Done(core)
     }
+
+    fn oracle_with_unit_learner(&mut self, assumps: &[Lit]) -> MaybeTerminatedError<SolverResult> {
+        let hss = (&mut self.hitting_set_solver) as *mut Hss;
+        let obj_lits = (&mut self.objective_lits) as *mut RsHashSet<Lit>;
+        self.kernel.oracle.attach_learner(
+            move |cl| {
+                debug_assert_eq!(cl.len(), 1);
+                // SAFETY: the callback will only ever be called from within the oracle call on the
+                // next line
+                let hss = unsafe { &mut *hss };
+                let obj_lits = unsafe { &mut *obj_lits };
+                if obj_lits.contains(&cl[0]) || obj_lits.contains(&!cl[0]) {
+                    hss.add_core(&cl)
+                }
+            },
+            0,
+        );
+        let res = self.kernel.solve_assumps(assumps);
+        self.kernel.oracle.detach_learner();
+        let res = res?;
+        self.kernel.check_termination()?;
+        Done(res)
+    }
 }
 
-impl<Hss, OInit, BCG> CoreBoost for ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, OInit, BCG>
+impl<'slv, Hss, OInit, BCG> CoreBoost
+    for ParetoIhs<rustsat_cadical::CaDiCaL<'_, 'slv>, Hss, OInit, BCG>
 where
-    Hss: HittingSetSolver,
+    Hss: HittingSetSolver + 'slv,
     BCG: Fn(Assignment) -> Clause,
 {
     fn core_boost(&mut self, _opts: crate::CoreBoostingOptions) -> MaybeTerminatedError<bool> {

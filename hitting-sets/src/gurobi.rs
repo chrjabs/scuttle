@@ -211,6 +211,20 @@ impl HittingSetSolver for Solver {
             .iter()
             .map(|o| o.iter().map(|(&l, &w)| (l, w)))
     }
+
+    fn learn_unit(&mut self, unit: Lit) {
+        self.statistics.n_learned_units += 1;
+        let var = self.map[unit.var()];
+        if unit.is_pos() {
+            self.model
+                .set_obj_attr(attr::LB, &var, 1.)
+                .expect("failed to set variable lower bound");
+        } else {
+            self.model
+                .set_obj_attr(attr::UB, &var, 0.)
+                .expect("failed to set variable upper bound");
+        }
+    }
 }
 
 impl Solver {

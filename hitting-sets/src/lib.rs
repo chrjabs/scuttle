@@ -139,6 +139,9 @@ pub trait HittingSetSolver {
 
     /// Gets an iterator over the objectives in the hitting set solver
     fn objectives(&self) -> impl Iterator<Item = impl Iterator<Item = (Lit, usize)>>;
+
+    /// Adds a learned unit to the hitting set solver
+    fn learn_unit(&mut self, unit: Lit);
 }
 
 /// Trait for initializing a new solver
@@ -175,4 +178,5 @@ pub struct Statistics {
     pub solve_time: std::time::Duration,
     pub n_solves: usize,
     pub n_cores: usize,
+    pub n_learned_units: usize,
 }

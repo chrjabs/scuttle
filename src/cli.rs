@@ -1202,10 +1202,12 @@ impl Cli {
             buffer.reset()?;
             let hitting_sets::Statistics {
                 n_cores,
+                n_learned_units,
                 n_solves,
                 solve_time,
             } = stats;
             Self::print_parameter(&mut buffer, "n-cores", n_cores)?;
+            Self::print_parameter(&mut buffer, "n-learned-units", n_learned_units)?;
             Self::print_parameter(&mut buffer, "n-solve-calls", n_solves)?;
             Self::print_parameter(&mut buffer, "cpu-solve-time", DurPrinter::new(solve_time))?;
             Self::end_block(&mut buffer)?;
