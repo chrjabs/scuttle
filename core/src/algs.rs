@@ -633,9 +633,7 @@ impl<O, ProofW, OInit, BCG> Kernel<O, ProofW, OInit, BCG>
 where
     ProofW: io::Write,
 {
-    /// Performs heuristic solution improvement and computes the improved
-    /// (internal) cost for one objective
-    fn compute_costs(&mut self, sol: &Assignment) -> Vec<usize> {
+    fn compute_costs(&self, sol: &Assignment) -> Vec<usize> {
         let mut costs = vec![0; self.stats.n_objs];
         for (obj, cost) in self.objs.iter().zip(costs.iter_mut()) {
             for (l, w) in obj.iter() {

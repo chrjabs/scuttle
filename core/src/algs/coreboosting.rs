@@ -5,7 +5,7 @@ use std::io;
 use rustsat::{
     encodings::{
         card::{self, Totalizer},
-        nodedb::{NodeById, NodeCon, NodeLike},
+        nodedb::{NodeById, NodeCon, NodeId, NodeLike},
         pb::{self, GeneralizedTotalizer},
         totdb::{Db as TotDb, Node},
     },
@@ -143,6 +143,14 @@ where
     /// on each objective individually. Returns the OLL reformulations or
     /// [`None`], if unsat.
     pub fn core_boost(&mut self) -> MaybeTerminatedError<Option<Vec<CbResult>>> {
+        self.core_boost_with_callbacks(|_, _, _| {}, |_, _, _, _| {})
+    }
+
+    pub fn core_boost_with_callbacks(
+        &mut self,
+        mut sol_cb: impl FnMut(&Self, usize, Assignment),
+        mut core_cb: impl FnMut(&Self, usize, NodeId, usize),
+    ) -> MaybeTerminatedError<Option<Vec<CbResult>>> {
         self.log_routine_start("core boost")?;
         let mut unsat = false;
         let mut res = Vec::with_capacity(self.stats.n_objs);
@@ -150,7 +158,14 @@ where
             let mut reform = (&self.objs[obj_idx]).into();
             let mut tot_db = TotDb::default();
             let solution = if !matches!(self.objs[obj_idx], Objective::Constant { .. }) {
-                match self.oll(&mut reform, &[], &mut tot_db, true)? {
+                match self.oll(
+                    &mut reform,
+                    &[],
+                    &mut tot_db,
+                    true,
+                    |kernel, sol| sol_cb(kernel, obj_idx, sol),
+                    |kernel, id, bound| core_cb(kernel, obj_idx, id, bound),
+                )? {
                     Some(sol) => Some(sol),
                     None => {
                         unsat = true;

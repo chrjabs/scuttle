@@ -112,13 +112,29 @@ pub trait HittingSetSolver {
     fn change_multipliers(&mut self, multi: &[f64]);
 
     /// Adds a new core to the solver
-    fn add_core(&mut self, core: &Cl);
+    fn add_core(&mut self, core: &Cl) {
+        self.add_card_core(core.as_ref(), 1);
+    }
+
+    /// Adds a cardinality core to the solver
+    fn add_card_core(&mut self, lits: &[Lit], bound: usize);
 
     /// Adds a clause to the solver
     ///
     /// In contrast to [`HittingSetSolver::add_core`], this does not assume that all variables are
     /// in the objectives
-    fn add_clause(&mut self, clause: &Cl);
+    fn add_clause(&mut self, clause: &Cl) {
+        self.add_card(clause.as_ref(), 1);
+    }
+
+    /// Adds a cardinality constraint to the solver
+    ///
+    /// In contrast to [`HittingSetSolver::add_card_core`], this does not assume that all variables
+    /// are in the objectives
+    fn add_card(&mut self, lits: &[Lit], bound: usize);
+
+    /// Adds a reified cardinality constraint of for `sum(lits) >= bound -> reif`
+    fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit);
 
     /// Computes an optimal hitting set for the currently given cores
     fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult

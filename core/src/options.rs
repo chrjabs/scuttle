@@ -446,14 +446,18 @@ pub struct IhsCbOptions {
 pub enum IhsCbTreatment {
     /// Ignore the knowledge that core boosting has been performed and simply extract cores over
     /// the reformulated objective
-    #[default]
     Ignore,
+    /// Translate the OLL semantics to the hitting set solver after core boosting. Cores are only
+    /// extracted over the original objective.
+    #[default]
+    Translate,
 }
 
 impl fmt::Display for IhsCbTreatment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IhsCbTreatment::Ignore => write!(f, "ignore"),
+            IhsCbTreatment::Translate => write!(f, "translate"),
         }
     }
 }

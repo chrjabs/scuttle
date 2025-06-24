@@ -1,7 +1,7 @@
 //! # Hitting Set Solver Interface for the Gurobi Solver
 
 use grb::{add_binvar, attr, c, expr::Expr, param, Env, Model, Status};
-use rustsat::types::{Cl, Lit, RsHashMap, Var};
+use rustsat::types::{Lit, RsHashMap, Var};
 
 use crate::{CompleteSolveResult, IncompleteSolveResult};
 
@@ -39,11 +39,11 @@ impl HittingSetSolver for Solver {
         }
     }
 
-    fn add_core(&mut self, core: &Cl) {
+    fn add_card_core(&mut self, lits: &[Lit], bound: usize) {
         self.statistics.n_cores += 1;
-        let mut bound = 1.;
+        let mut bound = bound as f64;
         let mut expr = Expr::Constant(0.);
-        for lit in core {
+        for lit in lits {
             if lit.is_pos() {
                 expr = expr + self.map[lit.var()];
             } else {
@@ -56,12 +56,11 @@ impl HittingSetSolver for Solver {
             .expect("failed adding core to Gurobi");
     }
 
-    fn add_clause(&mut self, clause: &Cl) {
-        self.statistics.n_cores += 1;
-        let mut bound = 1.;
+    fn add_card(&mut self, lits: &[Lit], bound: usize) {
+        let mut bound = bound as f64;
         let mut expr = Expr::Constant(0.);
         let model = &mut self.model;
-        for lit in clause {
+        for lit in lits {
             if lit.is_pos() {
                 expr = expr
                     + self.map.ensure_mapped(lit.var(), |v| {
@@ -80,6 +79,40 @@ impl HittingSetSolver for Solver {
         self.model
             .add_constr("core", c!(expr >= bound))
             .expect("failed adding core to Gurobi");
+    }
+
+    fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit) {
+        let model = &mut self.model;
+        let ind = self.map.ensure_mapped(reif.var(), |v| {
+            add_binvar!(model, name: &format!("{v}"), obj: 0)
+                .expect("failed to create Gurobi variable")
+        });
+        let mut expr = Expr::Constant(0.);
+        let mut bound = (bound - 1) as f64;
+        for lit in lits {
+            if lit.is_pos() {
+                expr = expr
+                    + self.map.ensure_mapped(lit.var(), |v| {
+                        add_binvar!(model, name: &format!("{v}"), obj: 0)
+                            .expect("failed to create Gurobi variable")
+                    });
+            } else {
+                bound -= 1.;
+                expr = expr
+                    - self.map.ensure_mapped(lit.var(), |v| {
+                        add_binvar!(model, name: &format!("{v}"), obj: 0)
+                            .expect("failed to create Gurobi variable")
+                    });
+            }
+        }
+        self.model
+            .add_genconstr_indicator(
+                &format!("{reif}-reification"),
+                ind,
+                reif.is_neg(),
+                c!(expr <= bound),
+            )
+            .expect("failed to add reified cardinality");
     }
 
     fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult

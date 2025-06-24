@@ -245,6 +245,8 @@ where
         base_assumps: &[Lit],
         tot_db: &mut TotDb,
         exact_reformulation: bool,
+        mut sol_cb: impl FnMut(&Self, Assignment),
+        mut core_cb: impl FnMut(&Self, NodeId, usize),
     ) -> MaybeTerminatedError<Option<Assignment>> {
         if matches!(reform.inactives, Inactives::Constant) {
             match self.solve_assumps(base_assumps)? {
@@ -332,7 +334,7 @@ where
                                     };
                                     let mut reform_ops =
                                         OperationSequence::<Var>::from(proof_id.unwrap());
-                                    let leafs: Vec<_> = tot_db.leaf_iter(*root).collect();
+                                    let leafs: Vec<_> = tot_db.leaf_iter(*root).lits().collect();
                                     for val in *oidx + 2..=tot_db[*root].max_val() {
                                         reform_ops *= val - 1;
                                         reform_ops += tot_db
@@ -381,7 +383,12 @@ where
 
                         self.log_routine_end()?;
                         return Done(Some(sol));
-                    } else if unreform_cores.is_empty() {
+                    }
+                    sol_cb(
+                        &self,
+                        self.oracle.solution(self.var_manager.max_var().unwrap())?,
+                    );
+                    if unreform_cores.is_empty() {
                         let Inactives::Weighted(inacts) = &reform.inactives else {
                             unreachable!("stratification only happens on weighted instances");
                         };
@@ -407,6 +414,7 @@ where
                         let root = con.id;
                         let (olit, oidx, proof_id) =
                             self.exhaust_core(root, base_assumps, tot_db, proof_id)?;
+                        core_cb(&self, root, oidx);
                         if oidx > 1 {
                             reform.offset += (oidx - 1) * weight;
                             if let Some(log) = &mut self.logger {

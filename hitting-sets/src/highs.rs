@@ -3,7 +3,7 @@
 use std::ops;
 
 use highs::{Col, HighsModelStatus, Model, RowProblem, Sense, Solution};
-use rustsat::types::{Cl, Lit, RsHashMap, Var};
+use rustsat::types::{Lit, RsHashMap, Var};
 
 use crate::{CompleteSolveResult, IncompleteSolveResult};
 
@@ -73,24 +73,25 @@ impl HittingSetSolver for Solver {
         }
     }
 
-    fn add_core(&mut self, core: &Cl) {
+    fn add_card_core(&mut self, lits: &[Lit], bound: usize) {
         self.statistics.n_cores += 1;
-        let bound = core
-            .iter()
-            .fold(1, |b, lit| if lit.is_neg() { b - 1 } else { b });
+        let bound = lits.iter().fold(
+            i32::try_from(bound).expect("`bound` does not fit in `i32`"),
+            |b, lit| if lit.is_neg() { b - 1 } else { b },
+        );
         self.state.add_row(
             bound..,
-            core.iter()
+            lits.iter()
                 .map(|lit| (self.map[lit.var()], if lit.is_pos() { 1. } else { -1. })),
         );
     }
 
-    fn add_clause(&mut self, clause: &Cl) {
-        self.statistics.n_cores += 1;
-        let bound = clause
-            .iter()
-            .fold(1, |b, lit| if lit.is_neg() { b - 1 } else { b });
-        let factors: Vec<_> = clause
+    fn add_card(&mut self, lits: &[Lit], bound: usize) {
+        let bound = lits.iter().fold(
+            i32::try_from(bound).expect("`bound` does not fit in `i32`"),
+            |b, lit| if lit.is_neg() { b - 1 } else { b },
+        );
+        let factors: Vec<_> = lits
             .iter()
             .map(|lit| {
                 (
@@ -100,6 +101,43 @@ impl HittingSetSolver for Solver {
                 )
             })
             .collect();
+        self.state.add_row(bound.., factors);
+    }
+
+    fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit) {
+        let (bound, n_neg) = lits.iter().fold(
+            (
+                i32::try_from(bound).expect("`bound` does not fit in `i32`"),
+                0,
+            ),
+            |(b, n), lit| {
+                if lit.is_neg() {
+                    (b - 1, n + 1)
+                } else {
+                    (b, n)
+                }
+            },
+        );
+        let bound = if reif.is_pos() { bound } else { n_neg };
+        let mut factors: Vec<_> = lits
+            .iter()
+            .map(|lit| {
+                (
+                    self.map
+                        .ensure_mapped(lit.var(), |_| self.state.new_binary_col(0.)),
+                    if lit.is_pos() { 1. } else { -1. },
+                )
+            })
+            .collect();
+        factors.push((
+            self.map
+                .ensure_mapped(reif.var(), |_| self.state.new_binary_col(0.)),
+            if reif.is_pos() {
+                (bound + n_neg) as f64
+            } else {
+                -((bound + n_neg) as f64)
+            },
+        ));
         self.state.add_row(bound.., factors);
     }
 

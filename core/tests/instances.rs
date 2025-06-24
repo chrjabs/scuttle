@@ -4,7 +4,7 @@ use libtest_mimic::{Arguments, Failed};
 use pigeons::Proof;
 use scuttle_core::{
     algs::{InitDefaultBlock, Solve},
-    options::{CoreMinimization, EnumOptions, IhsCbOptions, IhsOptions},
+    options::{CoreMinimization, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions},
     types::{Instance, ParetoFront},
     CoreBoost, CoreBoostingOptions, Init, InitCert, InitCertDefaultBlock, KernelFunctions,
     KernelOptions,
@@ -148,7 +148,20 @@ fn main() {
         );
     }
 
-    let vars = [("cb-ignore", IhsCbOptions::default())];
+    let vars = [
+        (
+            "cb-ignore",
+            IhsCbOptions {
+                treatment: IhsCbTreatment::Ignore,
+            },
+        ),
+        (
+            "cb-translate",
+            IhsCbOptions {
+                treatment: IhsCbTreatment::Translate,
+            },
+        ),
+    ];
     for (id, opts) in vars {
         tests.extend(
             TestSetup::new(

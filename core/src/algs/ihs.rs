@@ -4,12 +4,16 @@ use std::io;
 
 use hitting_sets::{BuildSolver, CompleteSolveResult, HittingSetSolver, IncompleteSolveResult};
 use rustsat::{
-    encodings::{nodedb::NodeLike, totdb::Semantics},
+    encodings::{
+        nodedb::{NodeById, NodeLike},
+        totdb::Semantics,
+    },
+    instances::ManageVars,
     solvers::{
         DefaultInitializer, Initialize, Learn, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Cl, Clause, Lit, RsHashSet, TernaryVal, Var},
+    types::{Assignment, Cl, Clause, Lit, RsHashSet, Var},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
@@ -32,7 +36,7 @@ pub struct ParetoIhs<O, Hss, OInit = DefaultInitializer, BCG = fn(Assignment) ->
     objective_lits: RsHashSet<Lit>,
     max_obj_var: Var,
     n_seeded: usize,
-    cb_performed: bool,
+    cb_data: CbData,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
     /// Archive of candidate solutions
@@ -134,7 +138,7 @@ where
             objective_lits,
             max_obj_var,
             n_seeded,
-            cb_performed: false,
+            cb_data: CbData::None,
             pareto_front: Default::default(),
             candidates: Default::default(),
             opts,
@@ -168,7 +172,7 @@ where
                 self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64,
             )?;
         }
-        if !self.cb_performed
+        if self.cb_data != CbData::Ignore
             && (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
                 < f64::EPSILON
         {
@@ -406,27 +410,12 @@ where
         }
     }
 
-    fn compute_internal_costs(&self, solution: &Assignment) -> Vec<usize> {
-        (0..self.kernel.objs.len())
-            .map(|idx| {
-                let mut cost = 0;
-                for (l, w) in self.kernel.objs[idx].iter() {
-                    let val = solution.lit_value(l);
-                    if val == TernaryVal::True {
-                        cost += w;
-                    }
-                }
-                cost
-            })
-            .collect()
-    }
-
     fn hitting_set_to_solution_and_internal_costs(
         &self,
         hitting_set: Vec<Lit>,
     ) -> (Vec<usize>, Assignment) {
         let sol: Assignment = hitting_set.into_iter().collect();
-        let costs = self.compute_internal_costs(&sol);
+        let costs = self.kernel.compute_costs(&sol);
         debug_assert_eq!(costs.len(), self.kernel.stats.n_objs);
         (costs, sol)
     }
@@ -482,10 +471,17 @@ where
             self.kernel.stats.n_solve_calls == 0,
             "cannot perform core boosting after solve has been called"
         );
-        let Some(cb_res) = self.kernel.core_boost()? else {
+        let mut cores = vec![vec![]; self.kernel.stats.n_objs];
+        let Some(cb_res) = self.kernel.core_boost_with_callbacks(
+            |kernel, _, sol| {
+                let costs = kernel.compute_costs(&sol);
+                self.candidates.insert(sol, costs);
+            },
+            |_, obj_idx, id, bound| cores[obj_idx].push((id, bound)),
+        )?
+        else {
             return Done(false);
         };
-        self.cb_performed = true;
         self.kernel.check_termination()?;
 
         self.kernel.log_routine_start("cb post treatment")?;
@@ -494,57 +490,136 @@ where
             self.objective_lits.clear();
         }
 
+        let mut translated = vec![false; self.kernel.var_manager.n_used() as usize + 1];
         let mut reform_objs = Vec::with_capacity(cb_res.len());
-        for CbResult {
-            reform,
-            solution,
-            mut tot_db,
-        } in cb_res
+        for (
+            CbResult {
+                reform,
+                solution,
+                mut tot_db,
+            },
+            cores,
+        ) in cb_res.into_iter().zip(cores)
         {
             if let Some(solution) = solution {
-                let costs = self.compute_internal_costs(&solution);
+                let costs = self.kernel.compute_costs(&solution);
                 self.candidates.insert(solution, costs);
             }
 
-            if opts.treatment == IhsCbTreatment::Ignore {
-                let mut reform_obj = Vec::with_capacity(reform.inactives.len());
-                for (&lit, &weight) in &reform.inactives {
-                    reform_obj.push((lit, weight));
-                    self.objective_lits.insert(lit);
-                    self.max_obj_var = std::cmp::max(self.max_obj_var, lit.var());
-                    if let Some(&ReformData {
-                        root,
-                        oidx,
-                        tot_weight,
-                        ..
-                    }) = reform.reformulations.get(&lit)
-                    {
-                        debug_assert_ne!(weight, 0);
-                        debug_assert!(oidx < tot_db[root].len());
-                        for idx in oidx + 1..tot_db[root].len() {
-                            let lit = tot_db.define_unweighted(
-                                root,
-                                idx,
-                                Semantics::If,
-                                &mut self.kernel.oracle,
-                                &mut self.kernel.var_manager,
-                            )?;
-                            reform_obj.push((lit, tot_weight));
-                            self.objective_lits.insert(lit);
-                            self.max_obj_var = std::cmp::max(self.max_obj_var, lit.var());
+            match opts.treatment {
+                IhsCbTreatment::Ignore => {
+                    let mut reform_obj = Vec::with_capacity(reform.inactives.len());
+                    for (&lit, &weight) in &reform.inactives {
+                        reform_obj.push((lit, weight));
+                        self.objective_lits.insert(lit);
+                        self.max_obj_var = std::cmp::max(self.max_obj_var, lit.var());
+                        if let Some(&ReformData {
+                            root,
+                            oidx,
+                            tot_weight,
+                            ..
+                        }) = reform.reformulations.get(&lit)
+                        {
+                            debug_assert_ne!(weight, 0);
+                            debug_assert!(oidx < tot_db[root].len());
+                            for idx in oidx + 1..tot_db[root].len() {
+                                let lit = tot_db.define_unweighted(
+                                    root,
+                                    idx,
+                                    Semantics::If,
+                                    &mut self.kernel.oracle,
+                                    &mut self.kernel.var_manager,
+                                )?;
+                                reform_obj.push((lit, tot_weight));
+                                self.objective_lits.insert(lit);
+                                self.max_obj_var = std::cmp::max(self.max_obj_var, lit.var());
+                            }
                         }
                     }
+                    reform_objs.push((reform_obj, reform.offset));
                 }
-                reform_objs.push((reform_obj, reform.offset));
+                IhsCbTreatment::Translate => {
+                    for (root, bound) in cores {
+                        let mut lits = vec![];
+                        for info in tot_db.leaf_iter(root) {
+                            debug_assert_eq!(
+                                info.weight, 1,
+                                "OLL core reformulations are unweighted"
+                            );
+                            debug_assert_eq!(
+                                info.val_range.end - info.val_range.start,
+                                1,
+                                "should only ever have single leaves in OLL core"
+                            );
+                            let node = &tot_db[info.id];
+                            if node.is_leaf() {
+                                debug_assert_eq!(
+                                    info.val_range.start, 1,
+                                    "true leaf must have value 1"
+                                );
+                                lits.push(node[1]);
+                            } else {
+                                let val = info.val_range.start;
+                                let lit = node[val];
+                                lits.push(lit);
+                                if translated[lit.vidx()] {
+                                    continue;
+                                }
+                                let mut lits = vec![];
+                                for info in tot_db.leaf_iter(info.id) {
+                                    debug_assert_eq!(
+                                        info.weight, 1,
+                                        "OLL core reformulations are unweighted"
+                                    );
+                                    debug_assert_eq!(
+                                        info.val_range.end - info.val_range.start,
+                                        1,
+                                        "should only ever have single leaves in OLL core"
+                                    );
+                                    let node = &tot_db[info.id];
+                                    let lit = node[info.val_range.start];
+                                    if node.is_leaf() {
+                                        debug_assert_eq!(
+                                            info.val_range.start, 1,
+                                            "true leaf must have value 1"
+                                        );
+                                    } else {
+                                        debug_assert!(translated[lit.vidx()], "this literal must have appeared in a another core, which must have been before in `cores`");
+                                    }
+                                    lits.push(lit);
+                                }
+                                self.hitting_set_solver.add_reified_card(&lits, val, lit);
+                                translated[lit.vidx()] = true;
+                            }
+                        }
+                        // NOTE: all variables in the core were introduced in the HSS in the above
+                        // loop, even if they are not from the original objective
+                        self.hitting_set_solver.add_card_core(&lits, bound);
+                    }
+                }
             }
         }
 
-        if opts.treatment == IhsCbTreatment::Ignore {
-            self.hitting_set_solver.change_objectives(reform_objs);
+        match opts.treatment {
+            IhsCbTreatment::Ignore => {
+                self.cb_data = CbData::Ignore;
+                self.hitting_set_solver.change_objectives(reform_objs);
+            }
+            IhsCbTreatment::Translate => {
+                self.cb_data = CbData::Translate;
+            }
         }
 
         self.kernel.log_routine_end()?;
 
         Done(true)
     }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+enum CbData {
+    #[default]
+    None,
+    Ignore,
+    Translate,
 }
