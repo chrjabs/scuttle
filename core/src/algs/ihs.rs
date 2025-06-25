@@ -2,18 +2,20 @@
 
 use std::io;
 
-use hitting_sets::{BuildSolver, CompleteSolveResult, HittingSetSolver, IncompleteSolveResult};
+use hitting_sets::{
+    BuildSolver, CompleteSolveResult, CoreOrigin, HittingSetSolver, IncompleteSolveResult,
+};
 use rustsat::{
     encodings::{
-        nodedb::{NodeById, NodeLike},
-        totdb::Semantics,
+        nodedb::{NodeById, NodeId, NodeLike},
+        totdb::{Db as TotDb, Semantics},
     },
     instances::ManageVars,
     solvers::{
         DefaultInitializer, Initialize, Learn, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Cl, Clause, Lit, RsHashSet, Var},
+    types::{Assignment, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
@@ -126,7 +128,7 @@ where
                         continue 'outer;
                     }
                 }
-                hitting_set_solver.add_core(cl);
+                hitting_set_solver.add_core(cl, CoreOrigin::Seeding);
                 n_seeded += 1;
             }
         }
@@ -172,7 +174,7 @@ where
                 self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64,
             )?;
         }
-        if self.cb_data != CbData::Ignore
+        if !matches!(self.cb_data, CbData::Ignore)
             && (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
                 < f64::EPSILON
         {
@@ -214,7 +216,7 @@ where
                     self.hitting_set_solver.optimal_hitting_set(None).into()
                 };
 
-            let (cost, mut hitting_set, is_optimal) = match hitting_set_answer {
+            let (cost, hitting_set, is_optimal) = match hitting_set_answer {
                 IncompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set, true),
                 IncompleteSolveResult::Infeasible => {
                     self.kernel.log_routine_end()?;
@@ -228,15 +230,18 @@ where
             if let Some(logger) = &mut self.kernel.logger {
                 logger.log_hitting_set(cost, is_optimal)?;
             }
+
+            let mut assumps = hitting_set.clone();
+
             self.kernel.check_termination()?;
-            hitting_set.retain(|lit| self.objective_lits.contains(&!*lit));
+            assumps.retain(|lit| self.objective_lits.contains(&!*lit));
             // sort hitting set by weight for core minimization
             if self.opts.core_minimization.minimization() {
                 // NOTE: we _intentionally_ use stable sort here, so that we preserve literal order
                 // on equal weight
-                hitting_set.sort_by_key(|l| -joint_objective[l.vidx()].abs());
+                assumps.sort_by_key(|l| -joint_objective[l.vidx()].abs());
             }
-            match self.oracle_with_unit_learner(&hitting_set)? {
+            match self.oracle_with_unit_learner(&assumps)? {
                 SolverResult::Sat => {
                     let (costs, solution) = self.kernel.get_solution_and_internal_costs(false)?;
                     if is_optimal {
@@ -266,13 +271,10 @@ where
                             want_optimal = true;
                         }
                     }
+                    continue;
                 }
                 SolverResult::Unsat => {
-                    let mut wce_obj = if self.opts.wce {
-                        joint_objective.clone()
-                    } else {
-                        vec![]
-                    };
+                    let mut wce_obj = joint_objective.clone();
                     loop {
                         let core = self.kernel.oracle.core()?;
                         if core.is_empty() {
@@ -281,69 +283,20 @@ where
                         }
                         let orig_len = core.len();
                         let core = self.minimize_core(core)?;
-                        let core = Cl::new(&core);
-                        self.hitting_set_solver.add_core(core);
-                        let _len_before = hitting_set.len();
-                        if self.opts.wce {
-                            let min_cost = core.iter().fold(isize::MAX, |min, lit| {
-                                std::cmp::min(wce_obj[lit.vidx()].abs(), min)
-                            });
-                            if let Some(log) = &mut self.kernel.logger {
-                                log.log_core(min_cost.unsigned_abs(), orig_len, core.len())?;
-                            }
-                            for lit in core {
-                                if lit.is_pos() {
-                                    wce_obj[lit.vidx()] -= min_cost;
-                                } else {
-                                    wce_obj[lit.vidx()] += min_cost;
-                                }
-                            }
-                            hitting_set.retain(|&lit| wce_obj[lit.vidx()] != 0);
+                        if core.len() == 1 {
+                            self.hitting_set_solver.learn_unit(core[0]);
                         } else {
-                            if let Some(log) = &mut self.kernel.logger {
-                                log.log_core(usize::MAX, orig_len, core.len())?;
-                            }
-                            // NOTE: core is in same order as hitting set, we can therefore remove the
-                            // core literals in a single sweep, knowing that the
-                            // with core minimization, the assumptions are ordered by weight,
-                            // otherwise by literal (from the hitting set solver)
-                            let mut core_idx = 0;
-                            if self.opts.core_minimization.minimization() {
-                                hitting_set.retain(|&lit| {
-                                    while core_idx < core.len()
-                                        && (joint_objective[core[core_idx].vidx()].abs()
-                                            > joint_objective[lit.vidx()].abs()
-                                            || (joint_objective[core[core_idx].vidx()].abs()
-                                                == joint_objective[lit.vidx()].abs()
-                                                && core[core_idx] < !lit))
-                                    {
-                                        core_idx += 1;
-                                    }
-                                    if core_idx >= core.len() || !lit != core[core_idx] {
-                                        return true;
-                                    }
-                                    false
-                                });
-                            } else {
-                                hitting_set.retain(|&lit| {
-                                    while core_idx < core.len() && core[core_idx] < !lit {
-                                        core_idx += 1;
-                                    }
-                                    if core_idx >= core.len() || !lit != core[core_idx] {
-                                        return true;
-                                    }
-                                    false
-                                });
-                            };
+                            self.hitting_set_solver
+                                .add_core(core.as_ref(), CoreOrigin::Normal);
                         }
-                        debug_assert!(
-                            hitting_set.len() < _len_before,
-                            "something should be removed from the assumptions"
-                        );
-                        if hitting_set.is_empty() {
+                        self.weed_out_assumptions(&core, &mut assumps, &mut wce_obj)?;
+                        if let Some(log) = &mut self.kernel.logger {
+                            log.log_ihs_core(orig_len, core.len(), false)?;
+                        }
+                        if assumps.is_empty() {
                             break;
                         }
-                        match self.oracle_with_unit_learner(&hitting_set)? {
+                        match self.oracle_with_unit_learner(&assumps)? {
                             SolverResult::Sat => {
                                 let (costs, solution) =
                                     self.kernel.get_solution_and_internal_costs(true)?;
@@ -353,11 +306,203 @@ where
                             SolverResult::Unsat => {}
                             SolverResult::Interrupted => unreachable!(),
                         }
+                        self.kernel.check_termination()?;
                     }
                     want_optimal = false;
                 }
                 SolverResult::Interrupted => unreachable!(),
             }
+
+            self.kernel.check_termination()?;
+
+            // Abstract cores based on core boosting
+            let mut cb_data = std::mem::take(&mut self.cb_data);
+            if let CbData::Abstract {
+                reforms,
+                translated,
+            } = &mut cb_data
+            {
+                // Abstract the hitting set to the reformulated objective
+                let assign: Assignment = hitting_set.iter().copied().collect();
+                let mut abstracted = Assignment::default();
+                let mut joint_objective = vec![0; self.kernel.var_manager.n_used() as usize + 1];
+                let mut olit_map = RsHashMap::default();
+                for (
+                    obj_idx,
+                    (
+                        CbReformData {
+                            db,
+                            ref keep_lits,
+                            ref remaining_tots,
+                        },
+                        obj,
+                    ),
+                ) in reforms.iter_mut().zip(self.kernel.objs.iter()).enumerate()
+                {
+                    for &lit in keep_lits {
+                        if assign.lit_value(lit) == TernaryVal::False {
+                            debug_assert_ne!(abstracted.lit_value(lit), TernaryVal::True);
+                            abstracted.assign_lit(!lit);
+                            let mut weight = isize::try_from(obj.weight(lit))
+                                .expect("weight does not fit in `isize`");
+                            if lit.is_neg() {
+                                weight *= -1;
+                            }
+                            joint_objective[lit.vidx()] += weight;
+                        }
+                    }
+                    for &(node, weight) in remaining_tots {
+                        let value = db.value(node, &assign);
+                        if value < db[node].max_val() {
+                            let lit = db.define_unweighted(
+                                node,
+                                value,
+                                Semantics::If,
+                                &mut self.kernel.oracle,
+                                &mut self.kernel.var_manager,
+                            )?;
+                            debug_assert_eq!(abstracted.lit_value(lit), TernaryVal::DontCare);
+                            abstracted.assign_lit(!lit);
+                            olit_map.insert(lit, (obj_idx, node, value + 1));
+                            if joint_objective.len() <= lit.vidx() {
+                                joint_objective.resize(lit.vidx() + 1, 0);
+                            }
+                            debug_assert_eq!(joint_objective[lit.vidx()], 0);
+                            joint_objective[lit.vidx()] =
+                                isize::try_from(weight).expect("weight does not fit in `isize`");
+                        }
+                    }
+                }
+                self.kernel.check_termination()?;
+                // Extract cores over the reformulated objective
+                let mut assumps: Vec<Lit> = abstracted.into_iter().collect();
+                // sort hitting set by weight for core minimization
+                if self.opts.core_minimization.minimization() {
+                    // NOTE: we _intentionally_ use stable sort here, so that we preserve literal order
+                    // on equal weight
+                    assumps.sort_by_key(|l| -joint_objective[l.vidx()].abs());
+                }
+                loop {
+                    match self.oracle_with_unit_learner(&assumps)? {
+                        SolverResult::Sat => {
+                            let (costs, solution) =
+                                self.kernel.get_solution_and_internal_costs(true)?;
+                            self.candidates.insert(solution, costs);
+                            break;
+                        }
+                        SolverResult::Unsat => {}
+                        SolverResult::Interrupted => unreachable!(),
+                    }
+                    self.kernel.check_termination()?;
+                    let core = self.kernel.oracle.core()?;
+                    debug_assert!(!core.is_empty());
+                    let orig_len = core.len();
+                    let core = self.minimize_core(core)?;
+
+                    if core.len() == 1 {
+                        let lit = core[0];
+                        if let Some(&(obj_idx, node, bound)) = olit_map.get(&lit) {
+                            // NOTE: translate abstract unit core back.
+                            // We intentionally _don't_ check whether the literal has been
+                            // translated yet here, since we want to add the translated core either
+                            // way
+                            if translated.len() <= lit.vidx() {
+                                translated.resize(lit.vidx() + 1, false);
+                            }
+                            let mut lits = vec![];
+                            let db = &reforms[obj_idx].db;
+                            for info in db.leaf_iter(node) {
+                                debug_assert_eq!(
+                                    info.weight, 1,
+                                    "OLL core reformulations are unweighted"
+                                );
+                                debug_assert_eq!(
+                                    info.val_range.end - info.val_range.start,
+                                    1,
+                                    "should only ever have single leaves in OLL core"
+                                );
+                                let node = &db[info.id];
+                                let lit = node[info.val_range.start];
+                                if node.is_leaf() {
+                                    debug_assert_eq!(
+                                        info.val_range.start, 1,
+                                        "true leaf must have value 1"
+                                    );
+                                } else {
+                                    debug_assert!(
+                                        translated[lit.vidx()],
+                                        "this literal must have
+                                        appeared in a core, which must have been translated after
+                                        core boosting"
+                                    );
+                                }
+                                lits.push(lit);
+                            }
+                            self.hitting_set_solver.add_card_core(
+                                &lits,
+                                bound,
+                                CoreOrigin::Abstract,
+                            );
+                            translated[lit.vidx()] = true;
+                        } else {
+                            self.hitting_set_solver.learn_unit(lit);
+                        }
+                    } else {
+                        // introduce necessary translations in HSS
+                        for &lit in &core {
+                            if let Some(&(obj_idx, node, bound)) = olit_map.get(&lit) {
+                                if translated.len() <= lit.vidx() {
+                                    translated.resize(lit.vidx() + 1, false);
+                                } else if translated[lit.vidx()] {
+                                    continue;
+                                }
+                                let mut lits = vec![];
+                                let db = &reforms[obj_idx].db;
+                                for info in db.leaf_iter(node) {
+                                    debug_assert_eq!(
+                                        info.weight, 1,
+                                        "OLL core reformulations are unweighted"
+                                    );
+                                    debug_assert_eq!(
+                                        info.val_range.end - info.val_range.start,
+                                        1,
+                                        "should only ever have single leaves in OLL core"
+                                    );
+                                    let node = &db[info.id];
+                                    let lit = node[info.val_range.start];
+                                    if node.is_leaf() {
+                                        debug_assert_eq!(
+                                            info.val_range.start, 1,
+                                            "true leaf must have value 1"
+                                        );
+                                    } else {
+                                        debug_assert!(
+                                            translated[lit.vidx()],
+                                            "this literal must have
+                                        appeared in a core, which must have been translated after
+                                        core boosting"
+                                        );
+                                    }
+                                    lits.push(lit);
+                                }
+                                self.hitting_set_solver.add_reified_card(&lits, bound, lit);
+                                translated[lit.vidx()] = true;
+                            }
+                        }
+
+                        self.hitting_set_solver
+                            .add_core(core.as_ref(), CoreOrigin::Abstract);
+                    }
+                    self.weed_out_assumptions(&core, &mut assumps, &mut joint_objective)?;
+                    if let Some(log) = &mut self.kernel.logger {
+                        log.log_ihs_core(orig_len, core.len(), true)?;
+                    }
+                    if assumps.is_empty() {
+                        break;
+                    }
+                }
+            }
+            self.cb_data = cb_data;
         }
     }
 
@@ -445,7 +590,7 @@ where
                 let hss = unsafe { &mut *hss };
                 let obj_lits = unsafe { &mut *obj_lits };
                 if obj_lits.contains(&cl[0]) || obj_lits.contains(&!cl[0]) {
-                    hss.add_core(&cl)
+                    hss.learn_unit(cl[0]);
                 }
             },
             0,
@@ -455,6 +600,64 @@ where
         let res = res?;
         self.kernel.check_termination()?;
         Done(res)
+    }
+
+    fn weed_out_assumptions(
+        &mut self,
+        core: &[Lit],
+        assumps: &mut Vec<Lit>,
+        wce_obj: &mut [isize],
+    ) -> MaybeTerminatedError {
+        let _len_before = assumps.len();
+        if self.opts.wce {
+            let min_cost = core.iter().fold(isize::MAX, |min, lit| {
+                std::cmp::min(wce_obj[lit.vidx()].abs(), min)
+            });
+            for lit in core {
+                if lit.is_pos() {
+                    wce_obj[lit.vidx()] -= min_cost;
+                } else {
+                    wce_obj[lit.vidx()] += min_cost;
+                }
+            }
+            assumps.retain(|&lit| wce_obj[lit.vidx()] != 0);
+        } else {
+            // NOTE: core is in same order as hitting set, we can therefore remove the
+            // core literals in a single sweep, knowing that the
+            // with core minimization, the assumptions are ordered by weight,
+            // otherwise by literal (from the hitting set solver / abstraction)
+            let mut core_idx = 0;
+            if self.opts.core_minimization.minimization() {
+                assumps.retain(|&lit| {
+                    while core_idx < core.len()
+                        && (wce_obj[core[core_idx].vidx()].abs() > wce_obj[lit.vidx()].abs()
+                            || (wce_obj[core[core_idx].vidx()].abs() == wce_obj[lit.vidx()].abs()
+                                && core[core_idx] < !lit))
+                    {
+                        core_idx += 1;
+                    }
+                    if core_idx >= core.len() || !lit != core[core_idx] {
+                        return true;
+                    }
+                    false
+                });
+            } else {
+                assumps.retain(|&lit| {
+                    while core_idx < core.len() && core[core_idx] < !lit {
+                        core_idx += 1;
+                    }
+                    if core_idx >= core.len() || !lit != core[core_idx] {
+                        return true;
+                    }
+                    false
+                });
+            };
+        }
+        debug_assert!(
+            assumps.len() < _len_before,
+            "something should be removed from the assumptions"
+        );
+        Done(())
     }
 }
 
@@ -492,6 +695,7 @@ where
 
         let mut translated = vec![false; self.kernel.var_manager.n_used() as usize + 1];
         let mut reform_objs = Vec::with_capacity(cb_res.len());
+        let mut reforms = Vec::with_capacity(cb_res.len());
         for (
             CbResult {
                 reform,
@@ -538,7 +742,7 @@ where
                     }
                     reform_objs.push((reform_obj, reform.offset));
                 }
-                IhsCbTreatment::Translate => {
+                IhsCbTreatment::Translate | IhsCbTreatment::Abstract => {
                     for (root, bound) in cores {
                         let mut lits = vec![];
                         for info in tot_db.leaf_iter(root) {
@@ -584,7 +788,10 @@ where
                                             "true leaf must have value 1"
                                         );
                                     } else {
-                                        debug_assert!(translated[lit.vidx()], "this literal must have appeared in a another core, which must have been before in `cores`");
+                                        debug_assert!(
+                                            translated[lit.vidx()],
+                                            "this literal must have appeared in a another core, which must have been before in `cores`"
+                                            );
                                     }
                                     lits.push(lit);
                                 }
@@ -594,7 +801,31 @@ where
                         }
                         // NOTE: all variables in the core were introduced in the HSS in the above
                         // loop, even if they are not from the original objective
-                        self.hitting_set_solver.add_card_core(&lits, bound);
+                        self.hitting_set_solver.add_card_core(
+                            &lits,
+                            bound,
+                            CoreOrigin::CoreBoosting,
+                        );
+                    }
+
+                    if opts.treatment == IhsCbTreatment::Abstract {
+                        let mut keep_lits = vec![];
+                        let mut remaining_tots = vec![];
+                        for (&lit, _) in reform.inactives.iter() {
+                            if let Some(&ReformData {
+                                root, tot_weight, ..
+                            }) = reform.reformulations.get(&lit)
+                            {
+                                remaining_tots.push((root, tot_weight));
+                            } else {
+                                keep_lits.push(lit);
+                            }
+                        }
+                        reforms.push(CbReformData {
+                            db: tot_db,
+                            keep_lits,
+                            remaining_tots,
+                        });
                     }
                 }
             }
@@ -608,18 +839,36 @@ where
             IhsCbTreatment::Translate => {
                 self.cb_data = CbData::Translate;
             }
+            IhsCbTreatment::Abstract => {
+                self.cb_data = CbData::Abstract {
+                    reforms,
+                    translated,
+                };
+            }
         }
 
         self.kernel.log_routine_end()?;
+        self.kernel.check_termination()?;
 
         Done(true)
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 enum CbData {
     #[default]
     None,
     Ignore,
     Translate,
+    Abstract {
+        reforms: Vec<CbReformData>,
+        translated: Vec<bool>,
+    },
+}
+
+#[derive(Debug)]
+struct CbReformData {
+    db: TotDb,
+    keep_lits: Vec<Lit>,
+    remaining_tots: Vec<(NodeId, usize)>,
 }

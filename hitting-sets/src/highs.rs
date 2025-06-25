@@ -7,7 +7,7 @@ use rustsat::types::{Lit, RsHashMap, Var};
 
 use crate::{CompleteSolveResult, IncompleteSolveResult};
 
-use super::{BuildSolver, HittingSetSolver, VarMap};
+use super::{BuildSolver, CoreOrigin, HittingSetSolver, VarMap};
 
 pub struct Solver {
     objectives: Vec<(RsHashMap<Lit, usize>, usize)>,
@@ -73,8 +73,18 @@ impl HittingSetSolver for Solver {
         }
     }
 
-    fn add_card_core(&mut self, lits: &[Lit], bound: usize) {
+    fn add_card_core(&mut self, lits: &[Lit], bound: usize, origin: CoreOrigin) {
         self.statistics.n_cores += 1;
+        match origin {
+            CoreOrigin::Seeding => {
+                self.statistics.n_seeded += 1;
+            }
+            CoreOrigin::CoreBoosting => (),
+            CoreOrigin::Normal => (),
+            CoreOrigin::Abstract => {
+                self.statistics.n_abstract_cores += 1;
+            }
+        }
         let bound = lits.iter().fold(
             i32::try_from(bound).expect("`bound` does not fit in `i32`"),
             |b, lit| if lit.is_neg() { b - 1 } else { b },

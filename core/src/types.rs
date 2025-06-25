@@ -365,6 +365,21 @@ impl Objective {
             | Objective::Constant { reform_id, .. } => *reform_id = new_reform_id,
         }
     }
+
+    /// Gets the weight of a literal in the objective
+    ///
+    /// NOTE: this assumes that the literal is in the objective, and might return wrong results
+    /// otherwise
+    pub fn weight(&self, lit: Lit) -> usize {
+        match self {
+            Objective::Weighted { lits, .. } => *lits.get(&lit).expect("literal not in objective"),
+            Objective::Unweighted { lits, .. } => {
+                debug_assert!(lits.contains(&lit), "literal not in objective");
+                1
+            }
+            Objective::Constant { .. } => 0,
+        }
+    }
 }
 
 pub enum ObjIter<'a> {

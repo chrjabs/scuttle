@@ -928,7 +928,7 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 [[package]]
 name = "pigeons"
 version = "0.1.1"
-source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#68add6f3864a50ecbbad25d362a0bab6f9072ca3"
+source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#b8eea69f12309643d263e167528878bf1297b006"
 dependencies = [
  "itertools 0.14.0",
  "rustc-hash",
@@ -1034,7 +1034,7 @@ dependencies = [
 [[package]]
 name = "rustsat"
 version = "0.7.1"
-source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#68add6f3864a50ecbbad25d362a0bab6f9072ca3"
+source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#b8eea69f12309643d263e167528878bf1297b006"
 dependencies = [
  "anyhow",
  "cpu-time",
@@ -1050,7 +1050,7 @@ dependencies = [
 [[package]]
 name = "rustsat-cadical"
 version = "0.7.1"
-source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#68add6f3864a50ecbbad25d362a0bab6f9072ca3"
+source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#b8eea69f12309643d263e167528878bf1297b006"
 dependencies = [
  "anyhow",
  "bindgen",

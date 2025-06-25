@@ -1,4 +1,4 @@
-use hitting_sets::{BuildSolver, CompleteSolveResult, HittingSetSolver};
+use hitting_sets::{BuildSolver, CompleteSolveResult, CoreOrigin, HittingSetSolver};
 use rustsat::{
     lit,
     types::{Cl, RsHashMap},
@@ -10,8 +10,8 @@ fn cores<S: HittingSetSolver>() {
         .collect();
     let builder = S::Builder::new([objective]);
     let mut solver = builder.init();
-    solver.add_core(Cl::new(&[lit![1], lit![3]]));
-    solver.add_core(Cl::new(&[lit![0], lit![1], lit![2]]));
+    solver.add_core(Cl::new(&[lit![1], lit![3]]), CoreOrigin::Normal);
+    solver.add_core(Cl::new(&[lit![0], lit![1], lit![2]]), CoreOrigin::Normal);
     let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
     else {
         panic!()
@@ -20,7 +20,7 @@ fn cores<S: HittingSetSolver>() {
     dbg!(cost, &hitting_set);
     assert_eq!(cost, 1.);
     assert_eq!(hitting_set, vec![!lit![0], lit![1], !lit![2], !lit![3]]);
-    solver.add_core(Cl::new(&[lit![0], lit![2]]));
+    solver.add_core(Cl::new(&[lit![0], lit![2]]), CoreOrigin::Normal);
     let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
     else {
         panic!()
@@ -28,7 +28,7 @@ fn cores<S: HittingSetSolver>() {
     hitting_set.sort_unstable();
     assert_eq!(cost, 2.);
     assert_eq!(hitting_set, vec![!lit![0], lit![1], lit![2], !lit![3]]);
-    solver.add_core(Cl::new(&[lit![0], lit![3]]));
+    solver.add_core(Cl::new(&[lit![0], lit![3]]), CoreOrigin::Normal);
     let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
     else {
         panic!()
@@ -48,10 +48,10 @@ fn pd_cuts<S: HittingSetSolver>() {
         .collect();
     let builder = S::Builder::new([obj1, obj2]);
     let mut solver = builder.init();
-    solver.add_core(Cl::new(&[lit![0], lit![1], lit![2]]));
-    solver.add_core(Cl::new(&[lit![0], lit![1], lit![3]]));
-    solver.add_core(Cl::new(&[lit![1], lit![2], lit![4]]));
-    solver.add_core(Cl::new(&[lit![2], lit![3], lit![4]]));
+    solver.add_core(Cl::new(&[lit![0], lit![1], lit![2]]), CoreOrigin::Normal);
+    solver.add_core(Cl::new(&[lit![0], lit![1], lit![3]]), CoreOrigin::Normal);
+    solver.add_core(Cl::new(&[lit![1], lit![2], lit![4]]), CoreOrigin::Normal);
+    solver.add_core(Cl::new(&[lit![2], lit![3], lit![4]]), CoreOrigin::Normal);
     let CompleteSolveResult::Optimal(cost, mut hitting_set) = solver.optimal_hitting_set(None)
     else {
         panic!()
@@ -97,9 +97,9 @@ fn pd_cuts_2<S: HittingSetSolver>() {
     let obj2: RsHashMap<_, _> = [(lit![0], 1), (lit![2], 1)].into_iter().collect();
     let builder = S::Builder::new([obj1, obj2]);
     let mut solver = builder.init();
-    solver.add_core(Cl::new(&[lit![0], lit![1]]));
-    solver.add_core(Cl::new(&[lit![1], lit![2]]));
-    solver.add_core(Cl::new(&[lit![2], lit![3]]));
+    solver.add_core(Cl::new(&[lit![0], lit![1]]), CoreOrigin::Normal);
+    solver.add_core(Cl::new(&[lit![1], lit![2]]), CoreOrigin::Normal);
+    solver.add_core(Cl::new(&[lit![2], lit![3]]), CoreOrigin::Normal);
     let CompleteSolveResult::Optimal(cost, _) = solver.optimal_hitting_set(None) else {
         panic!()
     };

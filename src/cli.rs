@@ -1258,11 +1258,15 @@ impl Cli {
             buffer.reset()?;
             let hitting_sets::Statistics {
                 n_cores,
+                n_abstract_cores,
+                n_seeded,
                 n_learned_units,
                 n_solves,
                 solve_time,
             } = stats;
             Self::print_parameter(&mut buffer, "n-cores", n_cores)?;
+            Self::print_parameter(&mut buffer, "n-abstract-cores", n_abstract_cores)?;
+            Self::print_parameter(&mut buffer, "n-seeded", n_seeded)?;
             Self::print_parameter(&mut buffer, "n-learned-units", n_learned_units)?;
             Self::print_parameter(&mut buffer, "n-solve-calls", n_solves)?;
             Self::print_parameter(&mut buffer, "cpu-solve-time", DurPrinter::new(solve_time))?;
@@ -1572,6 +1576,21 @@ impl WriteSolverLog for CliLogger {
             write!(buffer, "exhausted core")?;
             buffer.reset()?;
             writeln!(buffer, ": exhausted: {exhausted}; weight: {weight}")?;
+            self.stdout.print(&buffer)?;
+        }
+        Ok(())
+    }
+
+    fn log_ihs_core(&self, len: usize, red_len: usize, abstr: bool) -> anyhow::Result<()> {
+        if self.config.log_cores {
+            let mut buffer = self.stdout.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
+            write!(buffer, "extracted core")?;
+            buffer.reset()?;
+            writeln!(
+                buffer,
+                ": original-len: {len}; reduced-len: {red_len}; abstract: {abstr}",
+            )?;
             self.stdout.print(&buffer)?;
         }
         Ok(())

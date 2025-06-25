@@ -6,7 +6,7 @@ use rustsat::types::Var;
 #[derive(Debug)]
 pub struct VarMap<T> {
     forward: Vec<Option<T>>,
-    backward: Vec<Var>,
+    backward: Vec<Option<Var>>,
 }
 
 impl<T> VarMap<T> {
@@ -28,7 +28,7 @@ where
 {
     /// Gets the maximum value mapped to
     pub fn max_mapped(&self) -> Option<&T> {
-        let var = self.backward.last()?;
+        let var = self.backward.last()?.unwrap();
         self.forward[var.idx()].as_ref()
     }
 
@@ -57,8 +57,12 @@ where
             return mapped.clone();
         }
         let mapped = if_not(external);
-        assert_eq!(mapped.index(), self.backward.len());
-        self.backward.push(external);
+        debug_assert!(mapped.index() >= self.backward.len());
+        if mapped.index() > self.backward.len() {
+            // NOTE: gaps might appear due to aux columns introduced for PD cuts.
+            self.backward.resize(mapped.index(), None);
+        }
+        self.backward.push(Some(external));
         if self.forward.len() <= external.idx() {
             self.forward.resize(external.idx() + 1, None);
         }
@@ -84,7 +88,7 @@ impl<T> std::ops::Index<usize> for VarMap<T> {
     type Output = Var;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.backward[index]
+        self.backward[index].as_ref().unwrap()
     }
 }
 
@@ -95,7 +99,7 @@ where
     type Output = Var;
 
     fn index(&self, index: T) -> &Self::Output {
-        &self.backward[index.index()]
+        self.backward[index.index()].as_ref().unwrap()
     }
 }
 
@@ -106,7 +110,7 @@ where
     type Output = Var;
 
     fn index(&self, index: &T) -> &Self::Output {
-        &self.backward[index.index()]
+        self.backward[index.index()].as_ref().unwrap()
     }
 }
 
@@ -127,7 +131,12 @@ impl<'data, T> Iterator for MapIter<'data, T> {
         if self.idx >= self.data.backward.len() {
             return None;
         }
-        let var = self.data.backward[self.idx];
+        let var = loop {
+            if let Some(var) = self.data.backward[self.idx] {
+                break var;
+            }
+            self.idx += 1;
+        };
         let t = self.data.forward[var.idx()].as_ref().unwrap();
         self.idx += 1;
         Some((var, t))

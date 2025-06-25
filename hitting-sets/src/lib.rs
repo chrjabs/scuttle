@@ -112,12 +112,12 @@ pub trait HittingSetSolver {
     fn change_multipliers(&mut self, multi: &[f64]);
 
     /// Adds a new core to the solver
-    fn add_core(&mut self, core: &Cl) {
-        self.add_card_core(core.as_ref(), 1);
+    fn add_core(&mut self, core: &Cl, origin: CoreOrigin) {
+        self.add_card_core(core.as_ref(), 1, origin);
     }
 
     /// Adds a cardinality core to the solver
-    fn add_card_core(&mut self, lits: &[Lit], bound: usize);
+    fn add_card_core(&mut self, lits: &[Lit], bound: usize, origin: CoreOrigin);
 
     /// Adds a clause to the solver
     ///
@@ -195,10 +195,20 @@ pub trait BuildSolver {
     fn use_starting_points(&mut self, use_start: bool) -> &mut Self;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreOrigin {
+    Seeding,
+    CoreBoosting,
+    Normal,
+    Abstract,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Statistics {
     pub solve_time: std::time::Duration,
     pub n_solves: usize,
     pub n_cores: usize,
+    pub n_abstract_cores: usize,
+    pub n_seeded: usize,
     pub n_learned_units: usize,
 }

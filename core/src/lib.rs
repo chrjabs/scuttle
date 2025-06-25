@@ -135,6 +135,8 @@ pub trait WriteSolverLog {
     fn log_core(&self, weight: usize, len: usize, red_len: usize) -> anyhow::Result<()>;
     /// Adds a core exhaustion to the log
     fn log_core_exhaustion(&self, exhausted: usize, weight: usize) -> anyhow::Result<()>;
+    /// Adds a core extracted in IHS to the log
+    fn log_ihs_core(&self, len: usize, red_len: usize, abstr: bool) -> anyhow::Result<()>;
     /// Adds an inprocessing step to the log
     fn log_inprocessing(
         &self,
