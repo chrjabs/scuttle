@@ -1,35 +1,21 @@
 //! # Command Line Interface for the Solver Binary
 
-use std::io::Error as IOError;
-use std::path::PathBuf;
-use std::time::Duration;
-use std::{
-    fmt::{self},
-    io::Write,
+use std::{fmt, path::PathBuf};
+
+use ::tracing::Level;
+use clap::{Args, Parser, Subcommand, ValueEnum, builder::styling};
+use rustsat::instances::fio;
+use scuttle_core::{
+    Limits,
+    options::{
+        AfterCbOptions, CandidateSeeding, CoreBoostingOptions, CoreExtraction, CoreMinimization,
+        EnumOptions, HeurImprOptions, HeurImprWhen, IhsCbOptions, IhsCbTreatment, IhsOptions,
+        KernelOptions, MipPdOptions, ObjectiveMultipliers, Stratification,
+    },
+    prepro::FileFormat,
 };
 
-use clap::{
-    Args, Parser, Subcommand, ValueEnum, builder::styling, crate_authors, crate_name, crate_version,
-};
-use cpu_time::ProcessTime;
-use rustsat::{
-    instances::fio,
-    solvers::{SolverResult, SolverStats},
-};
-use scuttle_core::options::{
-    CandidateSeeding, CoreExtraction, CoreMinimization, IhsCbOptions, IhsCbTreatment, IhsOptions,
-    MipPdOptions, ObjectiveMultipliers, Stratification,
-};
-use scuttle_core::prepro::FileFormat;
-use scuttle_core::{
-    EncodingStats, Limits, Phase, Stats, Termination, WriteSolverLog,
-    options::{
-        AfterCbOptions, CoreBoostingOptions, EnumOptions, HeurImprOptions, HeurImprWhen,
-        KernelOptions,
-    },
-    types::{NonDomPoint, ParetoFront},
-};
-use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
+use crate::tracing;
 
 macro_rules! none_if_zero {
     ($val:expr_2021) => {
@@ -154,9 +140,6 @@ enum AlgorithmCommand {
     LowerBounding {
         #[command(flatten)]
         cb: CoreBoostingArgs,
-        /// Log fence updates
-        #[arg(long, help_heading = "Printing options")]
-        log_fence: bool,
         #[command(flatten)]
         file: FileArgs,
         #[command(flatten)]
@@ -171,12 +154,6 @@ enum AlgorithmCommand {
         /// The number of threads for the hitting set solver
         #[arg(long, alias = "hitting-set-solver-threads", default_value_t = hitting_sets::Threads::default())]
         hss_threads: hitting_sets::Threads,
-        /// Log extracted hitting set values
-        #[arg(long, help_heading = "Printing options")]
-        log_hitting_sets: bool,
-        /// Log ratio of seeded constraints
-        #[arg(long, help_heading = "Printing options")]
-        log_seeding_ratio: bool,
         /// Whether to seed constraints over only objective variables into the hitting set solver
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().seeding))]
         seeding: Bool,
@@ -425,23 +402,51 @@ struct FileArgs {
     inst_path: PathBuf,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, Default)]
+pub enum ColorOpt {
+    Always,
+    #[default]
+    Auto,
+    Never,
+}
+
+impl fmt::Display for ColorOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ColorOpt::Always => write!(f, "always"),
+            ColorOpt::Auto => write!(f, "auto"),
+            ColorOpt::Never => write!(f, "never"),
+        }
+    }
+}
+
 #[derive(Args, Copy, Clone)]
 #[command(next_help_heading = "Printing options")]
 struct LogArgs {
-    #[command(flatten)]
-    color: concolor_clap::Color,
     /// Print the solver configuration
-    #[arg(long, global = true)]
+    #[arg(long, global = true, alias = "config")]
     print_solver_config: bool,
     /// Print solutions as binary assignments
-    #[arg(long, global = true)]
+    #[arg(long, global = true, alias = "solutions", alias = "sols")]
     print_solutions: bool,
     /// Don't print statistics
-    #[arg(long, global = true)]
+    #[arg(
+        long,
+        global = true,
+        alias = "no-stats",
+        alias = "no-statistics",
+        alias = "no-print-statistics"
+    )]
     no_print_stats: bool,
+    /// When to enable coloured output
+    #[arg(long, global = true, default_value_t = ColorOpt::default())]
+    color: ColorOpt,
     /// Verbosity of the solver output
-    #[arg(short, long, default_value_t = 0, global = true)]
-    verbosity: u8,
+    #[command(flatten)]
+    verbosity: clap_verbosity_flag::Verbosity<clap_verbosity_flag::WarnLevel>,
+    /// Whether to print timestamps
+    #[arg(long, global=true, default_value_t = Bool::from(true))]
+    timestamps: Bool,
     /// Log candidates along the search trace
     #[arg(long, global = true)]
     log_candidates: bool,
@@ -449,49 +454,39 @@ struct LogArgs {
     #[arg(long, global = true)]
     log_solutions: bool,
     /// Log non-dominated points as they are discovered
-    #[arg(long, global = true)]
-    log_non_dom: bool,
+    #[arg(long, global = true, alias = "log_non_dom")]
+    log_non_dominated: bool,
     /// Log SAT oracle calls
     #[arg(long, global = true)]
     log_oracle_calls: bool,
-    /// Log heuristic objective improvement
-    #[arg(long, global = true)]
-    log_heuristic_obj_improvement: bool,
-    /// Log extracted cores
-    #[arg(long, global = true)]
-    log_cores: bool,
-    /// Log routine starts and ends till a given depth
-    #[arg(long, default_value_t = 0, global = true)]
-    log_routines: usize,
     /// Log ideal and nadir points
     #[arg(long, global = true)]
     log_bound_points: bool,
-    /// Log inprocessing
-    #[arg(long, global = true)]
-    log_inprocessing: bool,
-    /// Log stratification levels
-    #[arg(long, global = true)]
-    log_strat_level: bool,
 }
 
-impl From<LogArgs> for LoggerConfig {
+impl From<LogArgs> for Option<tracing::Options> {
     fn from(value: LogArgs) -> Self {
-        LoggerConfig {
-            log_candidates: value.log_candidates || value.verbosity >= 2,
-            log_solutions: value.log_solutions,
-            log_non_dom: value.log_non_dom || value.verbosity >= 1,
-            log_oracle_calls: value.log_oracle_calls || value.verbosity >= 3,
-            #[cfg(feature = "sol-tightening")]
-            log_heuristic_obj_improvement: value.log_heuristic_obj_improvement
-                || value.verbosity >= 3,
-            log_fence: false,
-            log_routines: std::cmp::max(value.log_routines, value.verbosity as usize * 2),
-            log_bound_points: value.log_bound_points || value.verbosity >= 2,
-            log_cores: value.log_cores || value.verbosity >= 2,
-            log_inpro: value.log_inprocessing || value.verbosity >= 1,
-            log_hitting_sets: false,
-            log_seeding_ratio: false,
-            log_strat_level: value.log_strat_level || value.verbosity >= 2,
+        let level = value.verbosity.tracing_level()?;
+        Some(tracing::Options {
+            color: value.color,
+            print_config: value.print_solver_config || level >= Level::DEBUG,
+            timestamps: value.timestamps.into(),
+            candidates: value.log_candidates,
+            solutions: value.log_solutions,
+            non_dominated: value.log_non_dominated,
+            oracle_calls: value.log_oracle_calls,
+            bound_points: value.log_bound_points,
+            level,
+        })
+    }
+}
+
+impl From<LogArgs> for tracing::WrapUpOptions {
+    fn from(value: LogArgs) -> Self {
+        tracing::WrapUpOptions {
+            color: value.color,
+            print_solutions: value.print_solutions,
+            print_stats: !value.no_print_stats,
         }
     }
 }
@@ -665,15 +660,10 @@ pub struct Cli {
     #[cfg(feature = "maxpre")]
     pub maxpre_reindexing: bool,
     pub cadical_config: CadicalConfig,
-    stdout: BufferWriter,
-    stderr: BufferWriter,
-    print_solver_config: bool,
-    print_solutions: bool,
-    print_stats: bool,
-    color: concolor_clap::Color,
-    logger_config: LoggerConfig,
     pub alg: Algorithm,
     pub proof_paths: Option<(PathBuf, Option<PathBuf>)>,
+    pub tracing_opts: Option<tracing::Options>,
+    pub wrap_up_opts: tracing::WrapUpOptions,
 }
 
 pub enum Algorithm {
@@ -708,32 +698,6 @@ impl fmt::Display for Algorithm {
 
 impl Cli {
     pub fn init() -> Self {
-        let stdout = |color: concolor_clap::Color| {
-            BufferWriter::stdout(match color.color {
-                concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
-                concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
-                concolor_clap::ColorChoice::Auto => {
-                    if atty::is(atty::Stream::Stdout) {
-                        termcolor::ColorChoice::Auto
-                    } else {
-                        termcolor::ColorChoice::Never
-                    }
-                }
-            })
-        };
-        let stderr = |color: concolor_clap::Color| {
-            BufferWriter::stderr(match color.color {
-                concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
-                concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
-                concolor_clap::ColorChoice::Auto => {
-                    if atty::is(atty::Stream::Stderr) {
-                        termcolor::ColorChoice::Auto
-                    } else {
-                        termcolor::ColorChoice::Never
-                    }
-                }
-            })
-        };
         let args = CliArgs::parse();
         let mut kernel_opts = args.kernel_opts();
         match args.command {
@@ -767,15 +731,10 @@ impl Cli {
                     #[cfg(feature = "maxpre")]
                     maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
                     cadical_config: args.cadical_config,
-                    stdout: stdout(args.log.color),
-                    stderr: stderr(args.log.color),
-                    print_solver_config: args.log.print_solver_config,
-                    print_solutions: args.log.print_solutions,
-                    print_stats: !args.log.no_print_stats,
-                    color: args.log.color,
-                    logger_config: args.log.into(),
                     alg: Algorithm::PMinimal(kernel_opts, cb),
                     proof_paths,
+                    tracing_opts: args.log.into(),
+                    wrap_up_opts: args.log.into(),
                 }
             }
             AlgorithmCommand::Bioptsat {
@@ -813,13 +772,6 @@ impl Cli {
                     #[cfg(feature = "maxpre")]
                     maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
                     cadical_config: args.cadical_config,
-                    stdout: stdout(args.log.color),
-                    stderr: stderr(args.log.color),
-                    print_solver_config: args.log.print_solver_config,
-                    print_solutions: args.log.print_solutions,
-                    print_stats: !args.log.no_print_stats,
-                    color: args.log.color,
-                    logger_config: args.log.into(),
                     alg: Algorithm::BiOptSat(
                         kernel_opts,
                         obj_encs.obj_pb_encoding,
@@ -827,14 +779,11 @@ impl Cli {
                         cb,
                     ),
                     proof_paths,
+                    tracing_opts: args.log.into(),
+                    wrap_up_opts: args.log.into(),
                 }
             }
-            AlgorithmCommand::LowerBounding {
-                cb,
-                file,
-                proof,
-                log_fence,
-            } => {
+            AlgorithmCommand::LowerBounding { cb, file, proof } => {
                 let cb = if args.core_boosting.into() {
                     let (cbo, store) = cb.parse(
                         #[cfg(feature = "maxpre")]
@@ -864,24 +813,14 @@ impl Cli {
                     #[cfg(feature = "maxpre")]
                     maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
                     cadical_config: args.cadical_config,
-                    stdout: stdout(args.log.color),
-                    stderr: stderr(args.log.color),
-                    print_solver_config: args.log.print_solver_config,
-                    print_solutions: args.log.print_solutions,
-                    print_stats: !args.log.no_print_stats,
-                    color: args.log.color,
-                    logger_config: LoggerConfig {
-                        log_fence: log_fence || args.log.verbosity >= 2,
-                        ..args.log.into()
-                    },
                     alg: Algorithm::LowerBounding(kernel_opts, cb),
                     proof_paths,
+                    tracing_opts: args.log.into(),
+                    wrap_up_opts: args.log.into(),
                 }
             }
             AlgorithmCommand::ParetoIhs {
                 hitting_set_solver,
-                log_hitting_sets,
-                log_seeding_ratio,
                 seeding,
                 ihs_core_extraction,
                 candidate_seeding,
@@ -912,17 +851,6 @@ impl Cli {
                 #[cfg(feature = "maxpre")]
                 maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
                 cadical_config: args.cadical_config,
-                stdout: stdout(args.log.color),
-                stderr: stderr(args.log.color),
-                print_solver_config: args.log.print_solver_config,
-                print_solutions: args.log.print_solutions,
-                print_stats: !args.log.no_print_stats,
-                color: args.log.color,
-                logger_config: LoggerConfig {
-                    log_hitting_sets: log_hitting_sets || args.log.verbosity >= 2,
-                    log_seeding_ratio: log_seeding_ratio || args.log.verbosity >= 1,
-                    ..args.log.into()
-                },
                 alg: Algorithm::ParetoIhs(
                     hitting_set_solver,
                     kernel_opts,
@@ -947,6 +875,8 @@ impl Cli {
                     },
                 ),
                 proof_paths: None,
+                tracing_opts: args.log.into(),
+                wrap_up_opts: args.log.into(),
             },
             AlgorithmCommand::MipPd {
                 random_seed,
@@ -971,13 +901,6 @@ impl Cli {
                 #[cfg(feature = "maxpre")]
                 maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
                 cadical_config: args.cadical_config,
-                stdout: stdout(args.log.color),
-                stderr: stderr(args.log.color),
-                print_solver_config: args.log.print_solver_config,
-                print_solutions: args.log.print_solutions,
-                print_stats: !args.log.no_print_stats,
-                color: args.log.color,
-                logger_config: args.log.into(),
                 alg: Algorithm::MipPd(
                     mip_solver,
                     MipPdOptions {
@@ -988,865 +911,9 @@ impl Cli {
                     },
                 ),
                 proof_paths: None,
+                tracing_opts: args.log.into(),
+                wrap_up_opts: args.log.into(),
             },
-        }
-    }
-
-    pub fn new_cli_logger(&self) -> CliLogger {
-        CliLogger {
-            stdout: BufferWriter::stdout(match self.color.color {
-                concolor_clap::ColorChoice::Always => termcolor::ColorChoice::Always,
-                concolor_clap::ColorChoice::Never => termcolor::ColorChoice::Never,
-                concolor_clap::ColorChoice::Auto => {
-                    if atty::is(atty::Stream::Stdout) {
-                        termcolor::ColorChoice::Auto
-                    } else {
-                        termcolor::ColorChoice::Never
-                    }
-                }
-            }),
-            config: self.logger_config.clone(),
-            routine_stack: vec![],
-        }
-    }
-
-    pub fn warning(&self, msg: &str) -> Result<(), IOError> {
-        let mut buffer = self.stderr.buffer();
-        buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Yellow)))?;
-        write!(buffer, "warning")?;
-        buffer.reset()?;
-        buffer.set_color(ColorSpec::new().set_bold(true))?;
-        write!(buffer, ": ")?;
-        buffer.reset()?;
-        writeln!(buffer, "{msg}")?;
-        self.stderr.print(&buffer)?;
-        Ok(())
-    }
-
-    pub fn error(&self, msg: &str) -> Result<(), IOError> {
-        let mut buffer = self.stderr.buffer();
-        buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Red)))?;
-        write!(buffer, "error")?;
-        buffer.reset()?;
-        buffer.set_color(ColorSpec::new().set_bold(true))?;
-        write!(buffer, ": ")?;
-        buffer.reset()?;
-        writeln!(buffer, "{msg}")?;
-        self.stderr.print(&buffer)?;
-        Ok(())
-    }
-
-    pub fn info(&self, msg: &str) -> Result<(), IOError> {
-        let mut buffer = self.stdout.buffer();
-        buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-        write!(buffer, "info")?;
-        buffer.reset()?;
-        buffer.set_color(ColorSpec::new().set_bold(true))?;
-        write!(buffer, ": ")?;
-        buffer.reset()?;
-        writeln!(buffer, "{msg}")?;
-        self.stdout.print(&buffer)?;
-        Ok(())
-    }
-
-    pub fn log_termination(&self, term: &Termination) -> Result<(), IOError> {
-        let msg = &format!("{term}");
-        self.warning(msg)
-    }
-
-    pub fn print_header(&self) -> Result<(), IOError> {
-        let mut buffer = self.stdout.buffer();
-        buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Green)))?;
-        write!(buffer, "{}", crate_name!())?;
-        buffer.reset()?;
-        buffer.set_color(ColorSpec::new().set_bold(true))?;
-        writeln!(buffer, " ({})", crate_version!())?;
-        buffer.reset()?;
-        writeln!(buffer, "{}", crate_authors!("\n"))?;
-        write!(buffer, "algorithm: ")?;
-        buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
-        writeln!(buffer, "{}", self.alg)?;
-        buffer.reset()?;
-        buffer.set_color(ColorSpec::new().set_bold(true))?;
-        write!(buffer, "==============================")?;
-        buffer.reset()?;
-        writeln!(buffer)?;
-        self.stdout.print(&buffer)?;
-        Ok(())
-    }
-
-    pub fn print_solver_config(&self) -> Result<(), IOError> {
-        if self.print_solver_config {
-            let mut buffer = self.stdout.buffer();
-            Self::start_block(&mut buffer)?;
-            buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(buffer, "Solver Config")?;
-            buffer.reset()?;
-            buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(buffer, ": ")?;
-            buffer.reset()?;
-            match &self.alg {
-                Algorithm::PMinimal(opts, cb_opts) | Algorithm::LowerBounding(opts, cb_opts) => {
-                    Self::print_parameter(
-                        &mut buffer,
-                        "enumeration",
-                        EnumPrinter::new(opts.enumeration),
-                    )?;
-                    Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
-                    Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
-                }
-                Algorithm::BiOptSat(opts, pb_enc, card_enc, cb_opts) => {
-                    Self::print_parameter(
-                        &mut buffer,
-                        "enumeration",
-                        EnumPrinter::new(opts.enumeration),
-                    )?;
-                    Self::print_parameter(&mut buffer, "reserve-enc-vars", opts.reserve_enc_vars)?;
-                    Self::print_parameter(&mut buffer, "obj-pb-encoding", pb_enc)?;
-                    Self::print_parameter(&mut buffer, "obj-card-encoding", card_enc)?;
-                    Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
-                }
-                Algorithm::ParetoIhs(hitting_set_solver, kernel_opts, opts, cb_opts) => {
-                    Self::print_parameter(&mut buffer, "hitting-set-solver", hitting_set_solver)?;
-                    Self::print_parameter(
-                        &mut buffer,
-                        "enumeration",
-                        EnumPrinter::new(kernel_opts.enumeration),
-                    )?;
-                    Self::print_parameter(&mut buffer, "core-boosting", cb_opts.is_some())?;
-                    Self::print_parameter(
-                        &mut buffer,
-                        "candidate-seeding",
-                        opts.candidate_seeding,
-                    )?;
-                    Self::print_parameter(
-                        &mut buffer,
-                        "ihs-core-extraction",
-                        opts.core_extraction,
-                    )?;
-                    Self::print_parameter(&mut buffer, "hss-threads", opts.hss_threads)?;
-                    Self::print_parameter(&mut buffer, "multipliers", opts.multipliers)?;
-                    Self::print_parameter(
-                        &mut buffer,
-                        "precompute-lexicographic",
-                        opts.precompute_lexicographic,
-                    )?;
-                    Self::print_parameter(
-                        &mut buffer,
-                        "max-failed-precompute-lex",
-                        opts.max_failed_precompute_lex,
-                    )?;
-                    Self::print_parameter(
-                        &mut buffer,
-                        "fully-seeded-precompute-lex",
-                        opts.fully_seeded_precompute_lex,
-                    )?;
-                    Self::print_parameter(
-                        &mut buffer,
-                        "reduced-cost-fixing",
-                        opts.reduced_cost_fixing,
-                    )?;
-                }
-                Algorithm::MipPd(mip_solver, opts) => {
-                    Self::print_parameter(&mut buffer, "mip-solver", mip_solver)?;
-                    Self::print_parameter(&mut buffer, "threads", opts.threads)?;
-                    Self::print_parameter(&mut buffer, "random_seed", opts.random_seed)?;
-                    Self::print_parameter(&mut buffer, "multipliers", opts.multipliers)?;
-                }
-            }
-            Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;
-            Self::print_parameter(&mut buffer, "sol-limit", OptVal::new(self.limits.sols))?;
-            Self::print_parameter(
-                &mut buffer,
-                "candidate-limit",
-                OptVal::new(self.limits.candidates),
-            )?;
-            Self::print_parameter(
-                &mut buffer,
-                "oracle-call-limit",
-                OptVal::new(self.limits.oracle_calls),
-            )?;
-            Self::end_block(&mut buffer)?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    pub fn print_pareto_front<S: Clone + Eq + fmt::Display>(
-        &self,
-        pareto_front: ParetoFront<S>,
-    ) -> Result<(), IOError> {
-        let mut buffer = self.stdout.buffer();
-        Self::start_block(&mut buffer)?;
-        buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-        write!(buffer, "Discovered Pareto Front")?;
-        buffer.set_color(ColorSpec::new().set_bold(true))?;
-        writeln!(buffer, ": ")?;
-        buffer.reset()?;
-        pareto_front
-            .into_iter()
-            .try_fold((), |_, pp| self.print_non_dom(&mut buffer, pp))?;
-        Self::end_block(&mut buffer)?;
-        self.stdout.print(&buffer)?;
-        Ok(())
-    }
-
-    pub fn print_stats(&self, stats: Stats) -> Result<(), IOError> {
-        if self.print_stats {
-            let mut buffer = self.stdout.buffer();
-            Self::start_block(&mut buffer)?;
-            buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(buffer, "Solver Stats")?;
-            buffer.reset()?;
-            buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(buffer, ": ")?;
-            buffer.reset()?;
-            Self::print_parameter(&mut buffer, "n-solve-calls", stats.n_solve_calls)?;
-            Self::print_parameter(&mut buffer, "n-solutions", stats.n_solutions)?;
-            Self::print_parameter(&mut buffer, "n-non-dominated", stats.n_non_dominated)?;
-            Self::print_parameter(&mut buffer, "n-candidates", stats.n_candidates)?;
-            Self::print_parameter(&mut buffer, "n-objectives", stats.n_objs)?;
-            Self::print_parameter(&mut buffer, "n-orig-clauses", stats.n_orig_clauses)?;
-            Self::end_block(&mut buffer)?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    pub fn print_oracle_stats(&self, stats: SolverStats) -> Result<(), IOError> {
-        if self.print_stats {
-            let mut buffer = self.stdout.buffer();
-            Self::start_block(&mut buffer)?;
-            buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(buffer, "Oracle Stats")?;
-            buffer.reset()?;
-            buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(buffer, ": ")?;
-            buffer.reset()?;
-            Self::print_parameter(&mut buffer, "n-sat-solves", stats.n_sat)?;
-            Self::print_parameter(&mut buffer, "n-unsat-solves", stats.n_unsat)?;
-            Self::print_parameter(&mut buffer, "n-clauses", stats.n_clauses)?;
-            Self::print_parameter(&mut buffer, "max-var", OptVal::new(stats.max_var))?;
-            Self::print_parameter(&mut buffer, "avg-clause-len", stats.avg_clause_len)?;
-            Self::print_parameter(
-                &mut buffer,
-                "cpu-solve-time",
-                DurPrinter::new(stats.cpu_solve_time),
-            )?;
-            Self::end_block(&mut buffer)?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    pub fn print_encoding_stats(&self, stats: Vec<EncodingStats>) -> Result<(), IOError> {
-        if self.print_stats {
-            let mut buffer = self.stdout.buffer();
-            Self::start_block(&mut buffer)?;
-            buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(buffer, "Encoding Stats")?;
-            buffer.reset()?;
-            buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(buffer, ": ")?;
-            buffer.reset()?;
-            stats
-                .into_iter()
-                .enumerate()
-                .try_fold((), |_, (idx, stats)| {
-                    Self::print_enc_stats(&mut buffer, idx, stats)
-                })?;
-            Self::end_block(&mut buffer)?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    #[cfg(feature = "maxpre")]
-    pub fn print_maxpre_stats(&self, stats: maxpre::Stats) -> Result<(), IOError> {
-        if self.print_stats {
-            let mut buffer = self.stdout.buffer();
-            Self::start_block(&mut buffer)?;
-            buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(buffer, "MaxPre Stats")?;
-            buffer.reset()?;
-            buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(buffer, ": ")?;
-            buffer.reset()?;
-            Self::print_parameter(&mut buffer, "n-objs", stats.n_objs)?;
-            Self::print_parameter(
-                &mut buffer,
-                "n-orig-hard-clauses",
-                stats.n_orig_hard_clauses,
-            )?;
-            Self::print_parameter(
-                &mut buffer,
-                "n-orig-soft-clauses",
-                VecPrinter::new(&stats.n_orig_soft_clauses),
-            )?;
-            Self::print_parameter(&mut buffer, "max-orig-var", OptVal::new(stats.max_orig_var))?;
-            Self::print_parameter(
-                &mut buffer,
-                "n-prepro-hard-clauses",
-                stats.n_prepro_hard_clauses,
-            )?;
-            Self::print_parameter(
-                &mut buffer,
-                "n-prepro-soft-clauses",
-                VecPrinter::new(&stats.n_prepro_soft_clauses),
-            )?;
-            Self::print_parameter(
-                &mut buffer,
-                "max-prepro-var",
-                OptVal::new(stats.max_prepro_var),
-            )?;
-            Self::print_parameter(
-                &mut buffer,
-                "removed-weight",
-                VecPrinter::new(&stats.removed_weight),
-            )?;
-            Self::print_parameter(
-                &mut buffer,
-                "prepro-time",
-                DurPrinter::new(stats.prepro_time),
-            )?;
-            Self::print_parameter(
-                &mut buffer,
-                "reconst-time",
-                DurPrinter::new(stats.reconst_time),
-            )?;
-            Self::end_block(&mut buffer)?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    pub fn print_hitting_set_solver_stats(
-        &self,
-        stats: hitting_sets::Statistics,
-    ) -> Result<(), IOError> {
-        if self.print_stats {
-            let mut buffer = self.stdout.buffer();
-            Self::start_block(&mut buffer)?;
-            buffer.set_color(ColorSpec::new().set_bold(true).set_fg(Some(Color::Blue)))?;
-            write!(buffer, "Hitting Set Solver Stats")?;
-            buffer.reset()?;
-            buffer.set_color(ColorSpec::new().set_bold(true))?;
-            writeln!(buffer, ": ")?;
-            buffer.reset()?;
-            let hitting_sets::Statistics {
-                n_cores,
-                n_abstract_cores,
-                n_seeded,
-                n_learned_units,
-                n_solves,
-                n_lp_solves,
-                solve_time,
-                lp_solve_time,
-            } = stats;
-            Self::print_parameter(&mut buffer, "n-cores", n_cores)?;
-            Self::print_parameter(&mut buffer, "n-abstract-cores", n_abstract_cores)?;
-            Self::print_parameter(&mut buffer, "n-seeded", n_seeded)?;
-            Self::print_parameter(&mut buffer, "n-learned-units", n_learned_units)?;
-            Self::print_parameter(&mut buffer, "n-solve-calls", n_solves)?;
-            Self::print_parameter(&mut buffer, "n-lp-solve-calls", n_lp_solves)?;
-            Self::print_parameter(&mut buffer, "cpu-solve-time", DurPrinter::new(solve_time))?;
-            Self::print_parameter(
-                &mut buffer,
-                "lp-cpu-solve-time",
-                DurPrinter::new(lp_solve_time),
-            )?;
-            Self::end_block(&mut buffer)?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn print_non_dom<S: Clone + Eq + fmt::Display>(
-        &self,
-        buffer: &mut Buffer,
-        non_dom: NonDomPoint<S>,
-    ) -> Result<(), IOError> {
-        Self::start_block(buffer)?;
-        buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-        write!(buffer, "Non-dominated Point")?;
-        buffer.reset()?;
-        writeln!(
-            buffer,
-            ": costs: {}; n-sols: {}",
-            VecPrinter::new(non_dom.costs()),
-            non_dom.n_sols()
-        )?;
-        if self.print_solutions {
-            non_dom
-                .into_iter()
-                .try_fold((), |_, sol| writeln!(buffer, "v {sol}"))?
-        }
-        Self::end_block(buffer)?;
-        Ok(())
-    }
-
-    fn print_enc_stats(
-        buffer: &mut Buffer,
-        idx: usize,
-        stats: EncodingStats,
-    ) -> Result<(), IOError> {
-        Self::start_block(buffer)?;
-        buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-        write!(buffer, "Encoding")?;
-        buffer.reset()?;
-        writeln!(buffer, " #{idx}")?;
-        Self::print_parameter(buffer, "n-clauses", stats.n_clauses)?;
-        Self::print_parameter(buffer, "n-vars", stats.n_vars)?;
-        Self::print_parameter(buffer, "offset", stats.offset)?;
-        Self::print_parameter(buffer, "unit-weight", OptVal::new(stats.unit_weight))?;
-        Self::end_block(buffer)?;
-        Ok(())
-    }
-
-    fn print_parameter<V: fmt::Display>(
-        buffer: &mut Buffer,
-        name: &str,
-        val: V,
-    ) -> Result<(), IOError> {
-        buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-        write!(buffer, "{name}")?;
-        buffer.reset()?;
-        writeln!(buffer, ": {val}")?;
-        Ok(())
-    }
-
-    fn start_block(buffer: &mut Buffer) -> Result<(), IOError> {
-        buffer.set_color(ColorSpec::new().set_dimmed(true))?;
-        write!(buffer, ">>>>>")?;
-        buffer.reset()?;
-        writeln!(buffer)?;
-        Ok(())
-    }
-
-    fn end_block(buffer: &mut Buffer) -> Result<(), IOError> {
-        buffer.set_color(ColorSpec::new().set_dimmed(true))?;
-        write!(buffer, "<<<<<")?;
-        buffer.reset()?;
-        writeln!(buffer)?;
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-struct LoggerConfig {
-    log_candidates: bool,
-    log_solutions: bool,
-    log_non_dom: bool,
-    log_oracle_calls: bool,
-    #[cfg(feature = "sol-tightening")]
-    log_heuristic_obj_improvement: bool,
-    log_fence: bool,
-    log_routines: usize,
-    log_bound_points: bool,
-    log_cores: bool,
-    log_inpro: bool,
-    log_hitting_sets: bool,
-    log_seeding_ratio: bool,
-    log_strat_level: bool,
-}
-
-pub struct CliLogger {
-    stdout: BufferWriter,
-    config: LoggerConfig,
-    routine_stack: Vec<(&'static str, ProcessTime)>,
-}
-
-impl WriteSolverLog for CliLogger {
-    fn log_candidate(&self, costs: &[usize], phase: Phase) -> anyhow::Result<()> {
-        if self.config.log_candidates {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "candidate")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": costs: {}; phase: {}; cpu-time: {}",
-                VecPrinter::new(costs),
-                phase,
-                DurPrinter::new(ProcessTime::now().as_duration()),
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_oracle_call(&self, result: SolverResult) -> anyhow::Result<()> {
-        if self.config.log_oracle_calls {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "oracle call")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": result: {}; cpu-time: {}",
-                result,
-                DurPrinter::new(ProcessTime::now().as_duration()),
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_solution(&self) -> anyhow::Result<()> {
-        if self.config.log_solutions {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "solution")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": cpu-time: {}",
-                DurPrinter::new(ProcessTime::now().as_duration()),
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_non_dominated(&self, non_dominated: &NonDomPoint) -> anyhow::Result<()> {
-        if self.config.log_non_dom {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "non-dominated point")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": costs: {}; n-sols: {}; cpu-time: {}",
-                VecPrinter::new(non_dominated.costs()),
-                non_dominated.n_sols(),
-                DurPrinter::new(ProcessTime::now().as_duration()),
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    #[cfg(feature = "sol-tightening")]
-    fn log_heuristic_obj_improvement(
-        &self,
-        obj_idx: usize,
-        apparent_cost: usize,
-        improved_cost: usize,
-    ) -> anyhow::Result<()> {
-        if self.config.log_heuristic_obj_improvement {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "heuristic objective improvement")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": obj-idx: {}; apparent-cost: {}; improved-cost: {}; cpu-time: {}",
-                obj_idx,
-                apparent_cost,
-                improved_cost,
-                DurPrinter::new(ProcessTime::now().as_duration()),
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_fence(&self, fence: &[usize]) -> anyhow::Result<()> {
-        if self.config.log_fence {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "fence update")?;
-            buffer.reset()?;
-            writeln!(buffer, ": {}", VecPrinter::new(fence))?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_routine_start(&mut self, desc: &'static str) -> anyhow::Result<()> {
-        self.routine_stack.push((desc, ProcessTime::now()));
-
-        if self.config.log_routines >= self.routine_stack.len() {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
-            write!(buffer, ">>> routine start")?;
-            buffer.reset()?;
-            writeln!(buffer, ": {desc}")?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_routine_end(&mut self) -> anyhow::Result<()> {
-        let (desc, start) = self.routine_stack.pop().expect("routine stack out of sync");
-
-        if self.config.log_routines > self.routine_stack.len() {
-            let duration = ProcessTime::now().duration_since(start);
-
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Red)))?;
-            write!(buffer, "<<< routine end")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": {}; duration: {}",
-                desc,
-                DurPrinter::new(duration)
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_end_solve(&mut self) -> anyhow::Result<()> {
-        while !self.routine_stack.is_empty() {
-            self.log_routine_end()?;
-        }
-        Ok(())
-    }
-
-    fn log_ideal(&self, ideal: &[usize]) -> anyhow::Result<()> {
-        if self.config.log_bound_points {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-            write!(buffer, "ideal point")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": costs: {}; cpu-time: {}",
-                VecPrinter::new(ideal),
-                DurPrinter::new(ProcessTime::now().as_duration()),
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_nadir(&self, nadir: &[usize]) -> anyhow::Result<()> {
-        if self.config.log_bound_points {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-            write!(buffer, "nadir point")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": costs: {}; cpu-time: {}",
-                VecPrinter::new(nadir),
-                DurPrinter::new(ProcessTime::now().as_duration()),
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_core(&self, weight: usize, len: usize, red_len: usize) -> anyhow::Result<()> {
-        if self.config.log_cores {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "extracted core")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": weight: {weight}; original-len: {len}; reduced-len: {red_len}",
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_core_exhaustion(&self, exhausted: usize, weight: usize) -> anyhow::Result<()> {
-        if self.config.log_cores {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "exhausted core")?;
-            buffer.reset()?;
-            writeln!(buffer, ": exhausted: {exhausted}; weight: {weight}")?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_ihs_core(&self, len: usize, red_len: usize, abstr: bool) -> anyhow::Result<()> {
-        if self.config.log_cores {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "extracted core")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": original-len: {len}; reduced-len: {red_len}; abstract: {abstr}",
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_inprocessing(
-        &self,
-        cls_before_after: (usize, usize),
-        fixed_lits: usize,
-        obj_range_before_after: Vec<(usize, usize)>,
-    ) -> anyhow::Result<()> {
-        if self.config.log_inpro {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-            write!(buffer, "inprocessing")?;
-            buffer.reset()?;
-            writeln!(
-                buffer,
-                ": cls_before: {}; cls_after: {}; fixed_lits: {}",
-                cls_before_after.0, cls_before_after.1, fixed_lits
-            )?;
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-            write!(buffer, "inprocessing")?;
-            buffer.reset()?;
-            let ranges_before: Vec<_> = obj_range_before_after
-                .iter()
-                .map(|(before, _)| *before)
-                .collect();
-            let ranges_after: Vec<_> = obj_range_before_after
-                .iter()
-                .map(|(_, after)| *after)
-                .collect();
-            writeln!(
-                buffer,
-                ": obj_ranges_before: {}; obj_ranges_after: {}",
-                VecPrinter::new(&ranges_before),
-                VecPrinter::new(&ranges_after)
-            )?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_message(&self, msg: &str) -> anyhow::Result<()> {
-        let mut buffer = self.stdout.buffer();
-        writeln!(buffer, "{msg}")?;
-        self.stdout.print(&buffer)?;
-        Ok(())
-    }
-
-    fn log_hitting_set(&self, hitting_set_val: f64, optimal: bool) -> anyhow::Result<()> {
-        if self.config.log_hitting_sets {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Magenta)))?;
-            write!(buffer, "extracted hitting set")?;
-            buffer.reset()?;
-            write!(buffer, ": val {} ", hitting_set_val.round())?;
-            if optimal {
-                write!(buffer, "(optimal)")?;
-            }
-            writeln!(buffer)?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_seeding_ratio(&self, ratio: f64) -> anyhow::Result<()> {
-        if self.config.log_seeding_ratio {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-            write!(buffer, "seeding ratio")?;
-            buffer.reset()?;
-            writeln!(buffer, ": {ratio}")?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-
-    fn log_strat_level(&self, strat_level: usize, reason: &str) -> anyhow::Result<()> {
-        if self.config.log_strat_level {
-            let mut buffer = self.stdout.buffer();
-            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
-            write!(buffer, "stratification level")?;
-            buffer.reset()?;
-            writeln!(buffer, ": {strat_level} ({reason})")?;
-            self.stdout.print(&buffer)?;
-        }
-        Ok(())
-    }
-}
-
-struct OptVal<T> {
-    val: Option<T>,
-}
-
-impl<T> OptVal<T> {
-    fn new(val: Option<T>) -> Self {
-        OptVal { val }
-    }
-}
-
-impl<T: fmt::Display> fmt::Display for OptVal<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.val {
-            Some(t) => fmt::Display::fmt(&t, f),
-            None => write!(f, "none"),
-        }
-    }
-}
-
-struct VecPrinter<'a, C>
-where
-    C: 'a,
-{
-    costs: &'a [C],
-}
-
-impl<'a, C> VecPrinter<'a, C> {
-    fn new(costs: &'a [C]) -> Self {
-        VecPrinter { costs }
-    }
-}
-
-impl<'a, C: fmt::Display> fmt::Display for VecPrinter<'a, C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(")?;
-        self.costs.iter().try_fold(true, |first, cost| {
-            if !first {
-                write!(f, ", ")?
-            };
-            write!(f, "{cost}")?;
-            Ok::<bool, fmt::Error>(false)
-        })?;
-        write!(f, ")")
-    }
-}
-
-struct DurPrinter {
-    dur: Duration,
-}
-
-impl DurPrinter {
-    fn new(dur: Duration) -> Self {
-        Self { dur }
-    }
-}
-
-impl fmt::Display for DurPrinter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.dur)
-    }
-}
-
-struct EnumPrinter {
-    enumeration: EnumOptions,
-}
-
-impl EnumPrinter {
-    fn new(enumeration: EnumOptions) -> Self {
-        Self { enumeration }
-    }
-}
-
-impl fmt::Display for EnumPrinter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.enumeration {
-            EnumOptions::NoEnum => write!(f, "none"),
-            EnumOptions::Solutions(None) => write!(f, "all solutions"),
-            EnumOptions::PMCSs(None) => write!(f, "all Pareto-MCSs"),
-            EnumOptions::Solutions(Some(limit)) => write!(f, "{limit} solutions"),
-            EnumOptions::PMCSs(Some(limit)) => write!(f, "{limit} Pareto-MCSs"),
         }
     }
 }

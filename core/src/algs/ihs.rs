@@ -19,6 +19,7 @@ use rustsat::{
     types::{Assignment, Cl, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
 };
 use scuttle_proc::{KernelFunctions, oracle_bounds};
+use tracing::{Level, debug, info, instrument, span, trace};
 
 use crate::{
     CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
@@ -62,6 +63,7 @@ where
     Hss: HittingSetSolver + 'slv,
     BCG: Fn(Assignment) -> Clause,
 {
+    #[instrument(name = "pareto-ihs", skip(self), fields(limits = %limits))]
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
         self.kernel.start_solving(limits);
         let res = self.alg_main();
@@ -172,12 +174,14 @@ where
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64))
                     .collect();
+                info!(target: "objective_mutlipliers", ?objective_multipliers);
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::Random => {
                 objective_multipliers = (0..kernel.stats.n_objs)
                     .map(|_| f64::from(kernel.rng.i8(1..=10)))
                     .collect();
+                info!(target: "objective_mutlipliers", ?objective_multipliers);
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::NormalizedRandom => {
@@ -186,6 +190,7 @@ where
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64) * f64::from(kernel.rng.i8(1..=10)))
                     .collect();
+                info!(target: "objective_mutlipliers", ?objective_multipliers);
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::Lexicographic => {
@@ -198,6 +203,7 @@ where
                     mult += 1;
                 }
                 objective_multipliers.reverse();
+                info!(target: "objective_mutlipliers", ?objective_multipliers);
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
         }
@@ -239,12 +245,7 @@ where
 {
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> MaybeTerminatedError {
-        self.kernel.log_routine_start("ihs")?;
-        if let Some(logger) = &mut self.kernel.logger {
-            logger.log_seeding_ratio(
-                self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64,
-            )?;
-        }
+        info!(target: "seeding_ratio", ratio = self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64);
         if !matches!(
             self.cb_data,
             CbData::Ignore | CbData::TranslateReform { .. }
@@ -253,7 +254,6 @@ where
         {
             let mut hss = self.hitting_set_solver.take().unwrap();
             let ret = self.main_fully_seeded(&mut hss);
-            self.kernel.log_routine_end()?;
             self.hitting_set_solver = Some(hss);
             return ret;
         }
@@ -263,7 +263,6 @@ where
         let mut hss = self.hitting_set_solver.take().unwrap();
         let ret = self.alg_main_int(&mut hss);
         self.hitting_set_solver = Some(hss);
-        self.kernel.log_routine_end()?;
         ret
     }
 
@@ -317,6 +316,7 @@ where
         }
     }
 
+    #[instrument(name = "precompute-lexicographic", level = "debug", skip_all)]
     fn precompute_lexicographic(&mut self, hss: &mut Hss) -> MaybeTerminatedError<bool> {
         if self.opts.precompute_lexicographic == 0 {
             return Done(true);
@@ -369,10 +369,7 @@ where
             if self.is_dominated_by_pareto_front(&costs) {
                 fails_in_a_row += 1;
                 if fails_in_a_row >= self.opts.max_failed_precompute_lex {
-                    if let Some(logger) = &mut self.kernel.logger {
-                        logger.log_message(&format!("breaking early out of lexicogarphic precomputation because of {fails_in_a_row} failures in a row")
-                        )?;
-                    }
+                    debug!(target: "break_precomp_lex", fails_in_a_row);
                     break;
                 }
                 continue;
@@ -404,26 +401,17 @@ where
                 .zip(&self.objective_multipliers)
                 .map(|(&nd, &mult)| nd as f64 * mult)
                 .sum();
-            if let Some(log) = &mut self.kernel.logger {
-                log.log_nadir(&nadir)?;
-                log.log_message(&format!(
-                    "global termination upper bound: {}",
-                    self.nadir_ub
-                ))?;
-            }
+            info!(target: "nadir_point", ?nadir);
+            debug!(target: "nadir_ub", nadir_ub = ?self.nadir_ub);
         }
         self.all_pd_cuts = true;
-        if let Some(logger) = &mut self.kernel.logger {
-            logger.log_message(&format!(
-                "precomputed {} lexicographic optima",
-                self.pareto_front.len()
-            ))?;
-        }
+        info!(target: "precompute_lexicographic", n_precomputed = self.pareto_front.len());
         Done(true)
     }
 
     /// Performs single-objective IHS to completion, returning the optimal solution and its
     /// objective values
+    #[instrument(name = "single-obj-ihs", level = "debug", skip_all)]
     fn single_obj_ihs(
         &mut self,
         hss: &mut Hss,
@@ -434,18 +422,16 @@ where
         loop {
             // reduced cost fixing
             if self.opts.reduced_cost_fixing && self.candidates.head().is_some() {
-                self.kernel
-                    .log_routine_start("solving lp for reduced costs")?;
+                let span = span!(Level::DEBUG, "solving lp for reduced costs").entered();
 
                 let ReducedCostsResult::ReducedCosts { obj_val, rcs } =
                     hss.reduced_costs_callback(self)?
                 else {
-                    self.kernel.log_routine_end()?;
                     hss.unfix_all();
                     return Done(None);
                 };
 
-                self.kernel.log_routine_end()?;
+                span.exit();
 
                 if obj_val.total_cmp(lower_bound) == Ordering::Greater {
                     *lower_bound = obj_val;
@@ -453,9 +439,7 @@ where
                 if self.nadir_ub < *lower_bound {
                     // overall termination based on nadir point
                     hss.unfix_all();
-                    if let Some(logger) = &mut self.kernel.logger {
-                        logger.log_message("terminating by nadir bound")?;
-                    }
+                    info!(target: "termination", "terminating by nadir bound");
                     return Done(None);
                 }
                 let head = self.candidates.head().expect("checked in outer if");
@@ -497,11 +481,12 @@ where
                         .candidates
                         .pop()
                         .expect("just checked with `head` right before");
+                    debug!(target: "ihs_termination", reason = "infeasibility with RCF");
                     return Done(Some(head));
                 }
             }
 
-            self.kernel.log_routine_start("extract hitting set")?;
+            let span = span!(Level::DEBUG, "extract hitting set").entered();
 
             let hitting_set_answer: IncompleteSolveResult =
                 if let Some(head) = self.candidates.head() {
@@ -523,12 +508,12 @@ where
                     (cost, hitting_set, true)
                 }
                 IncompleteSolveResult::Infeasible => {
-                    self.kernel.log_routine_end()?;
                     hss.unfix_all();
                     // NOTE: infeasibility might be due to reduced costs, in which case the upper
                     // bound solution needs to be returned
                     if let Some(head) = self.candidates.pop() {
                         assert!(self.opts.reduced_cost_fixing);
+                        debug!(target: "ihs_termination", reason = "infeasibility with RCF");
                         return Done(Some(head));
                     }
                     return Done(None);
@@ -536,10 +521,8 @@ where
                 IncompleteSolveResult::Feasible(cost, hitting_set) => (cost, hitting_set, false),
             };
 
-            self.kernel.log_routine_end()?;
-            if let Some(logger) = &mut self.kernel.logger {
-                logger.log_hitting_set(cost, is_optimal)?;
-            }
+            span.exit();
+            debug!(target: "hitting_set", cost, is_optimal);
 
             let mut assumps = hitting_set.clone();
 
@@ -576,14 +559,13 @@ where
             if self.nadir_ub < *lower_bound {
                 // overall termination based on nadir point
                 hss.unfix_all();
-                if let Some(logger) = &mut self.kernel.logger {
-                    logger.log_message("terminating by nadir bound")?;
-                }
+                info!(target: "termination", "terminating by nadir bound");
                 return Done(None);
             }
             if let Some(head) = self.candidates.head()
                 && head.ord() <= *lower_bound
             {
+                debug!(target: "ihs_termination", reason = "bounds", upper_bound = head.ord(), lower_bound = *lower_bound);
                 let res = self
                     .candidates
                     .pop()
@@ -598,6 +580,7 @@ where
                         // found pareto-optimal solution
                         self.candidates.remove_dominated(&costs);
                         hss.unfix_all();
+                        debug!(target: "ihs_termination", reason = "optimal hitting set extended");
                         return Done(Some((costs, solution)));
                     } else {
                         let old_head_cost = self
@@ -613,11 +596,13 @@ where
                         debug_assert!(
                             !self.all_pd_cuts || !self.is_dominated_by_pareto_front(&costs)
                         );
+                        info!(target: "candidate", ?costs, phase = "hitting-set");
                         if self.opts.upper_bounds {
                             self.candidates
                                 .insert(solution, costs, &self.objective_multipliers);
                         }
                         if new_target >= old_head_cost {
+                            trace!("setting `want_optimal`");
                             want_optimal = true;
                         }
                     }
@@ -628,7 +613,6 @@ where
                     loop {
                         let core = self.kernel.oracle.core()?;
                         if core.is_empty() {
-                            self.kernel.log_routine_end()?;
                             hss.unfix_all();
                             return Done(None);
                         }
@@ -761,9 +745,7 @@ where
                             hss.add_core(core.as_ref(), CoreOrigin::Normal);
                         }
                         self.weed_out_assumptions(&core, &mut assumps, &mut wce_obj)?;
-                        if let Some(log) = &mut self.kernel.logger {
-                            log.log_ihs_core(orig_len, core.len(), false)?;
-                        }
+                        debug!(target: "core", orig_len, min_len = core.len(), r#abstract = false);
                         if assumps.is_empty() {
                             break;
                         }
@@ -774,6 +756,7 @@ where
                                 if self.is_dominated_by_pareto_front(&costs) {
                                     break;
                                 }
+                                info!(target: "candidate", ?costs, phase = "wce");
                                 if self.opts.upper_bounds {
                                     self.candidates.insert(
                                         solution,
@@ -879,6 +862,7 @@ where
                             if self.is_dominated_by_pareto_front(&costs) {
                                 break;
                             }
+                            info!(target: "candidate", ?costs, phase = "abstract-cores");
                             if self.opts.upper_bounds {
                                 self.candidates.insert(
                                     solution,
@@ -987,9 +971,7 @@ where
                         hss.add_core(core.as_ref(), CoreOrigin::Abstract);
                     }
                     self.weed_out_assumptions(&core, &mut assumps, &mut joint_objective)?;
-                    if let Some(log) = &mut self.kernel.logger {
-                        log.log_ihs_core(orig_len, core.len(), true)?;
-                    }
+                    debug!(target: "core", orig_len, min_len = core.len(), r#abstract = true);
                     if assumps.is_empty() {
                         break;
                     }
@@ -1018,9 +1000,10 @@ where
             (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
                 < f64::EPSILON
         );
-        self.kernel.log_routine_start("ihs (fully seeded)")?;
+        info!("fully seeded IHS");
 
         if self.opts.fully_seeded_precompute_lex && self.opts.precompute_lexicographic > 0 {
+            let span = span!(Level::DEBUG, "precompute-lexicographic").entered();
             let obj_mult = self.objective_multipliers.clone();
             let mut fails_in_a_row = 0;
             for idx_perm in DiversePermIter::new(
@@ -1040,28 +1023,23 @@ where
                 }
                 hss.change_multipliers(&self.objective_multipliers);
                 // find optimum
-                self.kernel.log_routine_start("extract hitting set")?;
+                let span = span!(Level::DEBUG, "extract hitting set").entered();
                 let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;
                 self.kernel.check_termination()?;
                 let (_, hitting_set) = match hitting_set_answer {
                     CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
                     CompleteSolveResult::Infeasible => {
-                        self.kernel.log_routine_end()?;
-                        self.kernel.log_routine_end()?;
                         return Done(());
                     }
                 };
-                self.kernel.log_routine_end()?;
+                span.exit();
                 self.kernel.check_termination()?;
                 let (costs, solution) =
                     self.hitting_set_to_solution_and_internal_costs(hitting_set);
                 if self.is_dominated_by_pareto_front(&costs) {
                     fails_in_a_row += 1;
                     if fails_in_a_row >= self.opts.max_failed_precompute_lex {
-                        if let Some(logger) = &mut self.kernel.logger {
-                            logger.log_message(&format!("breaking early out of lexicogarphic precomputation because of {fails_in_a_row} failures in a row")
-                        )?;
-                        }
+                        debug!(target: "break_precomp_lex", fails_in_a_row);
                         break;
                     }
                     continue;
@@ -1080,30 +1058,22 @@ where
             for non_dom in self.pareto_front.iter() {
                 hss.add_pd_cut(non_dom.internal_costs());
             }
-            if let Some(logger) = &mut self.kernel.logger {
-                logger.log_message(&format!(
-                    "precomputed {} lexicographic optima",
-                    self.pareto_front.len()
-                ))?;
-            }
+            info!(target: "precompute_lexicographic", n_precomputed = self.pareto_front.len());
+            span.exit();
         }
 
         loop {
-            self.kernel.log_routine_start("extract hitting set")?;
+            let span = span!(Level::DEBUG, "extract hitting set").entered();
             let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;
             self.kernel.check_termination()?;
             let (cost, hitting_set) = match hitting_set_answer {
                 CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
                 CompleteSolveResult::Infeasible => {
-                    self.kernel.log_routine_end()?;
-                    self.kernel.log_routine_end()?;
                     return Done(());
                 }
             };
-            self.kernel.log_routine_end()?;
-            if let Some(logger) = &mut self.kernel.logger {
-                logger.log_hitting_set(cost, true)?;
-            }
+            span.exit();
+            debug!(target: "hitting_set", cost, is_optimal = true);
             self.kernel.check_termination()?;
             let (costs, solution) = self.hitting_set_to_solution_and_internal_costs(hitting_set);
             // store solution
@@ -1129,6 +1099,7 @@ where
                     SolverResult::Sat => {
                         let (costs, solution) =
                             self.kernel.get_solution_and_internal_costs(false)?;
+                        info!(target: "candidate", ?costs, phase = "seeding");
                         if self.opts.upper_bounds {
                             self.candidates
                                 .insert(solution, costs, &self.objective_multipliers);
@@ -1327,13 +1298,8 @@ where
                 .zip(&self.objective_multipliers)
                 .map(|(&nd, &mult)| nd as f64 * mult)
                 .sum();
-            if let Some(log) = &mut self.kernel.logger {
-                log.log_nadir(&nadir)?;
-                log.log_message(&format!(
-                    "global termination upper bound: {}",
-                    self.nadir_ub
-                ))?;
-            }
+            info!(target: "nadir_point", ?nadir);
+            debug!(target: "nadir_ub", nadir_ub = ?self.nadir_ub);
         }
         Done(true)
     }
@@ -1347,6 +1313,7 @@ where
 {
     type Options = IhsCbOptions;
 
+    #[instrument(name = "core-boost", skip(self), fields(opts = %opts))]
     fn core_boost(&mut self, opts: Self::Options) -> MaybeTerminatedError<bool> {
         ensure!(
             self.kernel.stats.n_solve_calls == 0,
@@ -1362,6 +1329,7 @@ where
         let Some(cb_res) = self.kernel.core_boost_with_callbacks(
             |kernel, _, sol| {
                 let costs = kernel.compute_costs(&sol);
+                info!(target: "candidate", ?costs, phase = "core-boosting");
                 if self.opts.upper_bounds {
                     self.candidates
                         .insert(sol, costs, &self.objective_multipliers);
@@ -1374,7 +1342,8 @@ where
         };
         self.kernel.check_termination()?;
 
-        self.kernel.log_routine_start("cb post treatment")?;
+        let span = span!(Level::DEBUG, "cb post treatment");
+        let _enter = span.enter();
 
         if opts.treatment.reform() {
             self.objective_lits.clear();
@@ -1401,6 +1370,7 @@ where
         {
             if let Some(solution) = solution {
                 let costs = self.kernel.compute_costs(&solution);
+                info!(target: "candidate", ?costs, phase = "core-boosting");
                 if self.opts.upper_bounds {
                     self.candidates
                         .insert(solution, costs, &self.objective_multipliers);
@@ -1528,6 +1498,7 @@ where
                                 translated[lit.vidx()] = true;
                             }
                         }
+
                         // NOTE: all variables in the core were introduced in the HSS in the above
                         // loop, even if they are not from the original objective
                         hss.add_card_core(&lits, bound, CoreOrigin::CoreBoosting);
@@ -1616,13 +1587,8 @@ where
                 .zip(&self.objective_multipliers)
                 .map(|(&nd, &mult)| nd as f64 * mult)
                 .sum();
-            if let Some(log) = &mut self.kernel.logger {
-                log.log_nadir(&nadir)?;
-                log.log_message(&format!(
-                    "global termination upper bound: {}",
-                    self.nadir_ub
-                ))?;
-            }
+            info!(target: "nadir_point", ?nadir);
+            debug!(target: "nadir_ub", nadir_ub = ?self.nadir_ub);
         }
 
         match opts.treatment {
@@ -1653,7 +1619,6 @@ where
             }
         }
 
-        self.kernel.log_routine_end()?;
         self.kernel.check_termination()?;
         self.hitting_set_solver = Some(hss);
 

@@ -28,6 +28,7 @@ use rustsat::{
     types::{Assignment, Clause, Lit, Var},
 };
 use scuttle_proc::{KernelFunctions, oracle_bounds};
+use tracing::{Level, instrument, span};
 
 use crate::{
     EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
@@ -84,6 +85,7 @@ where
     BCG: Fn(Assignment) -> Clause,
     ProofW: io::Write + 'static,
 {
+    #[instrument(name = "bioptsat", skip(self), fields(limits = %limits))]
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
         self.kernel.start_solving(limits);
         self.alg_main()
@@ -288,6 +290,7 @@ where
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     OInit: Initialize<rustsat_cadical::CaDiCaL<'learn, 'term>>,
 {
+    #[instrument(name = "core-boost", skip(self), fields(opts = %opts))]
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
         ensure!(
             self.kernel.stats.n_solve_calls == 0,
@@ -313,7 +316,8 @@ where
                 return Done(true);
             }
         };
-        self.kernel.log_routine_start("merge encodings")?;
+        let span = span!(Level::DEBUG, "merge-encodings");
+        let _enter = span.enter();
         for (
             oidx,
             CbResult {
@@ -357,7 +361,6 @@ where
             }
             self.kernel.check_termination()?;
         }
-        self.kernel.log_routine_end()?;
         Done(true)
     }
 }
@@ -391,8 +394,6 @@ where
         Lookup: Fn(usize) -> Option<usize>,
         Col: Extend<NonDomPoint>,
     {
-        self.log_routine_start("bioptsat")?;
-
         debug_assert_eq!(encodings.len(), 2);
 
         let mut inc_lb = inc_lb.unwrap_or(encodings[0].offset());
@@ -424,7 +425,6 @@ where
             )?
             else {
                 // no solutions
-                self.log_routine_end()?;
                 return Done(());
             };
             (inc_cost, sol) = (new_inc_cost, new_sol);
@@ -795,7 +795,6 @@ where
                 _ => panic!(),
             };
         }
-        self.log_routine_end()?;
         Done(())
     }
 }

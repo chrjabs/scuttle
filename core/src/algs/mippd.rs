@@ -5,12 +5,12 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use anyhow::Context;
 use hitting_sets::{BuildSolver, CompleteSolveResult, HittingSetSolver};
 use rustsat::{
     solvers::SolverStats,
     types::{Assignment, Lit, TernaryVal},
 };
+use tracing::{debug, info, instrument, span, Level};
 
 use crate::{
     EncodingStats, Limits, MaybeTerminated,
@@ -26,7 +26,6 @@ pub struct MipPd<Hss> {
     pareto_front: ParetoFront,
     stats: crate::Stats,
     lims: Limits,
-    logger: Option<Box<dyn crate::WriteSolverLog>>,
     term_flag: Arc<AtomicBool>,
     /// The objectives
     objs: Vec<Objective>,
@@ -39,6 +38,7 @@ impl<Hss> super::Solve for MipPd<Hss>
 where
     Hss: HittingSetSolver,
 {
+    #[instrument(name = "mip-pd", skip(self), fields(limits = %limits))]
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
         self.stats.n_solve_calls += 1;
         self.lims = limits;
@@ -76,14 +76,6 @@ impl<Hss> super::KernelFunctions for MipPd<Hss> {
 
     fn stats(&self) -> crate::Stats {
         self.stats
-    }
-
-    fn attach_logger<L: crate::WriteSolverLog + 'static>(&mut self, logger: L) {
-        self.logger = Some(Box::new(logger));
-    }
-
-    fn detach_logger(&mut self) -> Option<Box<dyn crate::WriteSolverLog>> {
-        self.logger.take()
     }
 
     fn interrupter(&mut self) -> super::Interrupter {
@@ -131,11 +123,13 @@ where
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64))
                     .collect();
+                info!(target: "objective_mutlipliers", ?objective_multipliers);
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::Random => {
                 objective_multipliers =
                     (0..objs.len()).map(|_| f64::from(rng.i8(1..=10))).collect();
+                info!(target: "objective_mutlipliers", ?objective_multipliers);
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::NormalizedRandom => {
@@ -144,6 +138,7 @@ where
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64) * f64::from(rng.i8(1..=10)))
                     .collect();
+                info!(target: "objective_mutlipliers", ?objective_multipliers);
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::Lexicographic => {
@@ -156,6 +151,7 @@ where
                     mult += 1;
                 }
                 objective_multipliers.reverse();
+                info!(target: "objective_mutlipliers", ?objective_multipliers);
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
         }
@@ -180,7 +176,6 @@ where
             pareto_front: Default::default(),
             stats,
             lims: Limits::none(),
-            logger: None,
             term_flag: Arc::new(AtomicBool::new(false)),
             objs,
             objective_multipliers,
@@ -201,10 +196,7 @@ where
     /// Logs a solution. Can return a termination if the solution limit is reached.
     fn log_solution(&mut self) -> MaybeTerminatedError {
         self.stats.n_solutions += 1;
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger.log_solution().context("logger failed")?;
-        }
+        debug!(target: "solution", "found a new optimal solution");
         // Update limit and check termination
         if let Some(solutions) = &mut self.lims.sols {
             *solutions -= 1;
@@ -218,12 +210,7 @@ where
     /// Logs a non-dominated point. Can return a termination if the non-dominated point limit is reached.
     fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> MaybeTerminatedError {
         self.stats.n_non_dominated += 1;
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger
-                .log_non_dominated(non_dominated)
-                .context("logger failed")?;
-        }
+        info!(target: "non_dominated", costs = ?non_dominated.costs(), n_sols = non_dominated.n_sols());
         // Update limit and check termination
         if let Some(pps) = &mut self.lims.pps {
             *pps -= 1;
@@ -267,10 +254,8 @@ where
 
     /// The solving algorithm main routine.
     fn alg_main(&mut self, hss: &mut Hss) -> MaybeTerminatedError {
-        if let Some(logger) = &mut self.logger {
-            logger.log_routine_start("mip-pd")?;
-        }
         if self.opts.precompute_lexicographic > 0 {
+            let span = span!(Level::DEBUG, "precompute-lexicographic").entered();
             let obj_mult = self.objective_multipliers.clone();
             for idx_perm in DiversePermIter::new(
                 0..self.objs.len(),
@@ -289,24 +274,16 @@ where
                 }
                 hss.change_multipliers(&self.objective_multipliers);
                 // find optimum
-                if let Some(logger) = &mut self.logger {
-                    logger.log_routine_start("MIP find solution")?;
-                }
+                let span = span!(Level::DEBUG, "MIP find solution").entered();
                 let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;
                 self.check_termination()?;
                 let (_, hitting_set) = match hitting_set_answer {
                     CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
                     CompleteSolveResult::Infeasible => {
-                        if let Some(logger) = &mut self.logger {
-                            logger.log_routine_end()?;
-                            logger.log_routine_end()?;
-                        }
                         return Done(());
                     }
                 };
-                if let Some(logger) = &mut self.logger {
-                    logger.log_routine_end()?;
-                }
+                span.exit();
                 self.check_termination()?;
                 let (costs, solution) =
                     self.hitting_set_to_solution_and_internal_costs(hitting_set);
@@ -321,32 +298,20 @@ where
             for non_dom in self.pareto_front.iter() {
                 hss.add_pd_cut(non_dom.internal_costs());
             }
-            if let Some(logger) = &mut self.logger {
-                logger.log_message(&format!(
-                    "precomputed {} lexicographic optima",
-                    self.pareto_front.len()
-                ))?;
-            }
+            info!(target: "precompute_lexicographic", n_precomputed = self.pareto_front.len());
+            span.exit();
         }
         loop {
-            if let Some(logger) = &mut self.logger {
-                logger.log_routine_start("MIP find solution")?;
-            }
+            let span = span!(Level::DEBUG, "MIP find solution").entered();
             let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;
             let (cost, hitting_set) = match hitting_set_answer {
                 CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
                 CompleteSolveResult::Infeasible => {
-                    if let Some(logger) = &mut self.logger {
-                        logger.log_routine_end()?;
-                        logger.log_routine_end()?;
-                    }
                     return Done(());
                 }
             };
-            if let Some(logger) = &mut self.logger {
-                logger.log_routine_end()?;
-                logger.log_hitting_set(cost, true)?;
-            }
+            span.exit();
+            debug!(target: "hitting_set", cost, is_optimal = true);
             self.check_termination()?;
             let (costs, solution) = self.hitting_set_to_solution_and_internal_costs(hitting_set);
             // introduce PD cut in the hitting set solver

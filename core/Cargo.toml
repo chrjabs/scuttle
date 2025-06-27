@@ -20,6 +20,7 @@ rustsat.workspace = true
 rustsat-cadical.workspace = true
 scuttle-proc.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 libtest-mimic.workspace = true

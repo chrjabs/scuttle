@@ -225,9 +225,21 @@ fn main() {
             },
         ),
         (
+            "cb-translate-katsirelos",
+            IhsCbOptions {
+                treatment: IhsCbTreatment::TranslateKatsirelos,
+            },
+        ),
+        (
             "cb-translate-reform",
             IhsCbOptions {
                 treatment: IhsCbTreatment::TranslateReform,
+            },
+        ),
+        (
+            "cb-translate-katsirelos-reform",
+            IhsCbOptions {
+                treatment: IhsCbTreatment::TranslateKatsirelosReform,
             },
         ),
         (

@@ -91,14 +91,6 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
                 #kernel.stats
             }
 
-            fn attach_logger<L: crate::WriteSolverLog + 'static>(&mut self, logger: L) {
-                #kernel.attach_logger(logger)
-            }
-
-            fn detach_logger(&mut self) -> Option<Box<dyn crate::WriteSolverLog>> {
-                #kernel.detach_logger()
-            }
-
             fn interrupter(&mut self) -> crate::algs::Interrupter {
                 #kernel.interrupter()
             }

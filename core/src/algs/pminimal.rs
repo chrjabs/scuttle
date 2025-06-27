@@ -34,6 +34,7 @@ use rustsat::{
     types::{Assignment, Clause, Lit, Var},
 };
 use scuttle_proc::{KernelFunctions, oracle_bounds};
+use tracing::{Level, instrument, span};
 
 use crate::{
     EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
@@ -92,6 +93,7 @@ where
     BCG: Fn(Assignment) -> Clause,
     ProofW: io::Write + 'static,
 {
+    #[instrument(name = "p-minimal", skip(self), fields(limits = %limits))]
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
         self.kernel.start_solving(limits);
         self.alg_main()
@@ -266,7 +268,6 @@ where
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> MaybeTerminatedError {
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
-        self.kernel.log_routine_start("p-minimal")?;
         loop {
             let (costs, solution) = if let Some((costs, sol)) = self.starting_points.pop() {
                 (costs, sol)
@@ -274,7 +275,6 @@ where
                 // Find minimization starting point
                 let res = self.kernel.solve()?;
                 if SolverResult::Unsat == res {
-                    self.kernel.log_routine_end()?;
                     return Done(());
                 }
                 self.kernel.check_termination()?;
@@ -360,6 +360,7 @@ where
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     OInit: Initialize<rustsat_cadical::CaDiCaL<'learn, 'term>>,
 {
+    #[instrument(name = "core-boost", skip(self), fields(opts = %opts))]
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
         ensure!(
             self.kernel.stats.n_solve_calls == 0,
@@ -383,7 +384,8 @@ where
                 return Done(true);
             }
         };
-        self.kernel.log_routine_start("merge encodings")?;
+        let span = span!(Level::DEBUG, "merge-encodings");
+        let _enter = span.enter();
         let obj_mults = vec![1.; self.kernel.stats.n_objs];
         for (
             oidx,
@@ -427,7 +429,6 @@ where
 
             self.kernel.check_termination()?;
         }
-        self.kernel.log_routine_end()?;
         Done(true)
     }
 }
@@ -438,6 +439,7 @@ where
     ProofW: io::Write + 'static,
 {
     /// Executes P-minimization from a cost and solution starting point
+    #[instrument(level = "debug", name = "p-minimization", skip_all)]
     pub fn p_minimization(
         &mut self,
         mut costs: Vec<usize>,
@@ -450,7 +452,6 @@ where
         Option<(Lit, Option<(AbsConstraintId, Vec<AbsConstraintId>)>)>,
     )> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
-        self.log_routine_start("p minimization")?;
         let mut block_switch: Option<(Lit, Option<(AbsConstraintId, Vec<AbsConstraintId>)>)> = None;
         let mut assumps = Vec::from(base_assumps);
         #[cfg(feature = "coarse-convergence")]
@@ -571,7 +572,6 @@ where
                     coarse = false;
                     continue;
                 }
-                self.log_routine_end()?;
                 // Termination criteria, return last solution and costs
                 return Done((costs, solution, block_switch));
             }

@@ -13,7 +13,6 @@ use std::{
 #[cfg(feature = "interrupt-oracle")]
 use std::sync::Mutex;
 
-use anyhow::Context;
 use cadical_veripb_tracer::CadicalCertCollector;
 use rustsat::{
     encodings::{card::Totalizer, pb::GeneralizedTotalizer},
@@ -27,11 +26,12 @@ use scuttle_proc::oracle_bounds;
 
 #[cfg(feature = "sol-tightening")]
 use maxpre::PreproClauses;
+use tracing::{debug, info, instrument};
 
 use crate::{
     EncodingStats, KernelOptions, Limits, MaybeTerminated,
     MaybeTerminatedError::{self, Done, Error, Terminated},
-    Phase, Stats, Termination, WriteSolverLog,
+    Phase, Stats, Termination,
     options::{CoreBoostingOptions, EnumOptions},
     types::{Instance, NonDomPoint, ObjEncoding, Objective, ParetoFront, VarManager},
 };
@@ -142,10 +142,6 @@ pub trait KernelFunctions {
     fn pareto_front(&self) -> ParetoFront;
     /// Gets tracked statistics from the solver
     fn stats(&self) -> Stats;
-    /// Attaches a logger to the solver
-    fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L);
-    /// Detaches a logger from the solver
-    fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>>;
     /// Gets an iterrupter to the solver
     fn interrupter(&mut self) -> Interrupter;
 }
@@ -211,8 +207,6 @@ where
     /// An optional inprocessor that has been run at some stage
     #[cfg(feature = "maxpre")]
     inpro: Option<maxpre::MaxPre>,
-    /// Logger to log with
-    logger: Option<Box<dyn WriteSolverLog>>,
     /// Termination flag
     term_flag: Arc<AtomicBool>,
     /// The oracle interrupter
@@ -327,7 +321,6 @@ where
             lims: Limits::none(),
             #[cfg(feature = "maxpre")]
             inpro: None,
-            logger: None,
             term_flag: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "interrupt-oracle")]
             oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
@@ -345,14 +338,6 @@ where
     fn start_solving(&mut self, limits: Limits) {
         self.stats.n_solve_calls += 1;
         self.lims = limits;
-    }
-
-    fn attach_logger<L: WriteSolverLog + 'static>(&mut self, logger: L) {
-        self.logger = Some(Box::new(logger));
-    }
-
-    fn detach_logger(&mut self) -> Option<Box<dyn WriteSolverLog>> {
-        self.logger.take()
     }
 
     /// Converts an internal cost vector to an external one. Internal cost is
@@ -414,12 +399,7 @@ where
     fn log_candidate(&mut self, costs: &[usize], phase: Phase) -> MaybeTerminatedError {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         self.stats.n_candidates += 1;
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger
-                .log_candidate(costs, phase)
-                .context("logger failed")?;
-        }
+        info!(target: "candidate", ?costs, %phase);
         // Update limit and check termination
         if let Some(candidates) = &mut self.lims.candidates {
             *candidates -= 1;
@@ -433,10 +413,7 @@ where
     /// Logs an oracle call. Can return a termination if the oracle call limit is reached.
     fn log_oracle_call(&mut self, result: SolverResult) -> MaybeTerminatedError {
         self.stats.n_oracle_calls += 1;
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger.log_oracle_call(result).context("logger failed")?;
-        }
+        debug!(target: "oracle_call", %result);
         // Update limit and check termination
         if let Some(oracle_calls) = &mut self.lims.oracle_calls {
             *oracle_calls -= 1;
@@ -450,10 +427,7 @@ where
     /// Logs a solution. Can return a termination if the solution limit is reached.
     fn log_solution(&mut self) -> MaybeTerminatedError {
         self.stats.n_solutions += 1;
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger.log_solution().context("logger failed")?;
-        }
+        debug!(target: "solution", "found a new optimal solution");
         // Update limit and check termination
         if let Some(solutions) = &mut self.lims.sols {
             *solutions -= 1;
@@ -467,12 +441,7 @@ where
     /// Logs a non-dominated point. Can return a termination if the non-dominated point limit is reached.
     fn log_non_dominated(&mut self, non_dominated: &NonDomPoint) -> MaybeTerminatedError {
         self.stats.n_non_dominated += 1;
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger
-                .log_non_dominated(non_dominated)
-                .context("logger failed")?;
-        }
+        info!(target: "non_dominated", costs = ?non_dominated.costs(), n_sols = non_dominated.n_sols());
         // Update limit and check termination
         if let Some(pps) = &mut self.lims.pps {
             *pps -= 1;
@@ -481,41 +450,6 @@ where
             }
         }
         Done(())
-    }
-
-    #[cfg(feature = "sol-tightening")]
-    /// Logs a heuristic objective improvement. Can return a logger error.
-    fn log_heuristic_obj_improvement(
-        &mut self,
-        obj_idx: usize,
-        apparent_cost: usize,
-        improved_cost: usize,
-    ) -> anyhow::Result<()> {
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger
-                .log_heuristic_obj_improvement(obj_idx, apparent_cost, improved_cost)
-                .context("logger failed")?;
-        }
-        Ok(())
-    }
-
-    /// Logs a routine start
-    fn log_routine_start(&mut self, desc: &'static str) -> anyhow::Result<()> {
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger.log_routine_start(desc).context("logger failed")?;
-        }
-        Ok(())
-    }
-
-    /// Logs a routine end
-    fn log_routine_end(&mut self) -> anyhow::Result<()> {
-        // Dispatch to logger
-        if let Some(logger) = &mut self.logger {
-            logger.log_routine_end().context("logger failed")?;
-        }
-        Ok(())
     }
 }
 
@@ -597,7 +531,7 @@ where
             );
         }
         if tightening {
-            self.log_heuristic_obj_improvement(obj_idx, cost + reduction, cost)?;
+            debug!(target: "heuristic_obj_improvement", obj_idx, old_cost = cost + reduction, new_cost = cost);
         }
         Ok(cost)
     }
@@ -703,6 +637,7 @@ where
     /// Yields Pareto-optimal solutions. The given assumptions must only allow
     /// for solutions at the non-dominated point with given cost. If the options
     /// ask for enumeration, will enumerate all solutions at this point.
+    #[instrument(level = "trace", name = "yield-solutions", skip_all)]
     fn yield_solutions<Col: Extend<NonDomPoint>>(
         &mut self,
         costs: Vec<usize>,
@@ -711,7 +646,6 @@ where
         collector: &mut Col,
     ) -> MaybeTerminatedError {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
-        self.log_routine_start("yield solutions")?;
         self.unphase_solution()?;
 
         // Create Pareto point
@@ -756,7 +690,6 @@ where
             } {
                 let pp_term = self.log_non_dominated(&non_dominated);
                 collector.extend([non_dominated]);
-                self.log_routine_end()?;
                 return pp_term;
             }
             self.check_termination()?;
@@ -776,7 +709,6 @@ where
                 let pp_term = self.log_non_dominated(&non_dominated);
                 // All solutions enumerated
                 collector.extend([non_dominated]);
-                self.log_routine_end()?;
                 return pp_term;
             }
             self.check_termination()?;
@@ -855,6 +787,7 @@ where
     ProofW: io::Write + 'static,
 {
     /// Performs linear sat-unsat search on a given objective.
+    #[instrument(level = "debug", name = "linsu", skip_all)]
     fn linsu(
         &mut self,
         obj_idx: usize,
@@ -865,8 +798,6 @@ where
     ) -> MaybeTerminatedError<Option<(usize, Assignment, Option<pigeons::AbsConstraintId>)>> {
         use rustsat::solvers::Solve;
 
-        self.log_routine_start("linsu")?;
-
         let mut lb_id = None;
 
         let lower_bound = lower_bound.unwrap_or(0);
@@ -876,7 +807,6 @@ where
         } else {
             let res = self.solve_assumps(base_assumps)?;
             if res == SolverResult::Unsat {
-                self.log_routine_end()?;
                 return Done(None);
             }
             let mut sol = self.oracle.solution(self.var_manager.max_var().unwrap())?;
@@ -913,7 +843,6 @@ where
                     sol = Some(thissol);
                     cost = new_cost;
                     if cost <= lower_bound {
-                        self.log_routine_end()?;
                         return Done(Some((cost, sol.unwrap(), None)));
                     }
                 }
@@ -951,7 +880,6 @@ where
             debug_assert_eq!(res, SolverResult::Sat);
             sol = Some(self.oracle.solution(self.var_manager.max_var().unwrap())?);
         }
-        self.log_routine_end()?;
         Done(Some((cost, sol.unwrap(), lb_id)))
     }
 
@@ -990,10 +918,14 @@ where
 {
     /// Wrapper around the oracle with call logging and interrupt detection.
     /// Assumes that the oracle is unlimited.
+    #[instrument(
+        level = "trace",
+        name = "oracle-call",
+        skip(self),
+        fields(assumps = "[]")
+    )]
     fn solve(&mut self) -> MaybeTerminatedError<SolverResult> {
-        self.log_routine_start("oracle call")?;
         let res = self.oracle.solve()?;
-        self.log_routine_end()?;
         self.check_termination()?;
         self.log_oracle_call(res)?;
         Done(res)
@@ -1001,10 +933,9 @@ where
 
     /// Wrapper around the oracle with call logging and interrupt detection.
     /// Assumes that the oracle is unlimited.
+    #[instrument(level = "trace", name = "oracle-call", skip(self), fields(assumps = ?assumps))]
     fn solve_assumps(&mut self, assumps: &[Lit]) -> MaybeTerminatedError<SolverResult> {
-        self.log_routine_start("oracle call")?;
         let res = self.oracle.solve_assumps(assumps)?;
-        self.log_routine_end()?;
         self.check_termination()?;
         self.log_oracle_call(res)?;
         Done(res)
@@ -1019,12 +950,12 @@ where
     OInit: Initialize<O>,
 {
     /// Resets the oracle and returns an error when the original [`Cnf`] was not stored.
+    #[instrument(level = "trace", name = "reset-oracle", skip(self))]
     fn reset_oracle(&mut self, include_var_manager: bool) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.opts.store_cnf,
             "cannot reset oracle without having stored the CNF"
         );
-        self.log_routine_start("reset-oracle")?;
         self.oracle = OInit::init();
         if include_var_manager {
             self.oracle.reserve(self.var_manager.max_enc_var())?;
@@ -1047,7 +978,6 @@ where
             self.var_manager
                 .forget_from(self.var_manager.max_enc_var() + 1);
         }
-        self.log_routine_end()?;
         Ok(())
     }
 }

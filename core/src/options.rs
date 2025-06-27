@@ -182,6 +182,15 @@ pub struct CoreBoostingOptions {
     pub after: AfterCbOptions,
 }
 
+impl fmt::Display for CoreBoostingOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CoreBoostingOptions")
+            .field("rebase", &self.rebase)
+            .field("after", &format_args!("{}", self.after))
+            .finish()
+    }
+}
+
 #[derive(Clone, Default, PartialEq, Eq)]
 pub enum AfterCbOptions {
     /// Don't do anything special after core boosting
@@ -192,6 +201,17 @@ pub enum AfterCbOptions {
     /// Perform MaxPre "inprocessing" after core boosting
     #[cfg(feature = "maxpre")]
     Inpro(String),
+}
+
+impl fmt::Display for AfterCbOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AfterCbOptions::Nothing => write!(f, "nothing"),
+            AfterCbOptions::Reset => write!(f, "reset"),
+            #[cfg(feature = "maxpre")]
+            AfterCbOptions::Inpro(techs) => write!(f, "inpro ({techs})"),
+        }
+    }
 }
 
 pub type KernelWithCbOptions = (KernelOptions, Option<CoreBoostingOptions>);
@@ -209,12 +229,30 @@ pub enum EnumOptions {
     PMCSs(Option<usize>),
 }
 
+impl fmt::Display for EnumOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EnumOptions::NoEnum => write!(f, "none"),
+            EnumOptions::Solutions(None) => write!(f, "all solutions"),
+            EnumOptions::PMCSs(None) => write!(f, "all Pareto-MCSs"),
+            EnumOptions::Solutions(Some(limit)) => write!(f, "{limit} solutions"),
+            EnumOptions::PMCSs(Some(limit)) => write!(f, "{limit} Pareto-MCSs"),
+        }
+    }
+}
+
 /// Options regarding heuristic solution improvement
 #[derive(Clone, Copy, Debug)]
 pub struct HeurImprOptions {
     /// When to perform solution tightening (flipping objective literals that can
     /// be flipped without breaking satisfiability)
     pub solution_tightening: HeurImprWhen,
+}
+
+impl fmt::Display for HeurImprOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "solution_tightening: {}", self.solution_tightening)
+    }
 }
 
 impl HeurImprOptions {
@@ -280,7 +318,7 @@ impl fmt::Display for HeurImprWhen {
 }
 
 /// Limits for a call to [`crate::Solve::solve`]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct Limits {
     /// The maximum number of Pareto points to enumerate
     pub pps: Option<usize>,
@@ -300,6 +338,47 @@ impl Limits {
             sols: None,
             candidates: None,
             oracle_calls: None,
+        }
+    }
+}
+
+impl fmt::Display for Limits {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut some = false;
+        if let Some(val) = self.pps {
+            write!(f, "Limited {{ non-dominated-points = {val}")?;
+            some = true;
+        }
+        if let Some(val) = self.sols {
+            if some {
+                write!(f, ", ")?;
+            } else {
+                write!(f, "Limited {{ ")?;
+            }
+            write!(f, "solutions = {val}")?;
+            some = true;
+        }
+        if let Some(val) = self.candidates {
+            if some {
+                write!(f, ", ")?;
+            } else {
+                write!(f, "Limited {{ ")?;
+            }
+            write!(f, "candidates = {val}")?;
+            some = true;
+        }
+        if let Some(val) = self.oracle_calls {
+            if some {
+                write!(f, ", ")?;
+            } else {
+                write!(f, "Limited {{ ")?;
+            }
+            write!(f, "oracle-calls = {val}")?;
+        }
+        if some {
+            write!(f, " }}")
+        } else {
+            write!(f, "Unlimited")
         }
     }
 }
@@ -511,6 +590,12 @@ impl fmt::Display for CoreExtraction {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct IhsCbOptions {
     pub treatment: IhsCbTreatment,
+}
+
+impl fmt::Display for IhsCbOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.treatment)
+    }
 }
 
 /// Core boosting treatment in the IHS algorithm

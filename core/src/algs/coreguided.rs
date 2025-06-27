@@ -16,6 +16,7 @@ use rustsat::{
     },
     types::{Assignment, Clause, Lit, RsHashMap, RsHashSet, Var},
 };
+use tracing::{debug, instrument, trace};
 
 use crate::{
     MaybeTerminatedError::{self, Done},
@@ -239,6 +240,7 @@ where
     ///
     /// The `exact_reformulation` argument specifies whether in the proof, we want to have an
     /// exact objective reformulation including all lazy totalizer outputs, or only the ones built
+    #[instrument(level = "debug", name = "pareto-ihs", skip_all)]
     pub fn oll(
         &mut self,
         reform: &mut OllReformulation,
@@ -259,7 +261,6 @@ where
                 Interrupted => unreachable!(),
             }
         }
-        self.log_routine_start("oll")?;
 
         // cores not yet reformulated (because of WCE)
         let mut unreform_cores = vec![];
@@ -381,7 +382,6 @@ where
                             }
                         }
 
-                        self.log_routine_end()?;
                         return Done(Some(sol));
                     }
                     sol_cb(
@@ -417,9 +417,7 @@ where
                         core_cb(self, root, oidx);
                         if oidx > 1 {
                             reform.offset += (oidx - 1) * weight;
-                            if let Some(log) = &mut self.logger {
-                                log.log_core_exhaustion(oidx, weight)?;
-                            }
+                            trace!(target: "core_exhaustion", oidx, weight);
                         }
                         if oidx < tot_db[root].len() {
                             reform.inactives.insert(olit, weight);
@@ -464,7 +462,6 @@ where
                     }
                     if core.is_empty() {
                         // unsat
-                        self.log_routine_end()?;
                         return Done(None);
                     }
 
@@ -489,9 +486,7 @@ where
                     };
                     reform.offset += core_weight;
                     // Log core
-                    if let Some(log) = &mut self.logger {
-                        log.log_core(core_weight, orig_len, core.len())?;
-                    }
+                    debug!(target: "core", core_weight, orig_len, min_len = core.len());
                     // Extend tot if output in core
                     let mut cons = Vec::with_capacity(core.len());
                     for olit in &core {
@@ -619,9 +614,7 @@ where
         let mut n_softs_selected = 0;
         if strat_level == usize::MAX {
             let Some((&max_weight, _)) = weight_levels.range(..).next_back() else {
-                if let Some(logger) = &self.logger {
-                    logger.log_strat_level(1, "done")?;
-                }
+                debug!(target: "strat_level", level = 1, reason = "done");
                 return Ok(1);
             };
             strat_level = max_weight;
@@ -631,9 +624,7 @@ where
         loop {
             let Some((&weight, &count)) = weight_levels.range(..strat_level).next_back() else {
                 // exhausted all levels
-                if let Some(logger) = &self.logger {
-                    logger.log_strat_level(1, "done")?;
-                }
+                debug!(target: "strat_level", level = 1, reason = "done");
                 return Ok(1);
             };
             let old_strat_level = strat_level;
@@ -648,9 +639,7 @@ where
             if levels_left == 0 {
                 debug_assert_eq!(sum_weights, 0);
                 debug_assert_eq!(n_softs, 0);
-                if let Some(logger) = &self.logger {
-                    logger.log_strat_level(1, "done")?;
-                }
+                debug!(target: "strat_level", level = 1, reason = "done");
                 return Ok(1);
             }
 
@@ -660,38 +649,31 @@ where
             {
                 strat_level = old_strat_level;
 
-                if let Some(logger) = &self.logger {
-                    logger.log_strat_level(strat_level, "dist")?;
-                }
+                debug!(target: "strat_level", level = strat_level, reason = "dist");
                 return Ok(strat_level);
             }
 
             if self.opts.stratification.multi_level && strat_level > sum_weights {
-                if let Some(logger) = &self.logger {
-                    logger.log_strat_level(strat_level, "multi-level")?;
-                }
+                debug!(target: "strat_level", level = strat_level, reason = "multi-level");
                 return Ok(strat_level);
             }
 
             if self.opts.stratification.stratification && 2 * n_softs > levels_left * total_levels {
-                if let Some(logger) = &self.logger {
-                    logger.log_strat_level(strat_level, "strat")?;
-                }
+                debug!(target: "strat_level", level = strat_level, reason = "strat");
                 return Ok(strat_level);
             }
 
             if self.opts.stratification.exponential_weight_stratification
                 && 2 * strat_level < orig_strat_level
             {
-                if let Some(logger) = &self.logger {
-                    logger.log_strat_level(strat_level, "exp-strat")?;
-                }
+                debug!(target: "strat_level", level = strat_level, reason = "exp-strat");
                 return Ok(strat_level);
             }
         }
     }
 
     /// Exhausts a core
+    #[instrument(level = "trace", name = "core-exhaustion", skip(self))]
     fn exhaust_core(
         &mut self,
         root: NodeId,
@@ -721,8 +703,6 @@ where
 
             return Done((olit, 1, proof_id));
         }
-
-        self.log_routine_start("core-exhaustion")?;
 
         let mut assumps = Vec::from(base_assumps);
         assumps.push(Lit::positive(0));
@@ -781,11 +761,11 @@ where
             None
         };
 
-        self.log_routine_end()?;
         Done((olit, bound, proof_id))
     }
 
     /// Minimizes a core
+    #[instrument(level = "trace", name = "core-minimization", skip(self))]
     pub fn minimize_core(
         &mut self,
         mut core: Vec<Lit>,
@@ -798,8 +778,6 @@ where
         if core.len() <= 1 {
             return Done((core, proof_id));
         }
-
-        self.log_routine_start("core-minimization")?;
 
         let mut assumps = Vec::from(base_assumps);
 
@@ -863,11 +841,11 @@ where
 
         #[cfg(feature = "limit-conflicts")]
         self.oracle.limit_conflicts(None)?;
-        self.log_routine_end()?;
         Done((core, proof_id))
     }
 
     /// Trims a core
+    #[instrument(level = "trace", name = "core-trimming", skip(self))]
     pub fn trim_core(
         &mut self,
         mut core: Vec<Lit>,
@@ -880,8 +858,6 @@ where
         if core.len() <= 1 {
             return Done((core, proof_id));
         }
-
-        self.log_routine_start("core-trimming")?;
 
         let mut assumps = Vec::from(base_assumps);
 
@@ -920,8 +896,6 @@ where
             }
             assumps.drain(base_assumps.len()..);
         }
-
-        self.log_routine_end()?;
 
         Done((core, proof_id))
     }

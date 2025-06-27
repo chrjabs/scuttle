@@ -13,6 +13,7 @@ use rustsat::{
     types::Assignment,
 };
 use scuttle_proc::oracle_bounds;
+use tracing::info;
 
 use crate::MaybeTerminatedError::{self, Done};
 
@@ -151,7 +152,6 @@ where
         mut sol_cb: impl FnMut(&Self, usize, Assignment),
         mut core_cb: impl FnMut(&Self, usize, NodeId, usize),
     ) -> MaybeTerminatedError<Option<Vec<CbResult>>> {
-        self.log_routine_start("core boost")?;
         let mut unsat = false;
         let mut res = Vec::with_capacity(self.stats.n_objs);
         for obj_idx in 0..self.stats.n_objs {
@@ -246,11 +246,7 @@ where
                 solution,
             });
         }
-        self.log_routine_end()?;
-        if let Some(logger) = &mut self.logger {
-            let ideal: Vec<_> = res.iter().map(|res| res.reform.offset).collect();
-            logger.log_ideal(&ideal)?;
-        }
+        info!(target: "ideal", ideal = ?res.iter().map(|res| res.reform.offset).collect::<Vec<_>>());
         Done(if unsat { None } else { Some(res) })
     }
 }
@@ -267,7 +263,7 @@ where
     pub fn inprocess<PBE, CE>(
         &mut self,
         techniques: &str,
-        mut reforms: Vec<(OllReformulation, TotDb)>,
+        mut reforms: Vec<CbResult>,
     ) -> MaybeTerminatedError<Vec<ObjEncoding<PBE, CE>>>
     where
         (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
@@ -279,6 +275,7 @@ where
             instances::ManageVars,
             types::RsHashMap,
         };
+        use tracing::debug;
 
         use crate::termination::ensure;
 
@@ -298,10 +295,10 @@ where
         let mut orig_cnf = self.orig_cnf.clone().unwrap();
         let mut all_outputs: Vec<_> = reforms
             .iter()
-            .map(|reform| reform.0.reformulations.clone())
+            .map(|res| res.reform.reformulations.clone())
             .collect();
         let mut objs = Vec::with_capacity(reforms.len());
-        for (obj_idx, (reform, tot_db)) in reforms.iter_mut().enumerate() {
+        for (obj_idx, CbResult { reform, tot_db, .. }) in reforms.iter_mut().enumerate() {
             tot_db.reset_encoded(Semantics::IfAndOnlyIf);
             let mut softs = Vec::with_capacity(reform.inactives.len());
             for (lit, weight) in reform.inactives.iter() {
@@ -342,7 +339,7 @@ where
             objs.push((softs, 0));
         }
         // Inprocess
-        self.log_routine_start("inprocessing")?;
+        let span = tracing::span!(tracing::Level::DEBUG, "inprocessing").entered();
         let cls_before = orig_cnf.len() + objs.iter().fold(0, |cnt, (obj, _)| cnt + obj.len());
         let mut ranges: Vec<_> = objs
             .iter()
@@ -355,14 +352,8 @@ where
             .iter()
             .zip(ranges.iter_mut())
             .for_each(|((obj, _), (_, after))| *after = obj.iter().fold(0, |rng, (_, w)| rng + w));
-        self.log_routine_end()?;
-        if let Some(logger) = self.logger.as_mut() {
-            logger.log_inprocessing(
-                (cls_before, inpro.n_prepro_clauses() as usize),
-                inpro.n_prepro_fixed_lits() as usize,
-                ranges,
-            )?;
-        }
+        span.exit();
+        debug!(target: "inprocessing", cls_before, cls_after = inpro.n_prepro_clauses(), fixed = inpro.n_prepro_fixed_lits(), ?ranges);
         self.inpro = Some(inpro);
         self.check_termination()?;
         // Reinit oracle
@@ -379,8 +370,15 @@ where
         self.check_termination()?;
         // Build encodings
         let mut encs = Vec::with_capacity(self.stats.n_objs);
-        for (obj_idx, ((softs, offset), (reform, mut tot_db))) in
-            inpro_objs.into_iter().zip(reforms).enumerate()
+        for (
+            obj_idx,
+            (
+                (softs, offset),
+                CbResult {
+                    reform, mut tot_db, ..
+                },
+            ),
+        ) in inpro_objs.into_iter().zip(reforms).enumerate()
         {
             debug_assert!(offset >= 0);
             let outputs = &all_outputs[obj_idx];
@@ -426,7 +424,8 @@ where
                 }
             }
             // actually build the encoding
-            self.log_routine_start("merge encodings")?;
+            let span = tracing::span!(tracing::Level::DEBUG, "merge-encodings");
+            let _enter = span.enter();
             for (root, (data, weight)) in tots_to_add {
                 let mut offset = usize::MAX;
                 let mut len = None;
@@ -454,7 +453,6 @@ where
                 reform.offset + (offset as usize),
                 max_leaf_weight,
             ));
-            self.log_routine_end()?;
         }
         Done(encs)
     }

@@ -14,7 +14,10 @@ use scuttle_core::{
 };
 
 mod cli;
+use ::tracing::{error, warn};
 use cli::{Algorithm, CadicalConfig, CardEncoding, Cli, HittingSetSolver, PbEncoding};
+
+mod tracing;
 
 /// The SAT solver used
 type Oracle = CaDiCaL<'static, 'static>;
@@ -40,39 +43,39 @@ macro_rules! run {
     // with proof
     ($slv:ident, $inst:expr_2021, $proof:expr_2021, $prepro:expr_2021, $reindexer:expr_2021, $opts:expr_2021, $cb_opts:expr_2021, $cli:expr_2021) => {
         if let Some(proof) = $proof {
-            let mut alg = setup_alg_cert::<$slv>($cli, $inst, $opts, proof)?;
+            let mut alg = setup_alg_cert::<$slv>($inst, $opts, proof)?;
             let cont = if let Some(opts) = $cb_opts {
-                handle_termination(alg.core_boost(opts.clone()), $cli)?.unwrap_or(false)
+                handle_termination(alg.core_boost(opts.clone()))?.unwrap_or(false)
             } else {
                 true
             };
             if cont {
-                handle_termination(alg.solve($cli.limits), $cli)?;
+                handle_termination(alg.solve($cli.limits))?;
             };
             post_solve(alg, $cli, $prepro, $reindexer)?;
         } else {
-            let mut alg = setup_alg::<$slv>($cli, $inst, $opts)?;
+            let mut alg = setup_alg::<$slv>($inst, $opts)?;
             let cont = if let Some(opts) = $cb_opts {
-                handle_termination(alg.core_boost(opts.clone()), $cli)?.unwrap_or(false)
+                handle_termination(alg.core_boost(opts.clone()))?.unwrap_or(false)
             } else {
                 true
             };
             if cont {
-                handle_termination(alg.solve($cli.limits), $cli)?;
+                handle_termination(alg.solve($cli.limits))?;
             };
             post_solve(alg, $cli, $prepro, $reindexer)?;
         }
     };
     // without proof
     (no-proof: $slv:ident, $inst:expr_2021, $prepro:expr_2021, $reindexer:expr_2021, $opts:expr_2021, $cb_opts:expr_2021, $cli:expr_2021) => {{
-        let mut alg = setup_alg::<$slv>($cli, $inst, $opts)?;
+        let mut alg = setup_alg::<$slv>($inst, $opts)?;
         let cont = if let Some(opts) = $cb_opts {
-            handle_termination(alg.core_boost(opts.clone()), $cli)?.unwrap_or(false)
+            handle_termination(alg.core_boost(opts.clone()))?.unwrap_or(false)
         } else {
             true
         };
         if cont {
-            handle_termination(alg.solve($cli.limits), $cli)?;
+            handle_termination(alg.solve($cli.limits))?;
         };
         post_solve(alg, $cli, $prepro, $reindexer)?;
     }};
@@ -123,12 +126,12 @@ macro_rules! dispatch_options {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::init();
+    tracing::init(&cli.alg, cli.tracing_opts);
 
     match sub_main(&cli) {
         Ok(_) => (),
         Err(err) => {
-            cli.error(&format!("{err}"))?;
-            cli.error(&format!("{}", err.backtrace()))?;
+            error!(target: "error", err = %err, backtrace = %err.backtrace());
         }
     };
 
@@ -136,10 +139,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn sub_main(cli: &Cli) -> anyhow::Result<()> {
-    cli.print_header()?;
-    cli.print_solver_config()?;
-
-    cli.info(&format!("solving instance {:?}", cli.inst_path))?;
+    warn!("solving instance {:?}", cli.inst_path);
 
     let parsed = prepro::parse(cli.inst_path.clone(), cli.file_format, cli.opb_options)?;
 
@@ -178,11 +178,11 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
         }
         Algorithm::BiOptSat(opts, pb_enc, card_enc, ref cb_opts) => {
             if inst.n_objs() != 2 {
-                cli.error("the bioptsat algorithm can only be run on bi-objective problems")?;
+                error!(target: "unsupported instance", "the bioptsat algorithm can only be run on bi-objective problems");
                 anyhow::bail!(Error::InvalidInstance);
             }
             if cb_opts.is_some() && (pb_enc != PbEncoding::Gte || card_enc != CardEncoding::Tot) {
-                cli.error("core boosting is only implemented for the GTE and Totalizer encodings")?;
+                error!(target: "unsupported configuration", "core boosting is only implemented for the GTE and Totalizer encodings");
                 anyhow::bail!(Error::InvalidConfig);
             }
             match pb_enc {
@@ -204,7 +204,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
             match hitting_set_solver {
                 HittingSetSolver::Highs => {
                     if opts.reduced_cost_fixing {
-                        cli.error("reduced cost fixing is currently only implemented for Gurobi")?;
+                        error!(target: "unsupported configuration", "reduced cost fixing is currently only implemented for Gurobi");
                         anyhow::bail!(Error::InvalidConfig);
                     }
                     type IhsSlv<OInit = CaDiCaLDefaultInit> = Ihs<hitting_sets::HighsSolver, OInit>;
@@ -238,9 +238,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
                     }
                 });
 
-                alg.attach_logger(cli.new_cli_logger());
-
-                handle_termination(alg.solve(cli.limits), cli)?;
+                handle_termination(alg.solve(cli.limits))?;
 
                 post_solve(alg, cli, prepro, reindexer)?;
             }
@@ -264,9 +262,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
                     }
                 });
 
-                alg.attach_logger(cli.new_cli_logger());
-
-                handle_termination(alg.solve(cli.limits), cli)?;
+                handle_termination(alg.solve(cli.limits))?;
 
                 post_solve(alg, cli, prepro, reindexer)?;
             }
@@ -275,7 +271,7 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn setup_alg<Alg>(cli: &Cli, inst: Instance, opts: <Alg as Init>::Options) -> anyhow::Result<Alg>
+fn setup_alg<Alg>(inst: Instance, opts: <Alg as Init>::Options) -> anyhow::Result<Alg>
 where
     Alg: InitDefaultBlock + KernelFunctions,
 {
@@ -297,13 +293,10 @@ where
         }
     });
 
-    alg.attach_logger(cli.new_cli_logger());
-
     Ok(alg)
 }
 
 fn setup_alg_cert<Alg>(
-    cli: &Cli,
     inst: Instance,
     opts: <Alg as Init>::Options,
     proof: pigeons::Proof<Alg::ProofWriter>,
@@ -328,8 +321,6 @@ where
             interrupter.interrupt();
         }
     });
-
-    alg.attach_logger(cli.new_cli_logger());
 
     Ok(alg)
 }
@@ -366,34 +357,29 @@ where
         pareto_front
     };
 
-    cli.print_pareto_front(pareto_front)?;
+    let stats = alg.all_stats();
 
-    let (stats, ostats, estats, hss_stats) = alg.all_stats();
-    cli.print_stats(stats)?;
-    // Get extended stats for solver that supports stats
-    if let Some(stats) = ostats {
-        cli.print_oracle_stats(stats)?;
-    }
-    if let Some(stats) = estats {
-        cli.print_encoding_stats(stats)?;
-    }
-    if let Some(stats) = hss_stats {
-        cli.print_hitting_set_solver_stats(stats)?;
-    }
+    #[cfg(not(feature = "maxpre"))]
+    tracing::wrap_up(pareto_front, stats, cli.wrap_up_opts);
     #[cfg(feature = "maxpre")]
-    if let Some(prepro) = prepro {
+    {
         use maxpre::PreproClauses;
-        cli.print_maxpre_stats(prepro.stats())?;
+        let maxpre_stats = prepro.map(|mp| mp.stats());
+        tracing::wrap_up(
+            pareto_front,
+            (stats.0, stats.1, stats.2, stats.3, maxpre_stats),
+            cli.wrap_up_opts,
+        );
     }
 
     Ok(())
 }
 
-fn handle_termination<T>(ret: MaybeTerminatedError<T>, cli: &Cli) -> anyhow::Result<Option<T>> {
+fn handle_termination<T>(ret: MaybeTerminatedError<T>) -> anyhow::Result<Option<T>> {
     match ret {
         MaybeTerminatedError::Done(val) => Ok(Some(val)),
         MaybeTerminatedError::Terminated(term) => {
-            cli.log_termination(&term)?;
+            warn!("terminating: {term}");
             Ok(None)
         }
         MaybeTerminatedError::Error(err) => Err(err),

@@ -26,6 +26,7 @@ use rustsat::{
     types::{Assignment, Clause, Lit, Var},
 };
 use scuttle_proc::KernelFunctions;
+use tracing::{debug, instrument, span, Level};
 
 use crate::{
     EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
@@ -83,6 +84,7 @@ where
     BCG: Fn(Assignment) -> Clause,
     ProofW: io::Write + 'static,
 {
+    #[instrument(name = "lower-bounding", skip(self), fields(limits = %limits))]
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
         self.kernel.start_solving(limits);
         self.alg_main()
@@ -268,7 +270,6 @@ where
     /// The solving algorithm main routine.
     fn alg_main(&mut self) -> MaybeTerminatedError {
         debug_assert_eq!(self.obj_encs.len(), self.kernel.stats.n_objs);
-        self.kernel.log_routine_start("lower-bounding")?;
         // Initialize fence here if not yet done
         if self.fence.data.is_empty() {
             for enc in self.obj_encs.iter_mut() {
@@ -306,7 +307,6 @@ where
                 SolverResult::Unsat => {
                     let core = self.kernel.oracle.core()?;
                     if core.is_empty() {
-                        self.kernel.log_routine_end()?;
                         return Done(());
                     }
                     #[cfg(debug_assertions)]
@@ -341,6 +341,7 @@ where
     (PBE, CE): MergeOllRef<PBE = PBE, CE = CE>,
     OInit: Initialize<rustsat_cadical::CaDiCaL<'learn, 'term>>,
 {
+    #[instrument(name = "core-boost", skip(self), fields(opts = %opts))]
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
         ensure!(
             self.kernel.stats.n_solve_calls == 0,
@@ -364,7 +365,8 @@ where
                 return Done(true);
             }
         };
-        self.kernel.log_routine_start("merge encodings")?;
+        let span = span!(Level::DEBUG, "merge-encodings");
+        let _enter = span.enter();
         for (
             oidx,
             CbResult {
@@ -399,7 +401,6 @@ where
             }
             self.kernel.check_termination()?;
         }
-        self.kernel.log_routine_end()?;
         Done(true)
     }
 }
@@ -458,9 +459,7 @@ where
                 }
             }
         }
-        if let Some(logger) = &mut self.logger {
-            logger.log_fence(&fence.bounds())?
-        }
+        debug!(target: "fence", bounds = ?fence.bounds());
         Done(())
     }
 }
@@ -472,6 +471,7 @@ where
     BCG: Fn(Assignment) -> Clause,
 {
     /// Runs the P-Minimal algorithm within the fence to harvest solutions
+    #[instrument(level = "debug", name = "harvest", skip_all)]
     pub fn harvest<Col>(
         &mut self,
         fence: &Fence,
@@ -483,7 +483,6 @@ where
         Col: Extend<NonDomPoint>,
     {
         debug_assert_eq!(obj_encs.len(), self.stats.n_objs);
-        self.log_routine_start("harvest")?;
         let mut assumps = Vec::from(base_assumps);
         loop {
             assumps.drain(base_assumps.len()..);
@@ -491,7 +490,6 @@ where
             assumps.extend(fence.assumps());
             let res = self.solve_assumps(&assumps)?;
             if SolverResult::Unsat == res {
-                self.log_routine_end()?;
                 return Done(());
             }
             self.check_termination()?;

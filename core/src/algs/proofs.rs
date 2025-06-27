@@ -961,7 +961,6 @@ where
             lims: Limits::none(),
             #[cfg(feature = "maxpre")]
             inpro: None,
-            logger: None,
             term_flag: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "interrupt-oracle")]
             oracle_interrupter: Arc::new(Mutex::new(Box::new(interrupter))),
