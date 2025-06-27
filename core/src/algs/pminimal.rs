@@ -595,7 +595,7 @@ where
         &'a mut self,
         costs: &'a [usize],
         obj_encs: &'a mut [ObjEncoding<GeneralizedTotalizer, Totalizer>],
-    ) -> anyhow::Result<impl Iterator<Item = Lit> + 'a> {
+    ) -> anyhow::Result<impl Iterator<Item = Lit> + 'a + use<'a, ProofW, OInit, BCG>> {
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.proof_stuff {
             let proof: *mut _ = self.oracle.proof_tracer_mut(pt_handle).proof_mut();

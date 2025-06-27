@@ -35,14 +35,14 @@ fn impl_kernel_functions_macro(mut ast: syn::DeriveInput, opts: KernelOpts) -> T
     let has_proof = {
         let mut found_oracle = false;
         let mut found_proof = false;
-        for gen in ast.generics.type_params() {
-            if gen.ident == "O" {
+        for r#gen in ast.generics.type_params() {
+            if r#gen.ident == "O" {
                 found_oracle = true;
                 if found_proof {
                     break;
                 }
             }
-            if gen.ident == "ProofW" {
+            if r#gen.ident == "ProofW" {
                 found_proof = true;
                 if found_oracle {
                     break;
@@ -137,8 +137,8 @@ fn impl_solve_macro(mut ast: syn::DeriveInput, kopts: KernelOpts, sopts: SolveOp
 
     // Check whether type has generic named O that is assumed to be the oracle
     let mut found_oracle = false;
-    for gen in ast.generics.type_params() {
-        if gen.ident == "O" {
+    for r#gen in ast.generics.type_params() {
+        if r#gen.ident == "O" {
             found_oracle = true;
             break;
         }
@@ -216,8 +216,8 @@ pub fn oracle_bounds(_attr: TokenStream, item: TokenStream) -> TokenStream {
 fn insert_oracle_bounds(mut impl_block: syn::ItemImpl) -> TokenStream {
     // Check whether type has generic named O that is assumed to be the oracle
     let mut found_oracle = false;
-    for gen in impl_block.generics.type_params() {
-        if gen.ident == "O" {
+    for r#gen in impl_block.generics.type_params() {
+        if r#gen.ident == "O" {
             found_oracle = true;
             break;
         }

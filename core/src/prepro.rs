@@ -39,7 +39,7 @@ impl fmt::Display for FileFormat {
 }
 
 macro_rules! is_one_of {
-    ($a:expr, $($b:expr),*) => {
+    ($a:expr_2021, $($b:expr_2021),*) => {
         $( $a == $b || )* false
     }
 }

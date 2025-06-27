@@ -39,7 +39,7 @@ type Ihs<Hss, OInit = CaDiCaLDefaultInit> = ParetoIhs<Oracle, Hss, OInit>;
 
 macro_rules! run {
     // with proof
-    ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $opts:expr, $cb_opts:expr, $cli:expr) => {
+    ($slv:ident, $inst:expr_2021, $proof:expr_2021, $prepro:expr_2021, $reindexer:expr_2021, $opts:expr_2021, $cb_opts:expr_2021, $cli:expr_2021) => {
         if let Some(proof) = $proof {
             let mut alg = setup_alg_cert::<$slv>($cli, $inst, $opts, proof)?;
             let cont = if let Some(opts) = $cb_opts {
@@ -65,7 +65,7 @@ macro_rules! run {
         }
     };
     // without proof
-    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $opts:expr, $cb_opts:expr, $cli:expr) => {{
+    (no-proof: $slv:ident, $inst:expr_2021, $prepro:expr_2021, $reindexer:expr_2021, $opts:expr_2021, $cb_opts:expr_2021, $cli:expr_2021) => {{
         let mut alg = setup_alg::<$slv>($cli, $inst, $opts)?;
         let cont = if let Some(opts) = $cb_opts {
             handle_termination(alg.core_boost(opts.clone()), $cli)?.unwrap_or(false)
@@ -81,7 +81,7 @@ macro_rules! run {
 
 macro_rules! dispatch_options {
     // with proof
-    ($slv:ident, $inst:expr, $proof:expr, $prepro:expr, $reindexer:expr, $opts:expr, $cb_opts:expr, $cli:expr) => {
+    ($slv:ident, $inst:expr_2021, $proof:expr_2021, $prepro:expr_2021, $reindexer:expr_2021, $opts:expr_2021, $cb_opts:expr_2021, $cli:expr_2021) => {
         match $cli.cadical_config {
             CadicalConfig::Default => {
                 run!($slv, $inst, $proof, $prepro, $reindexer, $opts, $cb_opts, $cli)
@@ -101,7 +101,7 @@ macro_rules! dispatch_options {
         }
     };
     // without proof
-    (no-proof: $slv:ident, $inst:expr, $prepro:expr, $reindexer:expr, $opts:expr, $cb_opts:expr, $cli:expr) => {
+    (no-proof: $slv:ident, $inst:expr_2021, $prepro:expr_2021, $reindexer:expr_2021, $opts:expr_2021, $cb_opts:expr_2021, $cli:expr_2021) => {
         match $cli.cadical_config {
             CadicalConfig::Default => {
                 run!(no-proof: $slv, $inst, $prepro, $reindexer, $opts, $cb_opts, $cli)

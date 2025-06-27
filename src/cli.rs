@@ -32,7 +32,7 @@ use scuttle_core::{
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 
 macro_rules! none_if_zero {
-    ($val:expr) => {
+    ($val:expr_2021) => {
         if $val == 0 {
             None
         } else {

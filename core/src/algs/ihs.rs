@@ -546,8 +546,8 @@ where
                 for (
                     obj_idx,
                     (
-                        CbReformData {
-                            db,
+                        &mut CbReformData {
+                            ref mut db,
                             ref keep_lits,
                             ref remaining_tots,
                         },

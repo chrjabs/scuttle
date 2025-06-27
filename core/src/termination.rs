@@ -203,17 +203,17 @@ impl<T> std::ops::FromResidual<hitting_sets::MaybeTerminated<std::convert::Infal
 
 /// Equivalent of [`anyhow::ensure`] for [`MaybeTerminatedError`]
 macro_rules! ensure {
-    ($cond:expr, $msg:literal) => {
+    ($cond:expr_2021, $msg:literal) => {
         if !$cond {
             return crate::MaybeTerminatedError::Error(anyhow::anyhow!($msg));
         }
     };
-    ($cond:expr, $err:expr) => {
+    ($cond:expr_2021, $err:expr_2021) => {
         if !$cond {
             return crate::MaybeTerminatedError::Error(anyhow::anyhow!($err));
         }
     };
-    ($cond:expr, $fmt:expr, $($arg:tt)*) => {
+    ($cond:expr_2021, $fmt:expr_2021, $($arg:tt)*) => {
         if !$cond {
             return crate::MaybeTerminatedError::Error(anyhow::anyhow!($fmt, $($arg)*));
         }
