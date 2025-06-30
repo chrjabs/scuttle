@@ -696,6 +696,7 @@ where
         let mut translated = vec![false; self.kernel.var_manager.n_used() as usize + 1];
         let mut reform_objs = Vec::with_capacity(cb_res.len());
         let mut reforms = Vec::with_capacity(cb_res.len());
+        let mut lower_bounds = Vec::with_capacity(cb_res.len());
         for (
             CbResult {
                 reform,
@@ -808,6 +809,7 @@ where
                         );
                     }
 
+                    lower_bounds.push(reform.offset);
                     if opts.treatment == IhsCbTreatment::Abstract {
                         let mut keep_lits = vec![];
                         let mut remaining_tots = vec![];
@@ -838,12 +840,14 @@ where
             }
             IhsCbTreatment::Translate => {
                 self.cb_data = CbData::Translate;
+                self.hitting_set_solver.change_lower_bounds(lower_bounds);
             }
             IhsCbTreatment::Abstract => {
                 self.cb_data = CbData::Abstract {
                     reforms,
                     translated,
                 };
+                self.hitting_set_solver.change_lower_bounds(lower_bounds);
             }
         }
 

@@ -5,7 +5,7 @@
 
 use std::{fmt, num::NonZero, str};
 
-use rustsat::types::{Cl, Lit};
+use rustsat::types::{Cl, Lit, RsHashMap};
 
 mod map;
 use map::{IndexedVar, VarMap};
@@ -156,6 +156,11 @@ pub trait HittingSetSolver {
         Outer: IntoIterator<Item = (Inner, usize)>,
         Inner: IntoIterator<Item = (Lit, usize)>;
 
+    /// Change the lower bounds for the objectives
+    fn change_lower_bounds<Iter>(&mut self, lower_bounds: Iter)
+    where
+        Iter: IntoIterator<Item = usize>;
+
     /// Gets the statistics of the hitting set solver
     fn statistics(&self) -> Statistics;
 
@@ -211,4 +216,11 @@ pub struct Statistics {
     pub n_abstract_cores: usize,
     pub n_seeded: usize,
     pub n_learned_units: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct Obj {
+    lits: RsHashMap<Lit, usize>,
+    offset: usize,
+    lower_bound: usize,
 }

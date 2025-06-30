@@ -1,14 +1,16 @@
 //! # Hitting Set Solver Interface for the Gurobi Solver
 
+use std::cmp;
+
 use grb::{add_binvar, attr, c, expr::Expr, param, Env, Model, Status};
 use rustsat::types::{Lit, RsHashMap, Var};
 
 use crate::{CompleteSolveResult, IncompleteSolveResult};
 
-use super::{BuildSolver, CoreOrigin, HittingSetSolver, VarMap};
+use super::{BuildSolver, CoreOrigin, HittingSetSolver, Obj, VarMap};
 
 pub struct Solver {
-    objectives: Vec<(RsHashMap<Lit, usize>, usize)>,
+    objectives: Vec<Obj>,
     map: VarMap<grb::Var>,
     model: Model,
     statistics: super::Statistics,
@@ -20,19 +22,19 @@ impl HittingSetSolver for Solver {
 
     fn change_multipliers(&mut self, multi: &[f64]) {
         for (var, gv) in self.map.iter() {
-            let weight = self
-                .objectives
-                .iter()
-                .zip(multi)
-                .fold(0., |sum, ((obj, _), &mult)| {
-                    if let Some(&weight) = obj.get(&var.pos_lit()) {
-                        return sum + (weight as f64) * mult;
-                    }
-                    if let Some(&weight) = obj.get(&var.neg_lit()) {
-                        return sum - (weight as f64) * mult;
-                    }
-                    sum
-                });
+            let weight =
+                self.objectives
+                    .iter()
+                    .zip(multi)
+                    .fold(0., |sum, (Obj { lits, .. }, &mult)| {
+                        if let Some(&weight) = lits.get(&var.pos_lit()) {
+                            return sum + (weight as f64) * mult;
+                        }
+                        if let Some(&weight) = lits.get(&var.neg_lit()) {
+                            return sum - (weight as f64) * mult;
+                        }
+                        sum
+                    });
             self.model
                 .set_obj_attr(attr::Obj, gv, weight)
                 .expect("failed to set objective coefficient");
@@ -145,9 +147,13 @@ impl HittingSetSolver for Solver {
             .iter()
             .zip(&self.objectives)
             .enumerate()
-            .filter_map(
-                |(idx, (&cost, &(_, offset)))| if cost <= offset { None } else { Some(idx) },
-            )
+            .filter_map(|(idx, (&cost, Obj { lower_bound, .. }))| {
+                if cost <= *lower_bound {
+                    None
+                } else {
+                    Some(idx)
+                }
+            })
             .collect();
         match non_zeroes.len() {
             // make infeasible
@@ -158,9 +164,9 @@ impl HittingSetSolver for Solver {
             }
             1 => {
                 let mut bound =
-                    (costs[non_zeroes[0]] - self.objectives[non_zeroes[0]].1 - 1) as f64;
+                    (costs[non_zeroes[0]] - self.objectives[non_zeroes[0]].offset - 1) as f64;
                 let mut expr = Expr::Constant(0.);
-                for (&lit, &cost) in self.objectives[non_zeroes[0]].0.iter() {
+                for (&lit, &cost) in self.objectives[non_zeroes[0]].lits.iter() {
                     if lit.is_pos() {
                         expr = expr + Expr::Term(cost as f64, self.map[lit.var()]);
                     } else {
@@ -180,9 +186,9 @@ impl HittingSetSolver for Solver {
 
                 // constraint for first objective
                 let mut bound =
-                    (costs[non_zeroes[0]] - self.objectives[non_zeroes[0]].1 - 1) as f64;
+                    (costs[non_zeroes[0]] - self.objectives[non_zeroes[0]].offset - 1) as f64;
                 let mut expr = Expr::Constant(0.);
-                for (&lit, &cost) in self.objectives[non_zeroes[0]].0.iter() {
+                for (&lit, &cost) in self.objectives[non_zeroes[0]].lits.iter() {
                     if lit.is_pos() {
                         expr = expr + Expr::Term(cost as f64, self.map[lit.var()]);
                     } else {
@@ -196,9 +202,9 @@ impl HittingSetSolver for Solver {
 
                 // constraint for second objective
                 let mut bound =
-                    (costs[non_zeroes[1]] - self.objectives[non_zeroes[1]].1 - 1) as f64;
+                    (costs[non_zeroes[1]] - self.objectives[non_zeroes[1]].offset - 1) as f64;
                 let mut expr = Expr::Constant(0.);
-                for (&lit, &cost) in self.objectives[non_zeroes[1]].0.iter() {
+                for (&lit, &cost) in self.objectives[non_zeroes[1]].lits.iter() {
                     if lit.is_pos() {
                         expr = expr + Expr::Term(cost as f64, self.map[lit.var()]);
                     } else {
@@ -220,9 +226,9 @@ impl HittingSetSolver for Solver {
                     .collect();
                 // indicator constraints for each objective
                 for (nz_idx, (obj_idx, &aux)) in non_zeroes.into_iter().zip(&auxs).enumerate() {
-                    let mut bound = (costs[obj_idx] - self.objectives[obj_idx].1 - 1) as f64;
+                    let mut bound = (costs[obj_idx] - self.objectives[obj_idx].offset - 1) as f64;
                     let mut expr = Expr::Constant(0.);
-                    for (&lit, &cost) in self.objectives[obj_idx].0.iter() {
+                    for (&lit, &cost) in self.objectives[obj_idx].lits.iter() {
                         if lit.is_pos() {
                             expr = expr + Expr::Term(cost as f64, self.map[lit.var()]);
                         } else {
@@ -259,13 +265,18 @@ impl HittingSetSolver for Solver {
         let _n_old_objs = self.objectives.len();
         self.objectives = objectives
             .into_iter()
-            .map(|(inner, offset)| (inner.into_iter().collect(), offset))
+            .zip(&self.objectives)
+            .map(|((inner, offset), Obj { lower_bound, .. })| Obj {
+                lits: inner.into_iter().collect(),
+                offset,
+                lower_bound: cmp::max(*lower_bound, offset),
+            })
             .collect();
         debug_assert_eq!(_n_old_objs, self.objectives.len());
         let mut vars: Vec<Var> = self
             .objectives
             .iter()
-            .flat_map(|(obj, _)| obj.keys().copied().map(Lit::var))
+            .flat_map(|Obj { lits, .. }| lits.keys().copied().map(Lit::var))
             .collect();
         vars.sort_unstable();
         vars.dedup();
@@ -277,11 +288,11 @@ impl HittingSetSolver for Solver {
         }
         // update objectives
         for var in vars {
-            let weight = self.objectives.iter().fold(0., |sum, (obj, _)| {
-                if let Some(&weight) = obj.get(&var.pos_lit()) {
+            let weight = self.objectives.iter().fold(0., |sum, Obj { lits, .. }| {
+                if let Some(&weight) = lits.get(&var.pos_lit()) {
                     return sum + (weight as f64);
                 }
-                if let Some(&weight) = obj.get(&var.neg_lit()) {
+                if let Some(&weight) = lits.get(&var.neg_lit()) {
                     return sum - (weight as f64);
                 }
                 sum
@@ -297,6 +308,17 @@ impl HittingSetSolver for Solver {
         }
     }
 
+    fn change_lower_bounds<Iter>(&mut self, lower_bounds: Iter)
+    where
+        Iter: IntoIterator<Item = usize>,
+    {
+        for (lb, Obj { lower_bound, .. }) in
+            lower_bounds.into_iter().zip(self.objectives.iter_mut())
+        {
+            *lower_bound = lb;
+        }
+    }
+
     fn statistics(&self) -> super::Statistics {
         self.statistics
     }
@@ -304,7 +326,7 @@ impl HittingSetSolver for Solver {
     fn objectives(&self) -> impl Iterator<Item = impl Iterator<Item = (Lit, usize)>> {
         self.objectives
             .iter()
-            .map(|(o, _)| o.iter().map(|(&l, &w)| (l, w)))
+            .map(|Obj { lits, .. }| lits.iter().map(|(&l, &w)| (l, w)))
     }
 
     fn learn_unit(&mut self, unit: Lit) {
@@ -466,7 +488,13 @@ impl BuildSolver for Builder {
             });
         }
         Solver {
-            objectives: objectives.into_iter().map(|o| (o, 0)).collect(),
+            objectives: objectives
+                .into_iter()
+                .map(|lits| Obj {
+                    lits,
+                    ..Obj::default()
+                })
+                .collect(),
             map,
             model,
             statistics: super::Statistics::default(),
