@@ -33,10 +33,11 @@ where
     }
 
     pub fn map(&self, index: Var) -> Option<&T> {
-        if index.idx() >= self.forward.len() {
-            return None;
-        }
-        self.forward[index.idx()].as_ref()
+        self.forward.get(index.idx()).and_then(|o| o.as_ref())
+    }
+
+    pub fn map_back(&self, index: usize) -> Option<Var> {
+        self.backward.get(index).and_then(|&o| o)
     }
 
     /// For a variable, returns it's internal representation. If none is tracked, generates a new

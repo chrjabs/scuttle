@@ -395,17 +395,16 @@ impl HittingSetSolver for Solver {
 
 #[inline]
 fn collect_hitting_set(sol: &Solution, map: &VarMap<Col>) -> Vec<Lit> {
-    // NOTE: only taking the first `map.max_mapped` entries, since after that we have aux vars from
-    // PD cuts
     sol.columns()
         .iter()
         .enumerate()
         .take(map.max_mapped().unwrap().index() + 1)
-        .map(|(idx, val)| {
+        .filter_map(|(idx, val)| {
+            let var = map.map_back(idx)?;
             if *val >= super::TRUE {
-                map[idx].pos_lit()
+                Some(var.pos_lit())
             } else if *val <= super::FALSE {
-                map[idx].neg_lit()
+                Some(var.neg_lit())
             } else {
                 panic!("variable assigned to non-integer value");
             }
