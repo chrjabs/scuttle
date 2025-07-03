@@ -134,7 +134,7 @@ pub trait HittingSetSolver {
     fn add_card(&mut self, lits: &[Lit], bound: usize);
 
     /// Adds a reified cardinality constraint of for `sum(lits) >= bound -> reif`
-    fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit);
+    fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit, equivalence: bool);
 
     /// Computes an optimal hitting set for the currently given cores
     fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult

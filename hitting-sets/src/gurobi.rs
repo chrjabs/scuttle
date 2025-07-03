@@ -93,14 +93,14 @@ impl HittingSetSolver for Solver {
             .expect("failed adding core to Gurobi");
     }
 
-    fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit) {
+    fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit, equivalence: bool) {
         let model = &mut self.model;
         let ind = self.map.ensure_mapped(reif.var(), |v| {
             add_binvar!(model, name: &format!("{v}"), obj: 0)
                 .expect("failed to create Gurobi variable")
         });
         let mut expr = Expr::Constant(0.);
-        let mut bound = (bound - 1) as f64;
+        let mut bound = bound as f64;
         for lit in lits {
             if lit.is_pos() {
                 expr = expr
@@ -117,14 +117,29 @@ impl HittingSetSolver for Solver {
                     });
             }
         }
+        let expr_clone = if equivalence {
+            Some(expr.clone())
+        } else {
+            None
+        };
         self.model
             .add_genconstr_indicator(
-                &format!("{reif}-reification"),
+                &format!("{reif}-reification-if"),
                 ind,
                 reif.is_neg(),
-                c!(expr <= bound),
+                c!(expr <= bound - 1.),
             )
             .expect("failed to add reified cardinality");
+        if let Some(expr) = expr_clone {
+            self.model
+                .add_genconstr_indicator(
+                    &format!("{reif}-reification-only-if"),
+                    ind,
+                    reif.is_pos(),
+                    c!(expr >= bound),
+                )
+                .expect("failed to add reified cardinality");
+        }
     }
 
     fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult

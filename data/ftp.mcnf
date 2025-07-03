@@ -15,6 +15,7 @@ c ignore-test:bioptsat
 c ignore-test:lower-bounding
 c ignore-test:pareto-ihs<highs>:wce
 c ignore-test:pareto-ihs<highs>:cb-ignore
+c ignore-test:pareto-ihs<highs>:cb-translate-reform
 c
 c non-dominated points
 c nd (345, 6125)

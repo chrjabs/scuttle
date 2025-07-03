@@ -112,21 +112,20 @@ impl HittingSetSolver for Solver {
         self.state.add_row(bound.., factors);
     }
 
-    fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit) {
-        let (bound, n_neg) = lits.iter().fold(
+    fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit, equivalence: bool) {
+        let (bound, n_pos) = lits.iter().fold(
             (
                 i32::try_from(bound).expect("`bound` does not fit in `i32`"),
                 0,
             ),
             |(b, n), lit| {
                 if lit.is_neg() {
-                    (b - 1, n + 1)
+                    (b - 1, n)
                 } else {
-                    (b, n)
+                    (b, n + 1)
                 }
             },
         );
-        let bound = if reif.is_pos() { bound } else { n_neg };
         let mut factors: Vec<_> = lits
             .iter()
             .map(|lit| {
@@ -137,16 +136,23 @@ impl HittingSetSolver for Solver {
                 )
             })
             .collect();
-        factors.push((
-            self.map
-                .ensure_mapped(reif.var(), |_| self.state.new_binary_col(0.)),
-            if reif.is_pos() {
-                (bound + n_neg) as f64
-            } else {
-                -((bound + n_neg) as f64)
-            },
-        ));
-        self.state.add_row(bound.., factors);
+        let big_m = n_pos - bound + 1;
+        let ind = self
+            .map
+            .ensure_mapped(reif.var(), |_| self.state.new_binary_col(0.));
+        factors.push((ind, (big_m * if reif.is_pos() { -1 } else { 1 }) as f64));
+        self.state.add_row(
+            ..=if reif.is_pos() { bound - 1 } else { n_pos },
+            factors.iter().copied(),
+        );
+
+        if equivalence {
+            let n_neg = i32::try_from(lits.len()).expect("more than `i32::MAX` lits") - n_pos;
+            let big_m = bound - n_neg;
+            factors.last_mut().unwrap().1 = (big_m * if reif.is_pos() { -1 } else { 1 }) as f64;
+            self.state
+                .add_row(if reif.is_pos() { -n_neg } else { bound }.., factors);
+        }
     }
 
     fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult

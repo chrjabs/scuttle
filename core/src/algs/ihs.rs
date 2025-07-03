@@ -15,7 +15,7 @@ use rustsat::{
         DefaultInitializer, Initialize, Learn, SolveIncremental, SolveStats, SolverResult,
         SolverStats,
     },
-    types::{Assignment, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
+    types::{Assignment, Cl, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
 };
 use scuttle_proc::{oracle_bounds, KernelFunctions};
 
@@ -174,9 +174,11 @@ where
                 self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64,
             )?;
         }
-        if !matches!(self.cb_data, CbData::Ignore)
-            && (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
-                < f64::EPSILON
+        if !matches!(
+            self.cb_data,
+            CbData::Ignore | CbData::TranslateReform { .. }
+        ) && (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
+            < f64::EPSILON
         {
             let term = self.main_fully_seeded();
             self.kernel.log_routine_end()?;
@@ -241,6 +243,20 @@ where
                 // on equal weight
                 assumps.sort_by_key(|l| -joint_objective[l.vidx()].abs());
             }
+            if let CbData::TranslateReform { dbs, olit_map, .. } = &mut self.cb_data {
+                for &a in &assumps {
+                    if let Some((obj_idx, id, oidx)) = olit_map[a.vidx()] {
+                        let lit = dbs[obj_idx].define_unweighted(
+                            id,
+                            oidx,
+                            Semantics::If,
+                            &mut self.kernel.oracle,
+                            &mut self.kernel.var_manager,
+                        )?;
+                        debug_assert_eq!(a, !lit);
+                    }
+                }
+            };
             match self.oracle_with_unit_learner(&assumps)? {
                 SolverResult::Sat => {
                     let (costs, solution) = self.kernel.get_solution_and_internal_costs(false)?;
@@ -283,7 +299,116 @@ where
                         }
                         let orig_len = core.len();
                         let core = self.minimize_core(core)?;
-                        if core.len() == 1 {
+                        if let CbData::TranslateReform {
+                            dbs,
+                            olit_map,
+                            translated,
+                        } = &mut self.cb_data
+                        {
+                            // these won't be modified here
+                            let dbs = &*dbs;
+                            let olit_map = &*olit_map;
+
+                            if core.len() == 1 {
+                                let lit = core[0];
+                                if let Some((obj_idx, node, oidx)) = olit_map[lit.vidx()] {
+                                    // NOTE: translate abstract unit core back.
+                                    // We intentionally _don't_ check whether the literal has been
+                                    // translated yet here, since we want to add the translated core either
+                                    // way
+                                    if translated.len() <= lit.vidx() {
+                                        translated.resize(lit.vidx() + 1, false);
+                                    }
+                                    let mut lits = vec![];
+                                    let db = &dbs[obj_idx];
+                                    for info in db.leaf_iter(node) {
+                                        debug_assert_eq!(
+                                            info.weight, 1,
+                                            "OLL core reformulations are unweighted"
+                                        );
+                                        debug_assert_eq!(
+                                            info.val_range.end - info.val_range.start,
+                                            1,
+                                            "should only ever have single leaves in OLL core"
+                                        );
+                                        let node = &db[info.id];
+                                        let lit = node[info.val_range.start];
+                                        if node.is_leaf() {
+                                            debug_assert_eq!(
+                                                info.val_range.start, 1,
+                                                "true leaf must have value 1"
+                                            );
+                                        } else {
+                                            debug_assert!(
+                                                translated[lit.vidx()],
+                                                "this literal must have
+                                        appeared in a core, which must have been translated after
+                                        core boosting"
+                                            );
+                                        }
+                                        lits.push(lit);
+                                    }
+                                    self.hitting_set_solver.add_card_core(
+                                        &lits,
+                                        oidx + 1,
+                                        CoreOrigin::Normal,
+                                    );
+                                    translated[lit.vidx()] = true;
+                                } else {
+                                    self.hitting_set_solver.learn_unit(lit);
+                                }
+                            } else {
+                                // introduce necessary translations in HSS
+                                for &lit in &core {
+                                    if let Some((obj_idx, node, oidx)) = olit_map[lit.vidx()] {
+                                        if translated.len() <= lit.vidx() {
+                                            translated.resize(lit.vidx() + 1, false);
+                                        } else if translated[lit.vidx()] {
+                                            continue;
+                                        }
+                                        let mut lits = vec![];
+                                        let db = &dbs[obj_idx];
+                                        for info in db.leaf_iter(node) {
+                                            debug_assert_eq!(
+                                                info.weight, 1,
+                                                "OLL core reformulations are unweighted"
+                                            );
+                                            debug_assert_eq!(
+                                                info.val_range.end - info.val_range.start,
+                                                1,
+                                                "should only ever have single leaves in OLL core"
+                                            );
+                                            let node = &db[info.id];
+                                            let lit = node[info.val_range.start];
+                                            if node.is_leaf() {
+                                                debug_assert_eq!(
+                                                    info.val_range.start, 1,
+                                                    "true leaf must have value 1"
+                                                );
+                                            } else {
+                                                debug_assert!(
+                                                    translated[lit.vidx()],
+                                                    "this literal must have
+                                        appeared in a core, which must have been translated after
+                                        core boosting"
+                                                );
+                                            }
+                                            lits.push(lit);
+                                        }
+                                        self.hitting_set_solver.add_reified_card(
+                                            &lits,
+                                            oidx + 1,
+                                            lit,
+                                            false,
+                                        );
+                                        translated[lit.vidx()] = true;
+                                    }
+                                }
+
+                                self.hitting_set_solver
+                                    .add_core(core.as_ref(), CoreOrigin::Normal);
+                            }
+                        } else if core.len() == 1 {
                             self.hitting_set_solver.learn_unit(core[0]);
                         } else {
                             self.hitting_set_solver
@@ -485,7 +610,8 @@ where
                                     }
                                     lits.push(lit);
                                 }
-                                self.hitting_set_solver.add_reified_card(&lits, bound, lit);
+                                self.hitting_set_solver
+                                    .add_reified_card(&lits, bound, lit, false);
                                 translated[lit.vidx()] = true;
                             }
                         }
@@ -694,17 +820,22 @@ where
         }
 
         let mut translated = vec![false; self.kernel.var_manager.n_used() as usize + 1];
+        let mut olit_map = vec![None; self.kernel.var_manager.n_used() as usize + 1];
         let mut reform_objs = Vec::with_capacity(cb_res.len());
         let mut reforms = Vec::with_capacity(cb_res.len());
         let mut lower_bounds = Vec::with_capacity(cb_res.len());
+        let mut tot_dbs = Vec::with_capacity(cb_res.len());
         for (
-            CbResult {
-                reform,
-                solution,
-                mut tot_db,
-            },
-            cores,
-        ) in cb_res.into_iter().zip(cores)
+            obj_idx,
+            (
+                CbResult {
+                    reform,
+                    solution,
+                    mut tot_db,
+                },
+                cores,
+            ),
+        ) in cb_res.into_iter().zip(cores).enumerate()
         {
             if let Some(solution) = solution {
                 let costs = self.kernel.compute_costs(&solution);
@@ -743,7 +874,9 @@ where
                     }
                     reform_objs.push((reform_obj, reform.offset));
                 }
-                IhsCbTreatment::Translate | IhsCbTreatment::Abstract => {
+                IhsCbTreatment::Translate
+                | IhsCbTreatment::TranslateReform
+                | IhsCbTreatment::Abstract => {
                     for (root, bound) in cores {
                         let mut lits = vec![];
                         for info in tot_db.leaf_iter(root) {
@@ -796,7 +929,8 @@ where
                                     }
                                     lits.push(lit);
                                 }
-                                self.hitting_set_solver.add_reified_card(&lits, val, lit);
+                                self.hitting_set_solver
+                                    .add_reified_card(&lits, val, lit, false);
                                 translated[lit.vidx()] = true;
                             }
                         }
@@ -810,7 +944,48 @@ where
                     }
 
                     lower_bounds.push(reform.offset);
-                    if opts.treatment == IhsCbTreatment::Abstract {
+                    if opts.treatment == IhsCbTreatment::TranslateReform {
+                        let mut reform_obj = Vec::with_capacity(reform.inactives.len());
+                        for (&lit, &weight) in &reform.inactives {
+                            reform_obj.push((lit, weight));
+                            self.objective_lits.insert(lit);
+                            self.max_obj_var = std::cmp::max(self.max_obj_var, lit.var());
+                            // NOTE: we only _reserve_ variables here, but lazily encode them
+                            // whenever they appear negated in a hitting set
+                            if let Some(&ReformData {
+                                root,
+                                oidx,
+                                tot_weight,
+                                ..
+                            }) = reform.reformulations.get(&lit)
+                            {
+                                debug_assert_ne!(weight, 0);
+                                debug_assert!(oidx < tot_db[root].len());
+                                olit_map[lit.vidx()] = Some((obj_idx, root, oidx));
+                                tot_db[root].reserve_vars(oidx + 2.., &mut self.kernel.var_manager);
+                                if olit_map.len() <= self.kernel.var_manager.n_used() as usize {
+                                    olit_map.resize(
+                                        self.kernel.var_manager.n_used() as usize + 1,
+                                        None,
+                                    );
+                                }
+                                let mut last_lit = lit;
+                                for idx in oidx + 1..tot_db[root].len() {
+                                    let lit = tot_db[root][idx + 1];
+                                    reform_obj.push((lit, tot_weight));
+                                    self.objective_lits.insert(lit);
+                                    self.max_obj_var = std::cmp::max(self.max_obj_var, lit.var());
+                                    olit_map[lit.vidx()] = Some((obj_idx, root, idx));
+                                    // Ordering constraints over totalizer output variables in HSS
+                                    self.hitting_set_solver
+                                        .add_clause(Cl::new(&[last_lit, !lit]));
+                                    last_lit = lit;
+                                }
+                            }
+                        }
+                        tot_dbs.push(tot_db);
+                        reform_objs.push((reform_obj, reform.offset));
+                    } else if opts.treatment == IhsCbTreatment::Abstract {
                         let mut keep_lits = vec![];
                         let mut remaining_tots = vec![];
                         for (&lit, _) in reform.inactives.iter() {
@@ -842,6 +1017,14 @@ where
                 self.cb_data = CbData::Translate;
                 self.hitting_set_solver.change_lower_bounds(lower_bounds);
             }
+            IhsCbTreatment::TranslateReform => {
+                self.cb_data = CbData::TranslateReform {
+                    dbs: tot_dbs,
+                    olit_map,
+                    translated,
+                };
+                self.hitting_set_solver.change_objectives(reform_objs);
+            }
             IhsCbTreatment::Abstract => {
                 self.cb_data = CbData::Abstract {
                     reforms,
@@ -864,6 +1047,11 @@ enum CbData {
     None,
     Ignore,
     Translate,
+    TranslateReform {
+        dbs: Vec<TotDb>,
+        olit_map: Vec<Option<(usize, NodeId, usize)>>,
+        translated: Vec<bool>,
+    },
     Abstract {
         reforms: Vec<CbReformData>,
         translated: Vec<bool>,

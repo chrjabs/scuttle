@@ -450,6 +450,10 @@ pub enum IhsCbTreatment {
     /// Translate the OLL semantics to the hitting set solver after core boosting. Cores are only
     /// extracted over the original objective.
     Translate,
+    /// Translate the OLL semantics to the hitting set solver after core boosting, and switch the
+    /// hitting set solver to the reformulated objective. Cores are then extracted over the
+    /// reformulated objective.
+    TranslateReform,
     /// Translate the OLL semantics to the hitting set solver after core boosting. Introduce
     /// further semantics as needed, and extract cores over both the original, and the reformulated
     /// objective. This is reminiscent of abstract cores.
@@ -462,6 +466,7 @@ impl fmt::Display for IhsCbTreatment {
         match self {
             IhsCbTreatment::Ignore => write!(f, "ignore"),
             IhsCbTreatment::Translate => write!(f, "translate"),
+            IhsCbTreatment::TranslateReform => write!(f, "translate-reform"),
             IhsCbTreatment::Abstract => write!(f, "abstract"),
         }
     }

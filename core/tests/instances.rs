@@ -162,6 +162,12 @@ fn main() {
             },
         ),
         (
+            "cb-translate-reform",
+            IhsCbOptions {
+                treatment: IhsCbTreatment::TranslateReform,
+            },
+        ),
+        (
             "cb-abstract",
             IhsCbOptions {
                 treatment: IhsCbTreatment::Abstract,
