@@ -133,6 +133,9 @@ pub trait HittingSetSolver {
     /// are in the objectives
     fn add_card(&mut self, lits: &[Lit], bound: usize);
 
+    /// Adds a cardinality equality constraint to the solver
+    fn add_card_eq(&mut self, lits: &[Lit], value: usize);
+
     /// Adds a reified cardinality constraint of for `sum(lits) >= bound -> reif`
     fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit, equivalence: bool);
 

@@ -450,10 +450,15 @@ pub enum IhsCbTreatment {
     /// Translate the OLL semantics to the hitting set solver after core boosting. Cores are only
     /// extracted over the original objective.
     Translate,
+    /// Translate the OLL semantics to the hitting set solver after core boosting. Use the
+    /// Katsirelos SAT'25 translation. Cores are only extracted over the original objective.
+    TranslateKatsirelos,
     /// Translate the OLL semantics to the hitting set solver after core boosting, and switch the
     /// hitting set solver to the reformulated objective. Cores are then extracted over the
     /// reformulated objective.
     TranslateReform,
+    /// Like [`Self::TranslateReform`], but with the Katsirelos SAT'25 reformulation
+    TranslateKatsirelosReform,
     /// Translate the OLL semantics to the hitting set solver after core boosting. Introduce
     /// further semantics as needed, and extract cores over both the original, and the reformulated
     /// objective. This is reminiscent of abstract cores.
@@ -461,12 +466,37 @@ pub enum IhsCbTreatment {
     Abstract,
 }
 
+impl IhsCbTreatment {
+    pub(crate) fn reform(self) -> bool {
+        match self {
+            IhsCbTreatment::Ignore
+            | IhsCbTreatment::TranslateReform
+            | IhsCbTreatment::TranslateKatsirelosReform => true,
+            IhsCbTreatment::Translate
+            | IhsCbTreatment::TranslateKatsirelos
+            | IhsCbTreatment::Abstract => false,
+        }
+    }
+
+    pub(crate) fn katsirelos(self) -> bool {
+        match self {
+            IhsCbTreatment::Ignore
+            | IhsCbTreatment::Translate
+            | IhsCbTreatment::TranslateReform
+            | IhsCbTreatment::Abstract => false,
+            IhsCbTreatment::TranslateKatsirelos | IhsCbTreatment::TranslateKatsirelosReform => true,
+        }
+    }
+}
+
 impl fmt::Display for IhsCbTreatment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IhsCbTreatment::Ignore => write!(f, "ignore"),
             IhsCbTreatment::Translate => write!(f, "translate"),
+            IhsCbTreatment::TranslateKatsirelos => write!(f, "translate-katsirelos"),
             IhsCbTreatment::TranslateReform => write!(f, "translate-reform"),
+            IhsCbTreatment::TranslateKatsirelosReform => write!(f, "translate-katsirelos-reform"),
             IhsCbTreatment::Abstract => write!(f, "abstract"),
         }
     }

@@ -93,6 +93,31 @@ impl HittingSetSolver for Solver {
             .expect("failed adding core to Gurobi");
     }
 
+    fn add_card_eq(&mut self, lits: &[Lit], value: usize) {
+        let mut value = value as f64;
+        let mut expr = Expr::Constant(0.);
+        let model = &mut self.model;
+        for lit in lits {
+            if lit.is_pos() {
+                expr = expr
+                    + self.map.ensure_mapped(lit.var(), |v| {
+                        add_binvar!(model, name: &format!("{v}"), obj: 0)
+                            .expect("failed to create Gurobi variable")
+                    });
+            } else {
+                value -= 1.;
+                expr = expr
+                    - self.map.ensure_mapped(lit.var(), |v| {
+                        add_binvar!(model, name: &format!("{v}"), obj: 0)
+                            .expect("failed to create Gurobi variable")
+                    });
+            }
+        }
+        self.model
+            .add_constr("core", c!(expr == value))
+            .expect("failed adding core to Gurobi");
+    }
+
     fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit, equivalence: bool) {
         let model = &mut self.model;
         let ind = self.map.ensure_mapped(reif.var(), |v| {

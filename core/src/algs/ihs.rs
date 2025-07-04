@@ -300,13 +300,13 @@ where
                         let orig_len = core.len();
                         let core = self.minimize_core(core)?;
                         if let CbData::TranslateReform {
+                            katsirelos,
                             dbs,
                             olit_map,
                             translated,
                         } = &mut self.cb_data
                         {
                             // these won't be modified here
-                            let dbs = &*dbs;
                             let olit_map = &*olit_map;
 
                             if core.len() == 1 {
@@ -395,13 +395,36 @@ where
                                             }
                                             lits.push(lit);
                                         }
-                                        self.hitting_set_solver.add_reified_card(
-                                            &lits,
-                                            oidx + 1,
-                                            lit,
-                                            false,
-                                        );
-                                        translated[lit.vidx()] = true;
+                                        if *katsirelos {
+                                            dbs[obj_idx][node]
+                                                .reserve_vars(2.., &mut self.kernel.var_manager);
+                                            let n_leafs = lits.len();
+                                            for val in dbs[obj_idx][node].vals(2..) {
+                                                let lit = dbs[obj_idx][node][val];
+                                                lits.push(!lit);
+                                                translated[lit.vidx()] = true;
+                                            }
+                                            debug_assert_eq!(lits.len(), n_leafs * 2 - 1);
+                                            // LP_OLL eformulation from Katsirelos SAT'25
+                                            // (3) constraint, reformulated as follows
+                                            //   * sum(x) - sum(o) = 1
+                                            //   * sum(x) + sum(not o) = k (since there are k-1 o vars)
+                                            self.hitting_set_solver.add_card_eq(&lits, n_leafs);
+                                            // (4)/(5) ordering constraints, slightly adapted from paper to drop e vars
+                                            //   * o_j >= o_j+1
+                                            for pair in lits[n_leafs..].windows(2) {
+                                                self.hitting_set_solver
+                                                    .add_clause(Cl::new(&[!pair[0], pair[1]]));
+                                            }
+                                        } else {
+                                            self.hitting_set_solver.add_reified_card(
+                                                &lits,
+                                                oidx + 1,
+                                                lit,
+                                                false,
+                                            );
+                                            translated[lit.vidx()] = true;
+                                        }
                                     }
                                 }
 
@@ -815,7 +838,7 @@ where
 
         self.kernel.log_routine_start("cb post treatment")?;
 
-        if opts.treatment == IhsCbTreatment::Ignore {
+        if opts.treatment.reform() {
             self.objective_lits.clear();
         }
 
@@ -875,9 +898,12 @@ where
                     reform_objs.push((reform_obj, reform.offset));
                 }
                 IhsCbTreatment::Translate
+                | IhsCbTreatment::TranslateKatsirelos
                 | IhsCbTreatment::TranslateReform
+                | IhsCbTreatment::TranslateKatsirelosReform
                 | IhsCbTreatment::Abstract => {
                     for (root, bound) in cores {
+                        let mut to_translate = vec![];
                         let mut lits = vec![];
                         for info in tot_db.leaf_iter(root) {
                             debug_assert_eq!(
@@ -897,38 +923,65 @@ where
                                 );
                                 lits.push(node[1]);
                             } else {
-                                let val = info.val_range.start;
-                                let lit = node[val];
-                                lits.push(lit);
-                                if translated[lit.vidx()] {
-                                    continue;
-                                }
-                                let mut lits = vec![];
-                                for info in tot_db.leaf_iter(info.id) {
+                                to_translate.push(info);
+                            }
+                        }
+
+                        // translate totalizer outputs from lower layers
+                        for info in to_translate {
+                            let val = info.val_range.start;
+                            let lit = tot_db[info.id][val];
+                            lits.push(lit);
+                            if translated[lit.vidx()] {
+                                continue;
+                            }
+                            let mut lits = vec![];
+                            for info in tot_db.leaf_iter(info.id) {
+                                debug_assert_eq!(
+                                    info.weight, 1,
+                                    "OLL core reformulations are unweighted"
+                                );
+                                debug_assert_eq!(
+                                    info.val_range.end - info.val_range.start,
+                                    1,
+                                    "should only ever have single leaves in OLL core"
+                                );
+                                let node = &tot_db[info.id];
+                                let lit = node[info.val_range.start];
+                                if node.is_leaf() {
                                     debug_assert_eq!(
-                                        info.weight, 1,
-                                        "OLL core reformulations are unweighted"
+                                        info.val_range.start, 1,
+                                        "true leaf must have value 1"
                                     );
-                                    debug_assert_eq!(
-                                        info.val_range.end - info.val_range.start,
-                                        1,
-                                        "should only ever have single leaves in OLL core"
-                                    );
-                                    let node = &tot_db[info.id];
-                                    let lit = node[info.val_range.start];
-                                    if node.is_leaf() {
-                                        debug_assert_eq!(
-                                            info.val_range.start, 1,
-                                            "true leaf must have value 1"
-                                        );
-                                    } else {
-                                        debug_assert!(
+                                } else {
+                                    debug_assert!(
                                             translated[lit.vidx()],
                                             "this literal must have appeared in a another core, which must have been before in `cores`"
                                             );
-                                    }
-                                    lits.push(lit);
                                 }
+                                lits.push(lit);
+                            }
+                            if opts.treatment.katsirelos() {
+                                tot_db[info.id].reserve_vars(2.., &mut self.kernel.var_manager);
+                                let n_leafs = lits.len();
+                                for val in tot_db[info.id].vals(2..) {
+                                    let lit = tot_db[info.id][val];
+                                    lits.push(!lit);
+                                    translated[lit.vidx()] = true;
+                                }
+                                debug_assert_eq!(lits.len(), n_leafs * 2 - 1);
+                                // LP_OLL eformulation from Katsirelos SAT'25
+                                // (3) constraint, reformulated as follows
+                                //   * sum(x) - sum(o) = 1
+                                //   * sum(x) + sum(not o) = k (since there are k-1 o vars)
+                                self.hitting_set_solver.add_card_eq(&lits, n_leafs);
+                                // (4)/(5) ordering constraints, slightly adapted from paper to drop e vars
+                                //   * o_j >= o_j+1
+                                for pair in lits[n_leafs..].windows(2) {
+                                    self.hitting_set_solver
+                                        .add_clause(Cl::new(&[!pair[0], pair[1]]));
+                                }
+                            } else {
                                 self.hitting_set_solver
                                     .add_reified_card(&lits, val, lit, false);
                                 translated[lit.vidx()] = true;
@@ -944,7 +997,10 @@ where
                     }
 
                     lower_bounds.push(reform.offset);
-                    if opts.treatment == IhsCbTreatment::TranslateReform {
+                    if matches!(
+                        opts.treatment,
+                        IhsCbTreatment::TranslateReform | IhsCbTreatment::TranslateKatsirelosReform
+                    ) {
                         let mut reform_obj = Vec::with_capacity(reform.inactives.len());
                         for (&lit, &weight) in &reform.inactives {
                             reform_obj.push((lit, weight));
@@ -1013,12 +1069,13 @@ where
                 self.cb_data = CbData::Ignore;
                 self.hitting_set_solver.change_objectives(reform_objs);
             }
-            IhsCbTreatment::Translate => {
+            IhsCbTreatment::Translate | IhsCbTreatment::TranslateKatsirelos => {
                 self.cb_data = CbData::Translate;
                 self.hitting_set_solver.change_lower_bounds(lower_bounds);
             }
-            IhsCbTreatment::TranslateReform => {
+            IhsCbTreatment::TranslateReform | IhsCbTreatment::TranslateKatsirelosReform => {
                 self.cb_data = CbData::TranslateReform {
+                    katsirelos: opts.treatment.katsirelos(),
                     dbs: tot_dbs,
                     olit_map,
                     translated,
@@ -1048,6 +1105,7 @@ enum CbData {
     Ignore,
     Translate,
     TranslateReform {
+        katsirelos: bool,
         dbs: Vec<TotDb>,
         olit_map: Vec<Option<(usize, NodeId, usize)>>,
         translated: Vec<bool>,

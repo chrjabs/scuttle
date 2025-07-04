@@ -112,6 +112,24 @@ impl HittingSetSolver for Solver {
         self.state.add_row(bound.., factors);
     }
 
+    fn add_card_eq(&mut self, lits: &[Lit], value: usize) {
+        let value = lits.iter().fold(
+            i32::try_from(value).expect("`value` does not fit in `i32`"),
+            |b, lit| if lit.is_neg() { b - 1 } else { b },
+        );
+        let factors: Vec<_> = lits
+            .iter()
+            .map(|lit| {
+                (
+                    self.map
+                        .ensure_mapped(lit.var(), |_| self.state.new_binary_col(0.)),
+                    if lit.is_pos() { 1. } else { -1. },
+                )
+            })
+            .collect();
+        self.state.add_row(value..=value, factors);
+    }
+
     fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit, equivalence: bool) {
         let (bound, n_pos) = lits.iter().fold(
             (
