@@ -5,7 +5,10 @@ use std::{cmp, ops};
 use highs::{Col, HighsModelStatus, Model, RowProblem, Sense, Solution};
 use rustsat::types::{Lit, RsHashMap, Var};
 
-use crate::{CompleteSolveResult, IncompleteSolveResult};
+use crate::{
+    Callbacks, CompleteSolveResult, IncompleteSolveResult,
+    MaybeTerminated::{self, Done},
+};
 
 use super::{BuildSolver, CoreOrigin, HittingSetSolver, Obj, VarMap};
 
@@ -173,18 +176,28 @@ impl HittingSetSolver for Solver {
         }
     }
 
-    fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult
+    fn optimal_hitting_set_callbacks<I, Cb>(
+        &mut self,
+        start: I,
+        cb: &mut Cb,
+    ) -> MaybeTerminated<CompleteSolveResult>
     where
         I: IntoIterator<Item = Lit>,
+        Cb: Callbacks,
     {
-        self.solve(start, true).into()
+        self.solve(start, true, cb).map(CompleteSolveResult::from)
     }
 
-    fn hitting_set<I>(&mut self, start: I) -> IncompleteSolveResult
+    fn hitting_set_callbacks<I, Cb>(
+        &mut self,
+        start: I,
+        cb: &mut Cb,
+    ) -> MaybeTerminated<IncompleteSolveResult>
     where
         I: IntoIterator<Item = Lit>,
+        Cb: Callbacks,
     {
-        self.solve(start, false)
+        self.solve(start, false, cb)
     }
 
     fn add_pd_cut(&mut self, costs: &[usize]) {
@@ -440,9 +453,15 @@ impl Solver {
         self.state = State::Main(model);
     }
 
-    fn solve<I>(&mut self, start: I, optimal: bool) -> IncompleteSolveResult
+    fn solve<I, Cb>(
+        &mut self,
+        start: I,
+        optimal: bool,
+        cb: &mut Cb,
+    ) -> MaybeTerminated<IncompleteSolveResult>
     where
         I: IntoIterator<Item = Lit>,
+        Cb: Callbacks,
     {
         self.statistics.n_solves += 1;
         let start_time = cpu_time::ProcessTime::now();
@@ -485,7 +504,16 @@ impl Solver {
             model.set_option("objective_target", target);
         }
 
-        let solved = model.solve();
+        let solved = model.solve_with_callback(&mut HighsCallbacks(cb));
+        if solved.status() == HighsModelStatus::Unknown {
+            let mut model = Model::from(solved);
+            if !optimal {
+                model.set_option("objective_target", -f64::INFINITY);
+            }
+            self.state = State::Main(model);
+            self.statistics.solve_time += start_time.elapsed();
+            return MaybeTerminated::Terminated;
+        }
         if solved.status() == HighsModelStatus::Infeasible {
             let mut model = Model::from(solved);
             if !optimal {
@@ -493,7 +521,7 @@ impl Solver {
             }
             self.state = State::Main(model);
             self.statistics.solve_time += start_time.elapsed();
-            return IncompleteSolveResult::Infeasible;
+            return Done(IncompleteSolveResult::Infeasible);
         }
         if solved.status() == HighsModelStatus::ObjectiveTarget {
             debug_assert!(!optimal);
@@ -504,7 +532,7 @@ impl Solver {
             self.state = State::Main(model);
             let hitting_set = collect_hitting_set(&solution, &self.map);
             self.statistics.solve_time += start_time.elapsed();
-            return IncompleteSolveResult::Feasible(cost, hitting_set);
+            return Done(IncompleteSolveResult::Feasible(cost, hitting_set));
         }
         assert_eq!(solved.status(), HighsModelStatus::Optimal);
         let solution = solved.get_solution();
@@ -516,7 +544,24 @@ impl Solver {
         self.state = State::Main(model);
         let hitting_set = collect_hitting_set(&solution, &self.map);
         self.statistics.solve_time += start_time.elapsed();
-        IncompleteSolveResult::Optimal(cost, hitting_set)
+        Done(IncompleteSolveResult::Optimal(cost, hitting_set))
+    }
+}
+
+/// Highs callback wrapper around crate callbacks
+struct HighsCallbacks<'cb, Cb>(&'cb mut Cb);
+
+impl<Cb> highs::Callback for HighsCallbacks<'_, Cb>
+where
+    Cb: Callbacks,
+{
+    fn callback(
+        &mut self,
+        _context: highs::callback::CallbackOuterContext<'_>,
+    ) -> highs::callback::CallbackReturn {
+        let mut ret = highs::callback::CallbackReturn::default();
+        ret.set_interrupt(self.0.check_termination());
+        ret
     }
 }
 

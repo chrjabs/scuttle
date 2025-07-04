@@ -5,7 +5,10 @@ use std::cmp;
 use grb::{add_binvar, attr, c, expr::Expr, param, Env, Model, Status};
 use rustsat::types::{Lit, RsHashMap, Var};
 
-use crate::{CompleteSolveResult, IncompleteSolveResult};
+use crate::{
+    Callbacks, CompleteSolveResult, IncompleteSolveResult,
+    MaybeTerminated::{self, Done},
+};
 
 use super::{BuildSolver, CoreOrigin, HittingSetSolver, Obj, VarMap};
 
@@ -167,18 +170,28 @@ impl HittingSetSolver for Solver {
         }
     }
 
-    fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult
+    fn optimal_hitting_set_callbacks<I, Cb>(
+        &mut self,
+        start: I,
+        cb: &mut Cb,
+    ) -> MaybeTerminated<CompleteSolveResult>
     where
         I: IntoIterator<Item = Lit>,
+        Cb: Callbacks,
     {
-        self.solve(start, true).into()
+        self.solve(start, true, cb).map(CompleteSolveResult::from)
     }
 
-    fn hitting_set<I>(&mut self, start: I) -> IncompleteSolveResult
+    fn hitting_set_callbacks<I, Cb>(
+        &mut self,
+        start: I,
+        cb: &mut Cb,
+    ) -> MaybeTerminated<IncompleteSolveResult>
     where
         I: IntoIterator<Item = Lit>,
+        Cb: Callbacks,
     {
-        self.solve(start, false)
+        self.solve(start, false, cb)
     }
 
     fn add_pd_cut(&mut self, costs: &[usize]) {
@@ -385,9 +398,15 @@ impl HittingSetSolver for Solver {
 }
 
 impl Solver {
-    fn solve<I>(&mut self, start: I, optimal: bool) -> IncompleteSolveResult
+    fn solve<I, Cb>(
+        &mut self,
+        start: I,
+        optimal: bool,
+        cb: &mut Cb,
+    ) -> MaybeTerminated<IncompleteSolveResult>
     where
         I: IntoIterator<Item = Lit>,
+        Cb: Callbacks,
     {
         self.statistics.n_solves += 1;
         let start_time = cpu_time::ProcessTime::now();
@@ -419,23 +438,27 @@ impl Solver {
         .expect("failed to set target value");
 
         self.model
-            .optimize()
+            .optimize_with_callback(&mut GurobiCallbacks(cb))
             .expect("failed to optimize with Gurobi");
         let status = self.model.status().expect("failed to get model status");
+        if status == Status::Interrupted {
+            self.statistics.solve_time += start_time.elapsed();
+            return MaybeTerminated::Terminated;
+        }
         if status == Status::Infeasible {
             self.statistics.solve_time += start_time.elapsed();
-            return IncompleteSolveResult::Infeasible;
+            return Done(IncompleteSolveResult::Infeasible);
         }
         if status == Status::UserObjLimit {
             debug_assert!(!optimal);
             let (cost, hitting_set) = self.get_solution();
             self.statistics.solve_time += start_time.elapsed();
-            return IncompleteSolveResult::Feasible(cost, hitting_set);
+            return Done(IncompleteSolveResult::Feasible(cost, hitting_set));
         };
         debug_assert_eq!(status, Status::Optimal);
         let (cost, hitting_set) = self.get_solution();
         self.statistics.solve_time += start_time.elapsed();
-        IncompleteSolveResult::Optimal(cost, hitting_set)
+        Done(IncompleteSolveResult::Optimal(cost, hitting_set))
     }
 
     fn get_solution(&self) -> (f64, Vec<Lit>) {
@@ -461,6 +484,67 @@ impl Solver {
             })
             .collect();
         (cost, hitting_set)
+    }
+}
+
+/// Gurobi callback wrapper around crate callbacks
+struct GurobiCallbacks<'cb, Cb>(&'cb mut Cb);
+
+impl<Cb> grb::callback::Callback for GurobiCallbacks<'_, Cb>
+where
+    Cb: Callbacks,
+{
+    fn callback(&mut self, w: grb::prelude::Where) -> grb::callback::CbResult {
+        let terminate = self.0.check_termination();
+        match w {
+            grb::prelude::Where::Polling(polling_ctx) => {
+                if terminate {
+                    polling_ctx.terminate()
+                }
+            }
+            grb::prelude::Where::PreSolve(pre_solve_ctx) => {
+                if terminate {
+                    pre_solve_ctx.terminate()
+                }
+            }
+            grb::prelude::Where::Simplex(simplex_ctx) => {
+                if terminate {
+                    simplex_ctx.terminate()
+                }
+            }
+            grb::prelude::Where::MIP(mipctx) => {
+                if terminate {
+                    mipctx.terminate()
+                }
+            }
+            grb::prelude::Where::MIPSol(mipsol_ctx) => {
+                if terminate {
+                    mipsol_ctx.terminate()
+                }
+            }
+            grb::prelude::Where::MIPNode(mipnode_ctx) => {
+                if terminate {
+                    mipnode_ctx.terminate()
+                }
+            }
+            grb::prelude::Where::Message(message_ctx) => {
+                if terminate {
+                    message_ctx.terminate()
+                }
+            }
+            grb::prelude::Where::Barrier(barrier_ctx) => {
+                if terminate {
+                    barrier_ctx.terminate()
+                }
+            }
+            grb::prelude::Where::IIS(iisctx) => {
+                if terminate {
+                    iisctx.terminate()
+                }
+            }
+            _ => (),
+        }
+        Ok(())
     }
 }
 

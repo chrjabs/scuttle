@@ -34,7 +34,7 @@ use super::Kernel;
 #[derive(KernelFunctions)]
 pub struct ParetoIhs<O, Hss, OInit = DefaultInitializer, BCG = fn(Assignment) -> Clause> {
     kernel: Kernel<O, io::BufWriter<std::fs::File>, OInit, BCG>,
-    hitting_set_solver: Hss,
+    hitting_set_solver: Option<Hss>,
     objective_lits: RsHashSet<Lit>,
     max_obj_var: Var,
     n_seeded: usize,
@@ -70,7 +70,7 @@ where
             self.kernel.stats,
             Some(self.oracle_stats()),
             Some(self.encoding_stats()),
-            Some(self.hitting_set_solver.statistics()),
+            Some(self.hitting_set_solver.as_ref().unwrap().statistics()),
         )
     }
 }
@@ -136,7 +136,7 @@ where
         let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, kernel_opts)?;
         Ok(Self {
             kernel,
-            hitting_set_solver,
+            hitting_set_solver: Some(hitting_set_solver),
             objective_lits,
             max_obj_var,
             n_seeded,
@@ -180,17 +180,26 @@ where
         ) && (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
             < f64::EPSILON
         {
-            let term = self.main_fully_seeded();
+            let mut hss = self.hitting_set_solver.take().unwrap();
+            let ret = self.main_fully_seeded(&mut hss);
             self.kernel.log_routine_end()?;
-            return term;
+            self.hitting_set_solver = Some(hss);
+            return ret;
         }
         if self.seed_candidates()? {
             return Done(());
         }
+        let mut hss = self.hitting_set_solver.take().unwrap();
+        let ret = self.alg_main_int(&mut hss);
+        self.hitting_set_solver = Some(hss);
+        ret
+    }
+
+    fn alg_main_int(&mut self, hss: &mut Hss) -> MaybeTerminatedError {
         let mut want_optimal = false;
         let joint_objective = {
             let mut jobj = vec![0; self.max_obj_var.idx() + 1];
-            for obj in self.hitting_set_solver.objectives() {
+            for obj in hss.objectives() {
                 for (lit, weight) in obj {
                     let mut weight =
                         isize::try_from(weight).expect("weight does not fit in `isize`");
@@ -207,16 +216,17 @@ where
 
             let hitting_set_answer: IncompleteSolveResult =
                 if let Some(head) = self.candidates.head() {
+                    // FIXME: get rid of this clone
+                    let start = head.sol().clone();
                     if want_optimal {
-                        self.hitting_set_solver
-                            .optimal_hitting_set(head.sol())
-                            .into()
+                        hss.optimal_hitting_set_callbacks(start, self)?.into()
                     } else {
-                        self.hitting_set_solver.hitting_set(head.sol())
+                        hss.hitting_set_callbacks(start, self)?
                     }
                 } else {
-                    self.hitting_set_solver.optimal_hitting_set(None).into()
+                    hss.optimal_hitting_set_callbacks(None, self)?.into()
                 };
+            self.kernel.check_termination()?;
 
             let (cost, hitting_set, is_optimal) = match hitting_set_answer {
                 IncompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set, true),
@@ -257,7 +267,7 @@ where
                     }
                 }
             };
-            match self.oracle_with_unit_learner(&assumps)? {
+            match self.oracle_with_unit_learner(&assumps, hss)? {
                 SolverResult::Sat => {
                     let (costs, solution) = self.kernel.get_solution_and_internal_costs(false)?;
                     if is_optimal {
@@ -271,7 +281,7 @@ where
                             &mut self.pareto_front,
                         )?;
                         // introduce PD cut in the hitting set solver
-                        self.hitting_set_solver.add_pd_cut(&costs);
+                        hss.add_pd_cut(&costs);
                         want_optimal = false;
                     } else {
                         let old_head_cost = self
@@ -348,14 +358,10 @@ where
                                         }
                                         lits.push(lit);
                                     }
-                                    self.hitting_set_solver.add_card_core(
-                                        &lits,
-                                        oidx + 1,
-                                        CoreOrigin::Normal,
-                                    );
+                                    hss.add_card_core(&lits, oidx + 1, CoreOrigin::Normal);
                                     translated[lit.vidx()] = true;
                                 } else {
-                                    self.hitting_set_solver.learn_unit(lit);
+                                    hss.learn_unit(lit);
                                 }
                             } else {
                                 // introduce necessary translations in HSS
@@ -409,33 +415,25 @@ where
                                             // (3) constraint, reformulated as follows
                                             //   * sum(x) - sum(o) = 1
                                             //   * sum(x) + sum(not o) = k (since there are k-1 o vars)
-                                            self.hitting_set_solver.add_card_eq(&lits, n_leafs);
+                                            hss.add_card_eq(&lits, n_leafs);
                                             // (4)/(5) ordering constraints, slightly adapted from paper to drop e vars
                                             //   * o_j >= o_j+1
                                             for pair in lits[n_leafs..].windows(2) {
-                                                self.hitting_set_solver
-                                                    .add_clause(Cl::new(&[!pair[0], pair[1]]));
+                                                hss.add_clause(Cl::new(&[!pair[0], pair[1]]));
                                             }
                                         } else {
-                                            self.hitting_set_solver.add_reified_card(
-                                                &lits,
-                                                oidx + 1,
-                                                lit,
-                                                false,
-                                            );
+                                            hss.add_reified_card(&lits, oidx + 1, lit, false);
                                             translated[lit.vidx()] = true;
                                         }
                                     }
                                 }
 
-                                self.hitting_set_solver
-                                    .add_core(core.as_ref(), CoreOrigin::Normal);
+                                hss.add_core(core.as_ref(), CoreOrigin::Normal);
                             }
                         } else if core.len() == 1 {
-                            self.hitting_set_solver.learn_unit(core[0]);
+                            hss.learn_unit(core[0]);
                         } else {
-                            self.hitting_set_solver
-                                .add_core(core.as_ref(), CoreOrigin::Normal);
+                            hss.add_core(core.as_ref(), CoreOrigin::Normal);
                         }
                         self.weed_out_assumptions(&core, &mut assumps, &mut wce_obj)?;
                         if let Some(log) = &mut self.kernel.logger {
@@ -444,7 +442,7 @@ where
                         if assumps.is_empty() {
                             break;
                         }
-                        match self.oracle_with_unit_learner(&assumps)? {
+                        match self.oracle_with_unit_learner(&assumps, hss)? {
                             SolverResult::Sat => {
                                 let (costs, solution) =
                                     self.kernel.get_solution_and_internal_costs(true)?;
@@ -531,7 +529,7 @@ where
                     assumps.sort_by_key(|l| -joint_objective[l.vidx()].abs());
                 }
                 loop {
-                    match self.oracle_with_unit_learner(&assumps)? {
+                    match self.oracle_with_unit_learner(&assumps, hss)? {
                         SolverResult::Sat => {
                             let (costs, solution) =
                                 self.kernel.get_solution_and_internal_costs(true)?;
@@ -586,14 +584,10 @@ where
                                 }
                                 lits.push(lit);
                             }
-                            self.hitting_set_solver.add_card_core(
-                                &lits,
-                                bound,
-                                CoreOrigin::Abstract,
-                            );
+                            hss.add_card_core(&lits, bound, CoreOrigin::Abstract);
                             translated[lit.vidx()] = true;
                         } else {
-                            self.hitting_set_solver.learn_unit(lit);
+                            hss.learn_unit(lit);
                         }
                     } else {
                         // introduce necessary translations in HSS
@@ -633,14 +627,12 @@ where
                                     }
                                     lits.push(lit);
                                 }
-                                self.hitting_set_solver
-                                    .add_reified_card(&lits, bound, lit, false);
+                                hss.add_reified_card(&lits, bound, lit, false);
                                 translated[lit.vidx()] = true;
                             }
                         }
 
-                        self.hitting_set_solver
-                            .add_core(core.as_ref(), CoreOrigin::Abstract);
+                        hss.add_core(core.as_ref(), CoreOrigin::Abstract);
                     }
                     self.weed_out_assumptions(&core, &mut assumps, &mut joint_objective)?;
                     if let Some(log) = &mut self.kernel.logger {
@@ -657,7 +649,7 @@ where
 
     /// Separate algorithm branch for when the entire instance was seeded into the hitting set
     /// solver
-    fn main_fully_seeded(&mut self) -> MaybeTerminatedError {
+    fn main_fully_seeded(&mut self, hss: &mut Hss) -> MaybeTerminatedError {
         debug_assert!(
             (self.n_seeded as f64 / self.kernel.stats.n_orig_clauses as f64 - 1.0).abs()
                 < f64::EPSILON
@@ -665,7 +657,8 @@ where
         self.kernel.log_routine_start("ihs (fully seeded)")?;
         loop {
             self.kernel.log_routine_start("extract hitting set")?;
-            let hitting_set_answer = self.hitting_set_solver.optimal_hitting_set(None);
+            let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;
+            self.kernel.check_termination()?;
             let (cost, hitting_set) = match hitting_set_answer {
                 CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
                 CompleteSolveResult::Infeasible => {
@@ -684,7 +677,7 @@ where
             self.kernel
                 .yield_solutions(costs.clone(), &[], solution, &mut self.pareto_front)?;
             // introduce PD cut in the hitting set solver
-            self.hitting_set_solver.add_pd_cut(&costs);
+            hss.add_pd_cut(&costs);
         }
     }
 
@@ -728,8 +721,12 @@ where
         Done(core)
     }
 
-    fn oracle_with_unit_learner(&mut self, assumps: &[Lit]) -> MaybeTerminatedError<SolverResult> {
-        let hss = (&mut self.hitting_set_solver) as *mut Hss;
+    fn oracle_with_unit_learner(
+        &mut self,
+        assumps: &[Lit],
+        hss: &mut Hss,
+    ) -> MaybeTerminatedError<SolverResult> {
+        let hss = hss as *mut Hss;
         let obj_lits = (&mut self.objective_lits) as *mut RsHashSet<Lit>;
         self.kernel.oracle.attach_learner(
             move |cl| {
@@ -842,6 +839,7 @@ where
             self.objective_lits.clear();
         }
 
+        let mut hss = self.hitting_set_solver.take().unwrap();
         let mut translated = vec![false; self.kernel.var_manager.n_used() as usize + 1];
         let mut olit_map = vec![None; self.kernel.var_manager.n_used() as usize + 1];
         let mut reform_objs = Vec::with_capacity(cb_res.len());
@@ -974,26 +972,20 @@ where
                                 // (3) constraint, reformulated as follows
                                 //   * sum(x) - sum(o) = 1
                                 //   * sum(x) + sum(not o) = k (since there are k-1 o vars)
-                                self.hitting_set_solver.add_card_eq(&lits, n_leafs);
+                                hss.add_card_eq(&lits, n_leafs);
                                 // (4)/(5) ordering constraints, slightly adapted from paper to drop e vars
                                 //   * o_j >= o_j+1
                                 for pair in lits[n_leafs..].windows(2) {
-                                    self.hitting_set_solver
-                                        .add_clause(Cl::new(&[!pair[0], pair[1]]));
+                                    hss.add_clause(Cl::new(&[!pair[0], pair[1]]));
                                 }
                             } else {
-                                self.hitting_set_solver
-                                    .add_reified_card(&lits, val, lit, false);
+                                hss.add_reified_card(&lits, val, lit, false);
                                 translated[lit.vidx()] = true;
                             }
                         }
                         // NOTE: all variables in the core were introduced in the HSS in the above
                         // loop, even if they are not from the original objective
-                        self.hitting_set_solver.add_card_core(
-                            &lits,
-                            bound,
-                            CoreOrigin::CoreBoosting,
-                        );
+                        hss.add_card_core(&lits, bound, CoreOrigin::CoreBoosting);
                     }
 
                     lower_bounds.push(reform.offset);
@@ -1033,8 +1025,7 @@ where
                                     self.max_obj_var = std::cmp::max(self.max_obj_var, lit.var());
                                     olit_map[lit.vidx()] = Some((obj_idx, root, idx));
                                     // Ordering constraints over totalizer output variables in HSS
-                                    self.hitting_set_solver
-                                        .add_clause(Cl::new(&[last_lit, !lit]));
+                                    hss.add_clause(Cl::new(&[last_lit, !lit]));
                                     last_lit = lit;
                                 }
                             }
@@ -1067,11 +1058,11 @@ where
         match opts.treatment {
             IhsCbTreatment::Ignore => {
                 self.cb_data = CbData::Ignore;
-                self.hitting_set_solver.change_objectives(reform_objs);
+                hss.change_objectives(reform_objs);
             }
             IhsCbTreatment::Translate | IhsCbTreatment::TranslateKatsirelos => {
                 self.cb_data = CbData::Translate;
-                self.hitting_set_solver.change_lower_bounds(lower_bounds);
+                hss.change_lower_bounds(lower_bounds);
             }
             IhsCbTreatment::TranslateReform | IhsCbTreatment::TranslateKatsirelosReform => {
                 self.cb_data = CbData::TranslateReform {
@@ -1080,19 +1071,20 @@ where
                     olit_map,
                     translated,
                 };
-                self.hitting_set_solver.change_objectives(reform_objs);
+                hss.change_objectives(reform_objs);
             }
             IhsCbTreatment::Abstract => {
                 self.cb_data = CbData::Abstract {
                     reforms,
                     translated,
                 };
-                self.hitting_set_solver.change_lower_bounds(lower_bounds);
+                hss.change_lower_bounds(lower_bounds);
             }
         }
 
         self.kernel.log_routine_end()?;
         self.kernel.check_termination()?;
+        self.hitting_set_solver = Some(hss);
 
         Done(true)
     }
@@ -1121,4 +1113,14 @@ struct CbReformData {
     db: TotDb,
     keep_lits: Vec<Lit>,
     remaining_tots: Vec<(NodeId, usize)>,
+}
+
+impl<Hss, OInit, BCG> hitting_sets::Callbacks
+    for ParetoIhs<rustsat_cadical::CaDiCaL<'_, '_>, Hss, OInit, BCG>
+{
+    fn check_termination(&self) -> bool {
+        self.kernel
+            .term_flag
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
 }

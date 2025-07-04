@@ -2,6 +2,7 @@
 //!
 //! This crate contains a uniform interface to various hitting set solvers intended to be used in
 //! IHS-style MaxSAT algorithms.
+#![feature(try_trait_v2)]
 
 use std::{fmt, num::NonZero, str};
 
@@ -139,16 +140,40 @@ pub trait HittingSetSolver {
     /// Adds a reified cardinality constraint of for `sum(lits) >= bound -> reif`
     fn add_reified_card(&mut self, lits: &[Lit], bound: usize, reif: Lit, equivalence: bool);
 
+    fn optimal_hitting_set_callbacks<I, Cb>(
+        &mut self,
+        start: I,
+        cb: &mut Cb,
+    ) -> MaybeTerminated<CompleteSolveResult>
+    where
+        I: IntoIterator<Item = Lit>,
+        Cb: Callbacks;
+
+    fn hitting_set_callbacks<I, Cb>(
+        &mut self,
+        start: I,
+        cb: &mut Cb,
+    ) -> MaybeTerminated<IncompleteSolveResult>
+    where
+        I: IntoIterator<Item = Lit>,
+        Cb: Callbacks;
+
     /// Computes an optimal hitting set for the currently given cores
     fn optimal_hitting_set<I>(&mut self, start: I) -> CompleteSolveResult
     where
-        I: IntoIterator<Item = Lit>;
+        I: IntoIterator<Item = Lit>,
+    {
+        self.optimal_hitting_set_callbacks(start, &mut ()).unwrap()
+    }
 
     /// Computes a hitting set for the currently given cores and stops once a solution better than
     /// the given starting point is found
     fn hitting_set<I>(&mut self, start: I) -> IncompleteSolveResult
     where
-        I: IntoIterator<Item = Lit>;
+        I: IntoIterator<Item = Lit>,
+    {
+        self.hitting_set_callbacks(start, &mut ()).unwrap()
+    }
 
     /// Adds a PD cut to the hitting set solver
     fn add_pd_cut(&mut self, costs: &[usize]);
@@ -203,6 +228,18 @@ pub trait BuildSolver {
     fn use_starting_points(&mut self, use_start: bool) -> &mut Self;
 }
 
+/// Trait for solver callbacks
+pub trait Callbacks {
+    /// If this returns true, the solver should terminate
+    fn check_termination(&self) -> bool;
+}
+
+impl Callbacks for () {
+    fn check_termination(&self) -> bool {
+        false
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreOrigin {
     Seeding,
@@ -226,4 +263,57 @@ struct Obj {
     lits: RsHashMap<Lit, usize>,
     offset: usize,
     lower_bound: usize,
+}
+
+/// Return type for interruptible functions
+#[derive(Debug, PartialEq)]
+pub enum MaybeTerminated<T = ()> {
+    /// The operation finished with a return value
+    Done(T),
+    /// The operation was terminated early
+    Terminated,
+}
+
+impl<T> MaybeTerminated<T> {
+    pub fn unwrap(self) -> T {
+        match self {
+            MaybeTerminated::Done(val) => val,
+            MaybeTerminated::Terminated => {
+                panic!("called `MaybeTerminated::unwrap()` on a `Terminated` value")
+            }
+        }
+    }
+
+    pub fn map<T2>(self, mut map: impl FnMut(T) -> T2) -> MaybeTerminated<T2> {
+        match self {
+            MaybeTerminated::Done(val) => MaybeTerminated::Done(map(val)),
+            MaybeTerminated::Terminated => MaybeTerminated::Terminated,
+        }
+    }
+}
+
+impl<T> std::ops::Try for MaybeTerminated<T> {
+    type Output = T;
+
+    type Residual = MaybeTerminated<std::convert::Infallible>;
+
+    fn from_output(output: Self::Output) -> Self {
+        MaybeTerminated::Done(output)
+    }
+
+    fn branch(self) -> std::ops::ControlFlow<Self::Residual, Self::Output> {
+        match self {
+            MaybeTerminated::Done(val) => std::ops::ControlFlow::Continue(val),
+            MaybeTerminated::Terminated => {
+                std::ops::ControlFlow::Break(MaybeTerminated::Terminated)
+            }
+        }
+    }
+}
+
+impl<T> std::ops::FromResidual<MaybeTerminated<std::convert::Infallible>> for MaybeTerminated<T> {
+    fn from_residual(residual: <Self as std::ops::Try>::Residual) -> Self {
+        let MaybeTerminated::Terminated = residual;
+        MaybeTerminated::Terminated
+    }
 }

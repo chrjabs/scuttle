@@ -88,6 +88,15 @@ impl<T> std::ops::FromResidual<MaybeTerminated<std::convert::Infallible>> for Ma
     }
 }
 
+impl<T> std::ops::FromResidual<hitting_sets::MaybeTerminated<std::convert::Infallible>>
+    for MaybeTerminated<T>
+{
+    fn from_residual(residual: hitting_sets::MaybeTerminated<std::convert::Infallible>) -> Self {
+        let hitting_sets::MaybeTerminated::Terminated = residual;
+        MaybeTerminated::Terminated(Termination::Interrupted)
+    }
+}
+
 /// Return type for functions that either return a value, terminate early or error
 #[derive(Debug)]
 pub enum MaybeTerminatedError<T = ()> {
@@ -180,6 +189,15 @@ where
     fn from_residual(residual: Result<std::convert::Infallible, E>) -> Self {
         let Err(err) = residual;
         MaybeTerminatedError::Error(err.into())
+    }
+}
+
+impl<T> std::ops::FromResidual<hitting_sets::MaybeTerminated<std::convert::Infallible>>
+    for MaybeTerminatedError<T>
+{
+    fn from_residual(residual: hitting_sets::MaybeTerminated<std::convert::Infallible>) -> Self {
+        let hitting_sets::MaybeTerminated::Terminated = residual;
+        MaybeTerminatedError::Terminated(Termination::Interrupted)
     }
 }
 
