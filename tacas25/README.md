@@ -103,7 +103,7 @@ tail -n+2 ${ARTEFACT}/results.csv | awk -F',' '{sum+=($4/$3)-1;}END{print sum/NR
 ## Benchmarks
 
 We include all benchmarks we used in our experiments in the artefact, these
-benchmarks do not all orginate from our work. We retrieved the instances from
+benchmarks do not all originate from our work. We retrieved the instances from
 the sources described below and converted them to our `.mcnf` instance format.
 
 The instances are all identified by a hash value, and they are located at

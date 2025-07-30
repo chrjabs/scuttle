@@ -5,7 +5,10 @@ set -e
 ARTEFACT="${1:-$(pwd)/tacas25-certified-mo-maxsat.zip}"
 rm -rf "${ARTEFACT}"
 
-SRCDIR="$(dirname "$(cd -- "$(dirname "$0")" >/dev/null 2>&1; pwd -P)")"
+SRCDIR="$(dirname "$(
+  cd -- "$(dirname "$0")" >/dev/null 2>&1
+  pwd -P
+)")"
 
 echo "Updating git submodules"
 git -C "${SRCDIR}" submodule update --init --recursive

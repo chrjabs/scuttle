@@ -27,18 +27,18 @@ use rustsat::{
     },
     types::{Assignment, Clause, Lit, Var},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions};
+use scuttle_proc::{KernelFunctions, oracle_bounds};
 
 use crate::{
+    EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
+    MaybeTerminatedError::{self, Done},
     algs::coreboosting::CbResult,
     options::{AfterCbOptions, CoreBoostingOptions},
     termination::ensure,
     types::{NonDomPoint, ParetoFront, VarManager},
-    EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
-    MaybeTerminatedError::{self, Done},
 };
 
-use super::{coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, Objective};
+use super::{CoreBoost, Kernel, ObjEncoding, Objective, coreboosting::MergeOllRef, proofs};
 
 /// The BiOptSat algorithm type
 ///

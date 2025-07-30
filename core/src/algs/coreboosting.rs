@@ -17,8 +17,8 @@ use scuttle_proc::oracle_bounds;
 use crate::MaybeTerminatedError::{self, Done};
 
 use super::{
-    coreguided::{Inactives, OllReformulation, ReformData},
     Kernel, ObjEncoding, Objective,
+    coreguided::{Inactives, OllReformulation, ReformData},
 };
 
 pub(super) trait MergeOllRef {

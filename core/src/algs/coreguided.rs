@@ -18,8 +18,8 @@ use rustsat::{
 };
 
 use crate::{
-    algs::proofs,
     MaybeTerminatedError::{self, Done},
+    algs::proofs,
 };
 
 use super::{Kernel, Objective};
@@ -253,7 +253,7 @@ where
                 Sat => {
                     return Done(Some(
                         self.oracle.solution(self.var_manager.max_var().unwrap())?,
-                    ))
+                    ));
                 }
                 Unsat => return Done(None),
                 Interrupted => unreachable!(),

@@ -22,10 +22,9 @@ use pigeons::{AbsConstraintId, ConstraintId};
 use rustsat::{
     clause,
     encodings::{
-        self, atomics,
+        self, Monotone, atomics,
         card::{self, Totalizer},
         pb::{self, GeneralizedTotalizer},
-        Monotone,
     },
     instances::ManageVars,
     solvers::{
@@ -34,20 +33,20 @@ use rustsat::{
     },
     types::{Assignment, Clause, Lit, Var},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions};
+use scuttle_proc::{KernelFunctions, oracle_bounds};
 
 use crate::{
+    EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
+    MaybeTerminatedError::{self, Done},
+    Phase,
     algs::coreboosting::CbResult,
     archive::Archive,
     options::{AfterCbOptions, CoreBoostingOptions, EnumOptions},
     termination::ensure,
     types::{ParetoFront, VarManager},
-    EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
-    MaybeTerminatedError::{self, Done},
-    Phase,
 };
 
-use super::{coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, Objective};
+use super::{CoreBoost, Kernel, ObjEncoding, Objective, coreboosting::MergeOllRef, proofs};
 
 /// The $P$-minimal algorithm type
 ///

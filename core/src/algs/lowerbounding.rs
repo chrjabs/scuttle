@@ -15,10 +15,9 @@ use pigeons::ConstraintId;
 use rustsat::{
     clause,
     encodings::{
-        self,
+        self, Monotone,
         card::{self, Totalizer},
         pb::{self, GeneralizedTotalizer},
-        Monotone,
     },
     solvers::{
         DefaultInitializer, Initialize, Solve, SolveIncremental, SolveStats, SolverResult,
@@ -29,16 +28,16 @@ use rustsat::{
 use scuttle_proc::KernelFunctions;
 
 use crate::{
+    EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
+    MaybeTerminatedError::{self, Done},
+    Phase,
     algs::coreboosting::CbResult,
     options::{AfterCbOptions, CoreBoostingOptions},
     termination::ensure,
     types::{NonDomPoint, ParetoFront, VarManager},
-    EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
-    MaybeTerminatedError::{self, Done},
-    Phase,
 };
 
-use super::{coreboosting::MergeOllRef, proofs, CoreBoost, Kernel, ObjEncoding, Objective};
+use super::{CoreBoost, Kernel, ObjEncoding, Objective, coreboosting::MergeOllRef, proofs};
 
 /// The lower-bounding algorithm type
 ///

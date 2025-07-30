@@ -7,9 +7,9 @@ use std::{
 };
 
 use rustsat::{
-    encodings::{cert::CollectClauses as CollectCertClauses, pb, CollectClauses},
-    instances::{fio, ManageVars, MultiOptInstance, Objective as RsObjective, ReindexVars},
-    types::{constraints::PbConstraint, Clause, Lit, RsHashMap},
+    encodings::{CollectClauses, cert::CollectClauses as CollectCertClauses, pb},
+    instances::{ManageVars, MultiOptInstance, Objective as RsObjective, ReindexVars, fio},
+    types::{Clause, Lit, RsHashMap, constraints::PbConstraint},
 };
 
 use crate::types::{Instance, Objective, Parsed, Reindexer, VarManager};

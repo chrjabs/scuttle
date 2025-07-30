@@ -4,7 +4,7 @@ use core::fmt;
 use std::{
     io,
     marker::PhantomData,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{Arc, atomic::AtomicBool},
 };
 
 #[cfg(feature = "interrupt-oracle")]
@@ -25,8 +25,8 @@ use rustsat::{
 use rustsat_cadical::CaDiCaL;
 
 use crate::{
-    types::{Instance, ObjEncoding, Objective, VarManager},
     KernelOptions, Limits, Stats,
+    types::{Instance, ObjEncoding, Objective, VarManager},
 };
 
 use super::default_blocking_clause;

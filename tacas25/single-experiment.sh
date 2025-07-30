@@ -6,32 +6,35 @@ INSTANCE=$1
 ALGORITHM=$2
 COMMENT=$3
 
-if [[ ! -f "${INSTANCE}" ]]; then
+if [[ ! -f ${INSTANCE} ]]; then
   >&2 echo "Instance \`${INSTANCE}\` does not exist"
   exit 1
 fi
 
 EXTRACTED="/tmp/$(basename -s .xz "${INSTANCE}")"
-xz -dc "${INSTANCE}" > "${EXTRACTED}"
+xz -dc "${INSTANCE}" >"${EXTRACTED}"
 
 # Determine top-level artefact directory
-ARTEFACT="$(dirname "$(cd -- "$(dirname "$0")" >/dev/null 2>&1; pwd -P)")"
+ARTEFACT="$(dirname "$(
+  cd -- "$(dirname "$0")" >/dev/null 2>&1
+  pwd -P
+)")"
 >&2 echo "Determined \${ARTEFACT} as \`${ARTEFACT}\`"
 
 SCUTTLE="${ARTEFACT}/bin/scuttle"
-if [[ ! -x "${SCUTTLE}" ]]; then
+if [[ ! -x ${SCUTTLE} ]]; then
   >&2 echo "scuttle not found at \`${SCUTTLE}\`, please run \`${ARTEFACT}/scripts/install.sh\` first"
   exit 1
 fi
 
 RUNSOLVER="${ARTEFACT}/bin/runsolver"
-if [[ ! -x "${RUNSOLVER}" ]]; then
+if [[ ! -x ${RUNSOLVER} ]]; then
   >&2 echo "runsolver not found at \`${RUNSOLVER}\`, please run \`${ARTEFACT}/scripts/install.sh\` first"
   exit 1
 fi
 
 VERIPB="${HOME}/.local/bin/veripb"
-if [[ ! -x "${VERIPB}" ]]; then
+if [[ ! -x ${VERIPB} ]]; then
   >&2 echo "veripb not found at \`${VERIPB}\`, please run \`${ARTEFACT}/scripts/install.sh\` first"
   exit 1
 fi
@@ -50,7 +53,7 @@ LOGGINGLOG="${ARTEFACT}/results/$(basename -s .mcnf ${EXTRACTED}).${ALGORITHM}.$
 
 rm "${EXTRACTED}"
 
-check_log () {
+check_log() {
   LOG="$1"
   if grep -q -m1 'Maximum CPU time exceeded: sending SIGTERM then SIGKILL' "${LOG}.wat"; then
     echo "timeout"
@@ -71,7 +74,7 @@ check_log () {
   grep -m1 "^CPUTIME" "${LOG}.var" | cut -d '=' -f2
 }
 
-print_results () {
+print_results() {
   HASH=$(basename -s .mcnf.xz "${INSTANCE}")
   BASELINE=$(check_log "${BASELINELOG}")
   LOGGING=$(check_log "${LOGGINGLOG}")
@@ -84,7 +87,7 @@ print_results () {
 
 VERIPBLOG="${ARTEFACT}/results/$(basename -s .mcnf ${EXTRACTED}).${ALGORITHM}.${COMMENT}.veripb"
 
-if ! check_log "${LOGGINGLOG}"> /dev/null; then
+if ! check_log "${LOGGINGLOG}" >/dev/null; then
   >&2 echo "Skipping VeriPB due to solver not done"
   print_results
   exit 0

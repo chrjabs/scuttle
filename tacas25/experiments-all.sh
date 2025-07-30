@@ -3,7 +3,10 @@
 set -e
 
 # Determine top-level artefact directory
-ARTEFACT="$(dirname "$(cd -- "$(dirname "$0")" >/dev/null 2>&1; pwd -P)")"
+ARTEFACT="$(dirname "$(
+  cd -- "$(dirname "$0")" >/dev/null 2>&1
+  pwd -P
+)")"
 >&2 echo "Determined \${ARTEFACT} as \`${ARTEFACT}\`"
 
 RUNEXP="${ARTEFACT}/scripts/single-experiment.sh"

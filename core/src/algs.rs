@@ -5,8 +5,8 @@ use std::{
     marker::PhantomData,
     ops::{Not, Range},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -29,11 +29,11 @@ use scuttle_proc::oracle_bounds;
 use maxpre::PreproClauses;
 
 use crate::{
-    options::{CoreBoostingOptions, EnumOptions},
-    types::{Instance, NonDomPoint, ObjEncoding, Objective, ParetoFront, VarManager},
     EncodingStats, KernelOptions, Limits, MaybeTerminated,
     MaybeTerminatedError::{self, Done, Error, Terminated},
     Phase, Stats, Termination, WriteSolverLog,
+    options::{CoreBoostingOptions, EnumOptions},
+    types::{Instance, NonDomPoint, ObjEncoding, Objective, ParetoFront, VarManager},
 };
 
 pub mod bioptsat;

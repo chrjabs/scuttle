@@ -6,7 +6,10 @@
 set -e
 
 # Determine top-level artefact directory
-ARTEFACT="$(dirname "$(cd -- "$(dirname "$0")" >/dev/null 2>&1; pwd -P)")"
+ARTEFACT="$(dirname "$(
+  cd -- "$(dirname "$0")" >/dev/null 2>&1
+  pwd -P
+)")"
 echo "Determined \${ARTEFACT} as \`${ARTEFACT}\`"
 
 for dir in runsolver veripb benchmarks scripts; do
@@ -23,7 +26,7 @@ sudo apt-get -y install \
   python3 python3-pip python3-dev python3-venv g++ libgmp-dev
 
 # Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
   sh -s -- --default-toolchain none -y
 source "${HOME}/.cargo/env"
 rustup install nightly-2024-08-13 --profile minimal
