@@ -195,6 +195,9 @@ enum AlgorithmCommand {
         /// Use upper bound solutions as starting point for the hitting set solver
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().starting_points), global = true)]
         use_starting_points: Bool,
+        /// Use randomized objective multipliers for evaluating robustness
+        #[arg(long, global = true)]
+        random_multipliers: bool,
         #[command(flatten)]
         cb: IhsCoreBoostingArgs,
         #[command(flatten)]
@@ -861,6 +864,7 @@ impl Cli {
                 candidate_seeding,
                 ihs_core_minimization,
                 use_starting_points,
+                random_multipliers,
                 hss_threads,
                 cb,
                 file,
@@ -901,6 +905,7 @@ impl Cli {
                         hss_threads,
                         core_minimization: ihs_core_minimization,
                         starting_points: use_starting_points.into(),
+                        random_multipliers,
                     },
                     if args.core_boosting.into() {
                         Some(cb.into())

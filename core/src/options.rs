@@ -399,6 +399,8 @@ pub struct IhsOptions {
     pub core_minimization: CoreMinimization,
     /// Use solutions from upper bounds as starting point for the hitting set solver
     pub starting_points: bool,
+    /// Use randomized objective multipliers to evaluate robustness
+    pub random_multipliers: bool,
 }
 
 impl Default for IhsOptions {
@@ -410,6 +412,7 @@ impl Default for IhsOptions {
             wce: true,
             core_minimization: CoreMinimization::Full,
             starting_points: true,
+            random_multipliers: false,
         }
     }
 }

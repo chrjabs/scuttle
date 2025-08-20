@@ -113,6 +113,16 @@ fn main() {
                 },
             ),
         ),
+        (
+            "randmult",
+            (
+                KernelOptions::default(),
+                IhsOptions {
+                    random_multipliers: true,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
     ];
     for (id, opts) in vars {
         tests.extend(

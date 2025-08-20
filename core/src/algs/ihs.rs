@@ -133,7 +133,16 @@ where
             }
         }
 
-        let kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, kernel_opts)?;
+        let mut kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, kernel_opts)?;
+
+        // randomized multipliers for evaluating robustness
+        if opts.random_multipliers {
+            let multipliers: Vec<_> = (0..kernel.stats.n_objs)
+                .map(|_| f64::from(kernel.rng.i8(1..=10)))
+                .collect();
+            hitting_set_solver.change_multipliers(&multipliers);
+        }
+
         Ok(Self {
             kernel,
             hitting_set_solver: Some(hitting_set_solver),
