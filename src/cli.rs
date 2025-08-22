@@ -17,7 +17,8 @@ use rustsat::{
     solvers::{SolverResult, SolverStats},
 };
 use scuttle_core::options::{
-    CandidateSeeding, CoreMinimization, IhsCbOptions, IhsCbTreatment, IhsOptions, Stratification,
+    CandidateSeeding, CoreMinimization, IhsCbOptions, IhsCbTreatment, IhsOptions, MipPdOptions,
+    ObjectiveMultipliers, Stratification,
 };
 use scuttle_core::prepro::FileFormat;
 use scuttle_core::{
@@ -196,8 +197,8 @@ enum AlgorithmCommand {
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().starting_points), global = true)]
         use_starting_points: Bool,
         /// Use randomized objective multipliers for evaluating robustness
-        #[arg(long, global = true)]
-        random_multipliers: bool,
+        #[arg(long, default_value_t = ObjectiveMultipliers::default(), global = true)]
+        multipliers: ObjectiveMultipliers,
         #[command(flatten)]
         cb: IhsCoreBoostingArgs,
         #[command(flatten)]
@@ -206,12 +207,18 @@ enum AlgorithmCommand {
     /// MIP with PD cuts
     #[command(alias = "mip")]
     MipPd {
+        /// The random seed to use for random operations
+        #[arg(long, default_value_t = MipPdOptions::default().random_seed, global = true)]
+        random_seed: u64,
         /// The hitting set solver to use
         #[arg(long, default_value_t = HittingSetSolver::default())]
         mip_solver: HittingSetSolver,
         /// The number of threads for the hitting set solver
         #[arg(long, default_value_t = hitting_sets::Threads::default())]
         threads: hitting_sets::Threads,
+        /// Use randomized objective multipliers for evaluating robustness
+        #[arg(long, default_value_t = ObjectiveMultipliers::default(), global = true)]
+        multipliers: ObjectiveMultipliers,
         #[command(flatten)]
         file: FileArgs,
     },
@@ -668,7 +675,7 @@ pub enum Algorithm {
         IhsOptions,
         Option<IhsCbOptions>,
     ),
-    MipPd(HittingSetSolver, hitting_sets::Threads),
+    MipPd(HittingSetSolver, MipPdOptions),
 }
 
 impl fmt::Display for Algorithm {
@@ -864,7 +871,7 @@ impl Cli {
                 candidate_seeding,
                 ihs_core_minimization,
                 use_starting_points,
-                random_multipliers,
+                multipliers,
                 hss_threads,
                 cb,
                 file,
@@ -905,7 +912,7 @@ impl Cli {
                         hss_threads,
                         core_minimization: ihs_core_minimization,
                         starting_points: use_starting_points.into(),
-                        random_multipliers,
+                        multipliers,
                     },
                     if args.core_boosting.into() {
                         Some(cb.into())
@@ -916,7 +923,9 @@ impl Cli {
                 proof_paths: None,
             },
             AlgorithmCommand::MipPd {
+                random_seed,
                 mip_solver,
+                multipliers,
                 threads,
                 file,
             } => Cli {
@@ -942,7 +951,14 @@ impl Cli {
                 print_stats: !args.log.no_print_stats,
                 color: args.log.color,
                 logger_config: args.log.into(),
-                alg: Algorithm::MipPd(mip_solver, threads),
+                alg: Algorithm::MipPd(
+                    mip_solver,
+                    MipPdOptions {
+                        random_seed,
+                        threads,
+                        multipliers,
+                    },
+                ),
                 proof_paths: None,
             },
         }
@@ -1076,10 +1092,13 @@ impl Cli {
                         opts.candidate_seeding,
                     )?;
                     Self::print_parameter(&mut buffer, "hss-threads", opts.hss_threads)?;
+                    Self::print_parameter(&mut buffer, "multipliers", opts.multipliers)?;
                 }
-                Algorithm::MipPd(mip_solver, threads) => {
+                Algorithm::MipPd(mip_solver, opts) => {
                     Self::print_parameter(&mut buffer, "mip-solver", mip_solver)?;
-                    Self::print_parameter(&mut buffer, "threads", threads)?;
+                    Self::print_parameter(&mut buffer, "threads", opts.threads)?;
+                    Self::print_parameter(&mut buffer, "random_seed", opts.random_seed)?;
+                    Self::print_parameter(&mut buffer, "multipliers", opts.multipliers)?;
                 }
             }
             Self::print_parameter(&mut buffer, "pp-limit", OptVal::new(self.limits.pps))?;

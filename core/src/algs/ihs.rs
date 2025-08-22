@@ -22,7 +22,10 @@ use scuttle_proc::{oracle_bounds, KernelFunctions};
 use crate::{
     algs::{coreboosting::CbResult, coreguided::ReformData},
     archive::Archive,
-    options::{CandidateSeeding, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions},
+    options::{
+        CandidateSeeding, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions,
+        ObjectiveMultipliers,
+    },
     termination::ensure,
     types::{Objective, ParetoFront, VarManager},
     CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
@@ -135,12 +138,55 @@ where
 
         let mut kernel = Kernel::new(clauses, objs, var_manager, block_clause_gen, kernel_opts)?;
 
-        // randomized multipliers for evaluating robustness
-        if opts.random_multipliers {
-            let multipliers: Vec<_> = (0..kernel.stats.n_objs)
-                .map(|_| f64::from(kernel.rng.i8(1..=10)))
-                .collect();
-            hitting_set_solver.change_multipliers(&multipliers);
+        let weight_sums_and_min = |objs: &[Objective]| {
+            let mut min_weight_sum = usize::MAX;
+            let mut weight_sums = vec![];
+            for obj in objs {
+                let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
+                weight_sums.push(sum);
+                min_weight_sum = std::cmp::min(min_weight_sum, sum);
+            }
+            (weight_sums, min_weight_sum)
+        };
+        match opts.multipliers {
+            ObjectiveMultipliers::Ones => (),
+            ObjectiveMultipliers::Normalized => {
+                let (sums, min) = weight_sums_and_min(&kernel.objs);
+                let multipliers: Vec<_> = sums
+                    .into_iter()
+                    .map(|sum| (sum as f64) / (min as f64))
+                    .collect();
+                hitting_set_solver.change_multipliers(&multipliers);
+            }
+            ObjectiveMultipliers::Random => {
+                let multipliers: Vec<_> = (0..kernel.stats.n_objs)
+                    .map(|_| f64::from(kernel.rng.i8(1..=10)))
+                    .collect();
+                hitting_set_solver.change_multipliers(&multipliers);
+            }
+            ObjectiveMultipliers::NormalizedRandom => {
+                let (sums, min) = weight_sums_and_min(&kernel.objs);
+                let multipliers: Vec<_> = sums
+                    .into_iter()
+                    .map(|sum| (sum as f64) / (min as f64) * f64::from(kernel.rng.i8(1..=10)))
+                    .collect();
+                hitting_set_solver.change_multipliers(&multipliers);
+            }
+            ObjectiveMultipliers::Lexicographic => {
+                let mut mult = 1;
+                let multipliers: Vec<_> = kernel
+                    .objs
+                    .iter()
+                    .rev()
+                    .map(|obj| {
+                        let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
+                        let ret = mult as f64;
+                        mult *= sum + 1;
+                        ret
+                    })
+                    .collect();
+                hitting_set_solver.change_multipliers(&multipliers);
+            }
         }
 
         Ok(Self {

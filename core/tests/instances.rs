@@ -4,7 +4,10 @@ use libtest_mimic::{Arguments, Failed};
 use pigeons::Proof;
 use scuttle_core::{
     algs::{InitDefaultBlock, Solve},
-    options::{CoreMinimization, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions},
+    options::{
+        CoreMinimization, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions, MipPdOptions,
+        ObjectiveMultipliers,
+    },
     types::{Instance, ParetoFront},
     CoreBoost, CoreBoostingOptions, Init, InitCert, InitCertDefaultBlock, KernelFunctions,
     KernelOptions,
@@ -118,7 +121,17 @@ fn main() {
             (
                 KernelOptions::default(),
                 IhsOptions {
-                    random_multipliers: true,
+                    multipliers: ObjectiveMultipliers::NormalizedRandom,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
+        (
+            "lexmult",
+            (
+                KernelOptions::default(),
+                IhsOptions {
+                    multipliers: ObjectiveMultipliers::Lexicographic,
                     ..IhsOptions::default()
                 },
             ),
@@ -218,25 +231,44 @@ fn main() {
         );
     }
 
-    tests.extend(
-        TestSetup::new(
-            "mip-pd<highs>",
-            "",
-            run_mippd_test::<hitting_sets::HighsSolver>,
-            hitting_sets::Threads::default(),
-        )
-        .collect_tests(),
-    );
-    #[cfg(any(feature = "gurobi9", feature = "gurobi12"))]
-    tests.extend(
-        TestSetup::new(
-            "mip-pd<gurobi>",
-            "",
-            run_mippd_test::<hitting_sets::GurobiSolver>,
-            hitting_sets::Threads::default(),
-        )
-        .collect_tests(),
-    );
+    let vars = [
+        ("", MipPdOptions::default()),
+        (
+            "randmult",
+            MipPdOptions {
+                multipliers: ObjectiveMultipliers::NormalizedRandom,
+                ..MipPdOptions::default()
+            },
+        ),
+        (
+            "lexmult",
+            MipPdOptions {
+                multipliers: ObjectiveMultipliers::Lexicographic,
+                ..MipPdOptions::default()
+            },
+        ),
+    ];
+    for (id, opts) in vars {
+        tests.extend(
+            TestSetup::new(
+                "mip-pd<highs>",
+                id,
+                run_mippd_test::<hitting_sets::HighsSolver>,
+                opts,
+            )
+            .collect_tests(),
+        );
+        #[cfg(any(feature = "gurobi9", feature = "gurobi12"))]
+        tests.extend(
+            TestSetup::new(
+                "mip-pd<gurobi>",
+                id,
+                run_mippd_test::<hitting_sets::GurobiSolver>,
+                opts,
+            )
+            .collect_tests(),
+        );
+    }
 
     let vars = [
         ("cb", CoreBoostingOptions::default()),
@@ -580,14 +612,11 @@ where
     Ok(alg.pareto_front())
 }
 
-fn run_mippd_test<Hss>(
-    inst: Instance,
-    threads: hitting_sets::Threads,
-) -> Result<ParetoFront, Failed>
+fn run_mippd_test<Hss>(inst: Instance, opts: MipPdOptions) -> Result<ParetoFront, Failed>
 where
     Hss: hitting_sets::HittingSetSolver,
 {
-    let mut alg = scuttle_core::MipPd::<Hss>::from_instance_default_blocking(inst, threads)?;
+    let mut alg = scuttle_core::MipPd::<Hss>::from_instance_default_blocking(inst, opts)?;
     match alg.solve(scuttle_core::Limits::none()) {
         scuttle_core::MaybeTerminatedError::Done(_) => (),
         scuttle_core::MaybeTerminatedError::Terminated(t) => {

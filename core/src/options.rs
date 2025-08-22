@@ -399,8 +399,8 @@ pub struct IhsOptions {
     pub core_minimization: CoreMinimization,
     /// Use solutions from upper bounds as starting point for the hitting set solver
     pub starting_points: bool,
-    /// Use randomized objective multipliers to evaluate robustness
-    pub random_multipliers: bool,
+    /// The objective multiplier strategy to use
+    pub multipliers: ObjectiveMultipliers,
 }
 
 impl Default for IhsOptions {
@@ -412,7 +412,7 @@ impl Default for IhsOptions {
             wce: true,
             core_minimization: CoreMinimization::Full,
             starting_points: true,
-            random_multipliers: false,
+            multipliers: ObjectiveMultipliers::default(),
         }
     }
 }
@@ -434,6 +434,37 @@ impl fmt::Display for CandidateSeeding {
         match self {
             CandidateSeeding::None => write!(f, "none"),
             CandidateSeeding::OneSolution => write!(f, "one-solution"),
+        }
+    }
+}
+
+/// Objective multiplier options
+#[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+pub enum ObjectiveMultipliers {
+    /// Use `1` as the multiplier for each objective
+    Ones,
+    /// Normalize the objectives, effectively using `1/M` where `M` is the maximum value of the
+    /// objective
+    #[default]
+    Normalized,
+    /// Use random objective multipliers in `1..=10`
+    Random,
+    /// Use random objective multipliers in `1..=10` multiplied with `1/M` where `M` is the maximum
+    /// value of the objective
+    NormalizedRandom,
+    /// Set the objective multipliers so that a lexicographic order is forced
+    Lexicographic,
+}
+
+impl fmt::Display for ObjectiveMultipliers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ObjectiveMultipliers::Ones => write!(f, "ones"),
+            ObjectiveMultipliers::Normalized => write!(f, "normalized"),
+            ObjectiveMultipliers::Random => write!(f, "random"),
+            ObjectiveMultipliers::NormalizedRandom => write!(f, "normalized-random"),
+            ObjectiveMultipliers::Lexicographic => write!(f, "lexicographic"),
         }
     }
 }
@@ -503,4 +534,15 @@ impl fmt::Display for IhsCbTreatment {
             IhsCbTreatment::Abstract => write!(f, "abstract"),
         }
     }
+}
+
+/// IHS algorithm options
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MipPdOptions {
+    /// Seed for random operations
+    pub random_seed: u64,
+    /// The number of threads for the MIP solver
+    pub threads: hitting_sets::Threads,
+    /// The objective multiplier strategy to use
+    pub multipliers: ObjectiveMultipliers,
 }

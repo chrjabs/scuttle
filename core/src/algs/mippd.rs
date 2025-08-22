@@ -6,13 +6,14 @@ use std::sync::{
 };
 
 use anyhow::Context;
-use hitting_sets::{BuildSolver, CompleteSolveResult, HittingSetSolver, Threads};
+use hitting_sets::{BuildSolver, CompleteSolveResult, HittingSetSolver};
 use rustsat::{
     solvers::SolverStats,
     types::{Assignment, Lit, TernaryVal},
 };
 
 use crate::{
+    options::{MipPdOptions, ObjectiveMultipliers},
     types::{Instance, NonDomPoint, Objective, ParetoFront},
     EncodingStats, Limits, MaybeTerminated,
     MaybeTerminatedError::{self, Done},
@@ -88,11 +89,66 @@ impl<Hss> MipPd<Hss>
 where
     Hss: HittingSetSolver,
 {
-    pub fn from_instance_default_blocking(inst: Instance, opts: Threads) -> anyhow::Result<Self> {
+    pub fn from_instance_default_blocking(
+        inst: Instance,
+        opts: MipPdOptions,
+    ) -> anyhow::Result<Self> {
         let Instance { clauses, objs, .. } = inst;
         let mut builder = Hss::Builder::new(objs.iter().map(|obj| obj.iter()));
-        builder.threads(opts);
+        builder.threads(opts.threads);
         let mut hitting_set_solver = builder.init();
+
+        let mut rng = fastrand::Rng::with_seed(opts.random_seed);
+
+        let weight_sums_and_min = |objs: &[Objective]| {
+            let mut min_weight_sum = usize::MAX;
+            let mut weight_sums = vec![];
+            for obj in objs {
+                let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
+                weight_sums.push(sum);
+                min_weight_sum = std::cmp::min(min_weight_sum, sum);
+            }
+            (weight_sums, min_weight_sum)
+        };
+        match opts.multipliers {
+            ObjectiveMultipliers::Ones => (),
+            ObjectiveMultipliers::Normalized => {
+                let (sums, min) = weight_sums_and_min(&objs);
+                let multipliers: Vec<_> = sums
+                    .into_iter()
+                    .map(|sum| (sum as f64) / (min as f64))
+                    .collect();
+                hitting_set_solver.change_multipliers(&multipliers);
+            }
+            ObjectiveMultipliers::Random => {
+                let multipliers: Vec<_> =
+                    (0..objs.len()).map(|_| f64::from(rng.i8(1..=10))).collect();
+                hitting_set_solver.change_multipliers(&multipliers);
+            }
+            ObjectiveMultipliers::NormalizedRandom => {
+                let (sums, min) = weight_sums_and_min(&objs);
+                let multipliers: Vec<_> = sums
+                    .into_iter()
+                    .map(|sum| (sum as f64) / (min as f64) * f64::from(rng.i8(1..=10)))
+                    .collect();
+                hitting_set_solver.change_multipliers(&multipliers);
+            }
+            ObjectiveMultipliers::Lexicographic => {
+                let mut mult = 1;
+                let multipliers: Vec<_> = objs
+                    .iter()
+                    .rev()
+                    .map(|obj| {
+                        let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
+                        let ret = mult as f64;
+                        mult *= sum + 1;
+                        ret
+                    })
+                    .collect();
+                hitting_set_solver.change_multipliers(&multipliers);
+            }
+        }
+
         let stats = Stats {
             n_objs: objs.len(),
             n_real_objs: objs.iter().fold(0, |cnt, o| {
