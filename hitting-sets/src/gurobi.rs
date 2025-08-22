@@ -574,6 +574,8 @@ impl BuildSolver for Builder {
             .expect("failed to silence Gurobi");
         env.set(param::Threads, 1)
             .expect("failed to set parameter `Threads` for Gurobi");
+        env.set(param::IntegralityFocus, 1)
+            .expect("failed to set parameter `IntegralityFocus` for Gurobi");
         Builder {
             objectives,
             env: env.start().expect("failed to start Gurobi environment"),

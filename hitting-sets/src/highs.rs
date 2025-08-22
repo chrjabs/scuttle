@@ -450,6 +450,12 @@ impl Solver {
         };
         let mut model = problem.optimise(Sense::Minimise);
         model.set_option("threads", options.threads);
+        let tolerance = 1e-9;
+        model.set_option("mip_feasibility_tolerance", tolerance);
+        model.set_option("primal_feasibility_tolerance", tolerance);
+        model.set_option("dual_feasibility_tolerance", tolerance);
+        model.set_option("primal_residual_tolerance", tolerance);
+        model.set_option("dual_residual_tolerance", tolerance);
         self.state = State::Main(model);
     }
 
