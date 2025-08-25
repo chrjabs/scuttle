@@ -100,23 +100,23 @@ where
 
         let mut rng = fastrand::Rng::with_seed(opts.random_seed);
 
-        let weight_sums_and_min = |objs: &[Objective]| {
-            let mut min_weight_sum = usize::MAX;
+        let weight_sums_and_max = |objs: &[Objective]| {
+            let mut max_weight_sum = usize::MAX;
             let mut weight_sums = vec![];
             for obj in objs {
                 let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
                 weight_sums.push(sum);
-                min_weight_sum = std::cmp::min(min_weight_sum, sum);
+                max_weight_sum = std::cmp::max(max_weight_sum, sum);
             }
-            (weight_sums, min_weight_sum)
+            (weight_sums, max_weight_sum)
         };
         match opts.multipliers {
             ObjectiveMultipliers::Ones => (),
             ObjectiveMultipliers::Normalized => {
-                let (sums, min) = weight_sums_and_min(&objs);
+                let (sums, max) = weight_sums_and_max(&objs);
                 let multipliers: Vec<_> = sums
                     .into_iter()
-                    .map(|sum| (sum as f64) / (min as f64))
+                    .map(|sum| (max as f64) / (sum as f64))
                     .collect();
                 hitting_set_solver.change_multipliers(&multipliers);
             }
@@ -126,10 +126,10 @@ where
                 hitting_set_solver.change_multipliers(&multipliers);
             }
             ObjectiveMultipliers::NormalizedRandom => {
-                let (sums, min) = weight_sums_and_min(&objs);
+                let (sums, max) = weight_sums_and_max(&objs);
                 let multipliers: Vec<_> = sums
                     .into_iter()
-                    .map(|sum| (sum as f64) / (min as f64) * f64::from(rng.i8(1..=10)))
+                    .map(|sum| (max as f64) / (sum as f64) * f64::from(rng.i8(1..=10)))
                     .collect();
                 hitting_set_solver.change_multipliers(&multipliers);
             }
