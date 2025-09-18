@@ -498,6 +498,8 @@ pub enum IhsCbTreatment {
     /// objective. This is reminiscent of abstract cores.
     #[default]
     Abstract,
+    /// Run IHS-based core boosting rather than OLL-based
+    Ihs,
 }
 
 impl IhsCbTreatment {
@@ -508,7 +510,8 @@ impl IhsCbTreatment {
             | IhsCbTreatment::TranslateKatsirelosReform => true,
             IhsCbTreatment::Translate
             | IhsCbTreatment::TranslateKatsirelos
-            | IhsCbTreatment::Abstract => false,
+            | IhsCbTreatment::Abstract
+            | IhsCbTreatment::Ihs => false,
         }
     }
 
@@ -517,7 +520,8 @@ impl IhsCbTreatment {
             IhsCbTreatment::Ignore
             | IhsCbTreatment::Translate
             | IhsCbTreatment::TranslateReform
-            | IhsCbTreatment::Abstract => false,
+            | IhsCbTreatment::Abstract
+            | IhsCbTreatment::Ihs => false,
             IhsCbTreatment::TranslateKatsirelos | IhsCbTreatment::TranslateKatsirelosReform => true,
         }
     }
@@ -532,6 +536,7 @@ impl fmt::Display for IhsCbTreatment {
             IhsCbTreatment::TranslateReform => write!(f, "translate-reform"),
             IhsCbTreatment::TranslateKatsirelosReform => write!(f, "translate-katsirelos-reform"),
             IhsCbTreatment::Abstract => write!(f, "abstract"),
+            IhsCbTreatment::Ihs => write!(f, "ihs"),
         }
     }
 }

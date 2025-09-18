@@ -196,6 +196,12 @@ fn main() {
                 treatment: IhsCbTreatment::Abstract,
             },
         ),
+        (
+            "cb-ihs",
+            IhsCbOptions {
+                treatment: IhsCbTreatment::Ihs,
+            },
+        ),
     ];
     for (id, opts) in vars {
         tests.extend(

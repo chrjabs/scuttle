@@ -39,6 +39,7 @@ pub struct ParetoIhs<O, Hss, OInit = DefaultInitializer, BCG = fn(Assignment) ->
     kernel: Kernel<O, io::BufWriter<std::fs::File>, OInit, BCG>,
     hitting_set_solver: Option<Hss>,
     objective_lits: RsHashSet<Lit>,
+    objective_multipliers: Vec<f64>,
     max_obj_var: Var,
     n_seeded: usize,
     cb_data: CbData,
@@ -148,33 +149,36 @@ where
             }
             (weight_sums, max_weight_sum)
         };
+        let objective_multipliers;
         match opts.multipliers {
-            ObjectiveMultipliers::Ones => (),
+            ObjectiveMultipliers::Ones => {
+                objective_multipliers = vec![1.; kernel.stats.n_objs];
+            }
             ObjectiveMultipliers::Normalized => {
                 let (sums, max) = weight_sums_and_max(&kernel.objs);
-                let multipliers: Vec<_> = sums
+                objective_multipliers = sums
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64))
                     .collect();
-                hitting_set_solver.change_multipliers(&multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::Random => {
-                let multipliers: Vec<_> = (0..kernel.stats.n_objs)
+                objective_multipliers = (0..kernel.stats.n_objs)
                     .map(|_| f64::from(kernel.rng.i8(1..=10)))
                     .collect();
-                hitting_set_solver.change_multipliers(&multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::NormalizedRandom => {
                 let (sums, max) = weight_sums_and_max(&kernel.objs);
-                let multipliers: Vec<_> = sums
+                objective_multipliers = sums
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64) * f64::from(kernel.rng.i8(1..=10)))
                     .collect();
-                hitting_set_solver.change_multipliers(&multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::Lexicographic => {
                 let mut mult = 1;
-                let multipliers: Vec<_> = kernel
+                objective_multipliers = kernel
                     .objs
                     .iter()
                     .rev()
@@ -185,7 +189,7 @@ where
                         ret
                     })
                     .collect();
-                hitting_set_solver.change_multipliers(&multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers);
             }
         }
 
@@ -193,6 +197,7 @@ where
             kernel,
             hitting_set_solver: Some(hitting_set_solver),
             objective_lits,
+            objective_multipliers,
             max_obj_var,
             n_seeded,
             cb_data: CbData::None,
@@ -247,11 +252,11 @@ where
         let mut hss = self.hitting_set_solver.take().unwrap();
         let ret = self.alg_main_int(&mut hss);
         self.hitting_set_solver = Some(hss);
+        self.kernel.log_routine_end()?;
         ret
     }
 
     fn alg_main_int(&mut self, hss: &mut Hss) -> MaybeTerminatedError {
-        let mut want_optimal = false;
         let joint_objective = {
             let mut jobj = vec![0; self.max_obj_var.idx() + 1];
             for obj in hss.objectives() {
@@ -266,6 +271,26 @@ where
             }
             jobj
         };
+        loop {
+            let Some((costs, solution)) = self.single_obj_ihs(hss, &joint_objective)? else {
+                return Done(());
+            };
+            // store solution
+            self.kernel
+                .yield_solutions(costs.clone(), &[], solution, &mut self.pareto_front)?;
+            // introduce PD cut in the hitting set solver
+            hss.add_pd_cut(&costs);
+        }
+    }
+
+    /// Performs single-objective IHS to completion, returning the optimal solution and its
+    /// objective values
+    fn single_obj_ihs(
+        &mut self,
+        hss: &mut Hss,
+        joint_objective: &[isize],
+    ) -> MaybeTerminatedError<Option<(Vec<usize>, Assignment)>> {
+        let mut want_optimal = false;
         loop {
             self.kernel.log_routine_start("extract hitting set")?;
 
@@ -287,8 +312,7 @@ where
                 IncompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set, true),
                 IncompleteSolveResult::Infeasible => {
                     self.kernel.log_routine_end()?;
-                    self.kernel.log_routine_end()?;
-                    return Done(());
+                    return Done(None);
                 }
                 IncompleteSolveResult::Feasible(cost, hitting_set) => (cost, hitting_set, false),
             };
@@ -328,16 +352,7 @@ where
                     if is_optimal {
                         // found pareto-optimal solution
                         self.candidates.remove_dominated(&costs);
-                        // store solution
-                        self.kernel.yield_solutions(
-                            costs.clone(),
-                            &[],
-                            solution,
-                            &mut self.pareto_front,
-                        )?;
-                        // introduce PD cut in the hitting set solver
-                        hss.add_pd_cut(&costs);
-                        want_optimal = false;
+                        return Done(Some((costs, solution)));
                     } else {
                         let old_head_cost = self
                             .candidates
@@ -355,12 +370,12 @@ where
                     continue;
                 }
                 SolverResult::Unsat => {
-                    let mut wce_obj = joint_objective.clone();
+                    let mut wce_obj = joint_objective.to_vec();
                     loop {
                         let core = self.kernel.oracle.core()?;
                         if core.is_empty() {
                             self.kernel.log_routine_end()?;
-                            return Done(());
+                            return Done(None);
                         }
                         let orig_len = core.len();
                         let core = self.minimize_core(core)?;
@@ -860,6 +875,36 @@ where
         );
         Done(())
     }
+
+    /// Core boosting variant that performs IHS on each of the individual objectives first
+    /// separately
+    fn ihs_cb(&mut self, hss: &mut Hss) -> MaybeTerminatedError<bool> {
+        let mut lower_bounds = Vec::with_capacity(self.kernel.stats.n_objs);
+        for obj_idx in 0..self.kernel.stats.n_objs {
+            let mut mults = vec![0.0; self.kernel.stats.n_objs];
+            mults[obj_idx] = 1.0;
+            hss.change_multipliers(&mults);
+            let joint_objective = {
+                let mut jobj = vec![0; self.max_obj_var.idx() + 1];
+                for (lit, weight) in self.kernel.objs[obj_idx].iter() {
+                    let mut weight =
+                        isize::try_from(weight).expect("weight does not fit in `isize`");
+                    if lit.is_neg() {
+                        weight *= -1;
+                    }
+                    jobj[lit.vidx()] += weight;
+                }
+                jobj
+            };
+            let Some((costs, _)) = self.single_obj_ihs(hss, &joint_objective)? else {
+                return Done(false);
+            };
+            lower_bounds.push(costs[obj_idx]);
+        }
+        hss.change_lower_bounds(lower_bounds);
+        hss.change_multipliers(&self.objective_multipliers);
+        Done(true)
+    }
 }
 
 impl<'slv, Hss, OInit, BCG> CoreBoost
@@ -875,6 +920,12 @@ where
             self.kernel.stats.n_solve_calls == 0,
             "cannot perform core boosting after solve has been called"
         );
+        if opts.treatment == IhsCbTreatment::Ihs {
+            let mut hss = self.hitting_set_solver.take().unwrap();
+            let ret = self.ihs_cb(&mut hss);
+            self.hitting_set_solver = Some(hss);
+            return ret;
+        }
         let mut cores = vec![vec![]; self.kernel.stats.n_objs];
         let Some(cb_res) = self.kernel.core_boost_with_callbacks(
             |kernel, _, sol| {
@@ -919,6 +970,7 @@ where
             }
 
             match opts.treatment {
+                IhsCbTreatment::Ihs => unreachable!(),
                 IhsCbTreatment::Ignore => {
                     let mut reform_obj = Vec::with_capacity(reform.inactives.len());
                     for (&lit, &weight) in &reform.inactives {
@@ -1111,6 +1163,7 @@ where
         }
 
         match opts.treatment {
+            IhsCbTreatment::Ihs => unreachable!(),
             IhsCbTreatment::Ignore => {
                 self.cb_data = CbData::Ignore;
                 hss.change_objectives(reform_objs);
