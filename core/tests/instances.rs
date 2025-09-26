@@ -917,7 +917,7 @@ mod setup {
         }
         let pf: rustsat::types::RsHashSet<(Vec<isize>, usize)> = pf
             .into_iter()
-            .map(|pp| (pp.costs().clone(), pp.n_sols()))
+            .map(|pp| (pp.costs().to_vec(), pp.n_sols()))
             .collect();
         if pf != truth {
             return Err(format!(

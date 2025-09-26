@@ -385,6 +385,7 @@ where
             }
         };
         self.kernel.log_routine_start("merge encodings")?;
+        let obj_mults = vec![1.; self.kernel.stats.n_objs];
         for (
             oidx,
             CbResult {
@@ -422,7 +423,7 @@ where
 
             if let Some(solution) = solution {
                 let costs = self.kernel.compute_costs(&solution);
-                self.starting_points.insert(solution, costs);
+                self.starting_points.insert(solution, costs, &obj_mults);
             }
 
             self.kernel.check_termination()?;

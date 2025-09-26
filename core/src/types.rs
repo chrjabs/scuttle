@@ -99,10 +99,7 @@ where
     fn extend<T: IntoIterator<Item = NonDomPoint<S>>>(&mut self, iter: T) {
         #[cfg(all(debug_assertions, feature = "check-non-dominance"))]
         {
-            let cost_set = rustsat::types::RsHashSet::from_iter(
-                self.ndoms.iter().map(|nd| nd.costs().clone()),
-            );
-            let check_dominated = |c1: &Vec<isize>, c2: &Vec<isize>| -> bool {
+            let check_dominated = |c1: &[isize], c2: &[isize]| -> bool {
                 let mut dom = 0;
                 for (c1, c2) in c1.iter().zip(c2.iter()) {
                     if c1 < c2 {
@@ -122,10 +119,10 @@ where
                 return dom != 0;
             };
             for ndom in iter.into_iter() {
-                for cost in &cost_set {
-                    debug_assert!(!check_dominated(ndom.costs(), cost));
+                for other in &self.ndoms {
+                    debug_assert!(!check_dominated(ndom.costs(), other.costs()));
+                    debug_assert_ne!(ndom.costs(), other.costs());
                 }
-                debug_assert!(!cost_set.contains(ndom.costs()));
                 self.ndoms.push(ndom);
             }
             return;
@@ -144,6 +141,7 @@ where
     S: Clone + Eq,
 {
     costs: Vec<isize>,
+    internal_costs: Vec<usize>,
     sols: Vec<S>,
 }
 
@@ -152,10 +150,12 @@ where
     S: Clone + Eq,
 {
     /// Constructs a new non-dominated point
-    pub(crate) fn new(mut costs: Vec<isize>) -> Self {
+    pub(crate) fn new(mut costs: Vec<isize>, mut internal_costs: Vec<usize>) -> Self {
         costs.shrink_to_fit();
+        internal_costs.shrink_to_fit();
         NonDomPoint {
             costs,
+            internal_costs,
             sols: vec![],
         }
     }
@@ -178,13 +178,18 @@ where
     {
         NonDomPoint {
             costs: self.costs,
+            internal_costs: self.internal_costs,
             sols: self.sols.into_iter().map(conv).collect(),
         }
     }
 
     /// Gets the costs of the non-dominated point
-    pub fn costs(&self) -> &Vec<isize> {
+    pub fn costs(&self) -> &[isize] {
         &self.costs
+    }
+
+    pub(crate) fn internal_costs(&self) -> &[usize] {
+        &self.internal_costs
     }
 
     /// Gets an iterator over references to the solutions

@@ -7,10 +7,30 @@ use std::collections::BinaryHeap;
 pub struct Archive<S>(BinaryHeap<Elem<S>>);
 
 impl<S> Archive<S> {
+    fn compute_ord(multipliers: &[f64], costs: &[usize]) -> f64 {
+        debug_assert_eq!(multipliers.len(), costs.len());
+        multipliers
+            .iter()
+            .zip(costs)
+            .map(|(&mult, &cst)| mult * (cst as f64))
+            .sum()
+    }
+
+    /// Changes the objective multipliers that the archive is sorted based on
+    pub fn reorder(self, multipliers: &[f64]) -> Self {
+        let mut heap = self.0.into_vec();
+        for elem in heap.iter_mut() {
+            elem.ord = Self::compute_ord(&multipliers, &elem.costs);
+        }
+        Self(BinaryHeap::from(heap))
+    }
+
     /// Inserts a new solution into the archive
-    pub fn insert(&mut self, sol: S, costs: Vec<usize>) {
+    pub fn insert(&mut self, sol: S, mut costs: Vec<usize>, multipliers: &[f64]) {
+        costs.shrink_to_fit();
         self.0.retain(|e| !weakly_dominates(&costs, &e.costs));
-        self.0.push(Elem { costs, sol });
+        let ord = Self::compute_ord(multipliers, &costs);
+        self.0.push(Elem { ord, costs, sol });
     }
 
     /// Gets the target value (sum of objectives) of the best candidate
@@ -27,10 +47,21 @@ impl<S> Archive<S> {
     pub fn pop(&mut self) -> Option<(Vec<usize>, S)> {
         self.0.pop().map(|e| (e.costs, e.sol))
     }
+
+    /// Iterates over the elements in the archive in arbitrary order
+    pub fn iter(&self) -> impl Iterator<Item = &Elem<S>> {
+        self.0.iter()
+    }
+
+    /// Checks whether the archive is empty
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Elem<S> {
+    ord: f64,
     costs: Vec<usize>,
     sol: S,
 }
@@ -43,14 +74,16 @@ impl<S> Elem<S> {
     pub fn sol(&self) -> &S {
         &self.sol
     }
+
+    pub fn ord(&self) -> f64 {
+        self.ord
+    }
 }
 
 impl<S> Ord for Elem<S> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // NOTE: intentionally reversed to sort by smallest objective sum
-        let self_sum = self.costs.iter().sum::<usize>();
-        let other_sum = other.costs.iter().sum::<usize>();
-        std::cmp::Reverse(self_sum).cmp(&std::cmp::Reverse(other_sum))
+        other.ord.total_cmp(&self.ord)
     }
 }
 
@@ -75,4 +108,16 @@ fn weakly_dominates(first: &[usize], second: &[usize]) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn lowest_first() {
+        let mut archive = super::Archive::default();
+        archive.insert('a', vec![1, 1, 1], &[1., 1., 1.]);
+        archive.insert('b', vec![2, 1, 1], &[1., 1., 1.]);
+        let head = archive.head().unwrap();
+        assert_eq!(*head.sol(), 'a');
+    }
 }

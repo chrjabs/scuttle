@@ -715,7 +715,8 @@ where
         self.unphase_solution()?;
 
         // Create Pareto point
-        let mut non_dominated = NonDomPoint::new(self.externalize_internal_costs(&costs));
+        let mut non_dominated =
+            NonDomPoint::new(self.externalize_internal_costs(&costs), costs.clone());
 
         loop {
             debug_assert_eq!(

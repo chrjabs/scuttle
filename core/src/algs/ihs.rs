@@ -202,7 +202,7 @@ where
             n_seeded,
             cb_data: CbData::None,
             pareto_front: Default::default(),
-            candidates: Default::default(),
+            candidates: Archive::default(),
             opts,
         })
     }
@@ -271,8 +271,11 @@ where
             }
             jobj
         };
+        let mut lower_bound = 0.;
         loop {
-            let Some((costs, solution)) = self.single_obj_ihs(hss, &joint_objective)? else {
+            let Some((costs, solution)) =
+                self.single_obj_ihs(hss, &mut lower_bound, &joint_objective)?
+            else {
                 return Done(());
             };
             // store solution
@@ -280,6 +283,21 @@ where
                 .yield_solutions(costs.clone(), &[], solution, &mut self.pareto_front)?;
             // introduce PD cut in the hitting set solver
             hss.add_pd_cut(&costs);
+            // all other candidates that match the lower bound are known to be Pareto-optimal
+            while let Some(head) = self.candidates.head()
+                && head.ord() <= lower_bound
+            {
+                let Some((costs, solution)) = self.candidates.pop() else {
+                    unreachable!("just checked with `head` right before");
+                };
+                self.kernel.yield_solutions(
+                    costs.clone(),
+                    &[],
+                    solution,
+                    &mut self.pareto_front,
+                )?;
+                hss.add_pd_cut(&costs);
+            }
         }
     }
 
@@ -288,6 +306,7 @@ where
     fn single_obj_ihs(
         &mut self,
         hss: &mut Hss,
+        lower_bound: &mut f64,
         joint_objective: &[isize],
     ) -> MaybeTerminatedError<Option<(Vec<usize>, Assignment)>> {
         let mut want_optimal = false;
@@ -309,7 +328,10 @@ where
             self.kernel.check_termination()?;
 
             let (cost, hitting_set, is_optimal) = match hitting_set_answer {
-                IncompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set, true),
+                IncompleteSolveResult::Optimal(cost, hitting_set) => {
+                    *lower_bound = cost;
+                    (cost, hitting_set, true)
+                }
                 IncompleteSolveResult::Infeasible => {
                     self.kernel.log_routine_end()?;
                     return Done(None);
@@ -346,6 +368,15 @@ where
                     }
                 }
             };
+            // termination by bounds
+            if let Some(head) = self.candidates.head() {
+                if head.ord() <= *lower_bound {
+                    let Some(res) = self.candidates.pop() else {
+                        unreachable!("just checked with `head` right before");
+                    };
+                    return Done(Some(res));
+                }
+            }
             match self.oracle_with_unit_learner(&assumps, hss)? {
                 SolverResult::Sat => {
                     let (costs, solution) = self.kernel.get_solution_and_internal_costs(false)?;
@@ -358,11 +389,15 @@ where
                             .candidates
                             .head()
                             .expect("since the hitting set is not optimal, we must have a target")
-                            .costs()
+                            .ord();
+                        let new_target: f64 = costs
                             .iter()
+                            .zip(&self.objective_multipliers)
+                            .map(|(&cst, &mult)| mult * (cst as f64))
                             .sum();
-                        let new_target = costs.iter().copied().sum::<usize>();
-                        self.candidates.insert(solution, costs);
+                        debug_assert!(!self.is_dominated_by_pareto_front(&costs));
+                        self.candidates
+                            .insert(solution, costs, &self.objective_multipliers);
                         if new_target >= old_head_cost {
                             want_optimal = true;
                         }
@@ -516,7 +551,14 @@ where
                             SolverResult::Sat => {
                                 let (costs, solution) =
                                     self.kernel.get_solution_and_internal_costs(true)?;
-                                self.candidates.insert(solution, costs);
+                                if self.is_dominated_by_pareto_front(&costs) {
+                                    break;
+                                }
+                                self.candidates.insert(
+                                    solution,
+                                    costs,
+                                    &self.objective_multipliers,
+                                );
                                 break;
                             }
                             SolverResult::Unsat => {}
@@ -603,7 +645,11 @@ where
                         SolverResult::Sat => {
                             let (costs, solution) =
                                 self.kernel.get_solution_and_internal_costs(true)?;
-                            self.candidates.insert(solution, costs);
+                            if self.is_dominated_by_pareto_front(&costs) {
+                                break;
+                            }
+                            self.candidates
+                                .insert(solution, costs, &self.objective_multipliers);
                             break;
                         }
                         SolverResult::Unsat => {}
@@ -717,6 +763,18 @@ where
         }
     }
 
+    fn is_dominated_by_pareto_front(&self, costs: &[usize]) -> bool {
+        'non_dom: for non_dom in self.pareto_front.iter() {
+            for (&non_dom_cst, &current_cst) in non_dom.internal_costs().iter().zip(costs) {
+                if current_cst < non_dom_cst {
+                    continue 'non_dom;
+                }
+            }
+            return true;
+        }
+        false
+    }
+
     /// Separate algorithm branch for when the entire instance was seeded into the hitting set
     /// solver
     fn main_fully_seeded(&mut self, hss: &mut Hss) -> MaybeTerminatedError {
@@ -755,15 +813,22 @@ where
     fn seed_candidates(&mut self) -> MaybeTerminatedError<bool> {
         match self.opts.candidate_seeding {
             CandidateSeeding::None => Done(false),
-            CandidateSeeding::OneSolution => match self.kernel.solve()? {
-                SolverResult::Sat => {
-                    let (costs, solution) = self.kernel.get_solution_and_internal_costs(false)?;
-                    self.candidates.insert(solution, costs);
-                    Done(false)
+            CandidateSeeding::OneSolution => {
+                if !self.candidates.is_empty() {
+                    return Done(false);
+                };
+                match self.kernel.solve()? {
+                    SolverResult::Sat => {
+                        let (costs, solution) =
+                            self.kernel.get_solution_and_internal_costs(false)?;
+                        self.candidates
+                            .insert(solution, costs, &self.objective_multipliers);
+                        Done(false)
+                    }
+                    SolverResult::Unsat => Done(true),
+                    SolverResult::Interrupted => unreachable!(),
                 }
-                SolverResult::Unsat => Done(true),
-                SolverResult::Interrupted => unreachable!(),
-            },
+            }
         }
     }
 
@@ -880,10 +945,23 @@ where
     /// separately
     fn ihs_cb(&mut self, hss: &mut Hss) -> MaybeTerminatedError<bool> {
         let mut lower_bounds = Vec::with_capacity(self.kernel.stats.n_objs);
+        // temporary archive to not have to change multipliers constantly
+        let mut candidates = self.candidates.clone();
+        let objective_multipliers = self.objective_multipliers.clone();
         for obj_idx in 0..self.kernel.stats.n_objs {
-            let mut mults = vec![0.0; self.kernel.stats.n_objs];
-            mults[obj_idx] = 1.0;
-            hss.change_multipliers(&mults);
+            self.objective_multipliers.fill(0.);
+            self.objective_multipliers[obj_idx] = 1.0;
+            hss.change_multipliers(&self.objective_multipliers);
+            // insert best found solution for the current objective only into the temporary archive
+            self.candidates = Archive::default();
+            if let Some(best) = candidates.iter().min_by_key(|elem| elem.costs()[obj_idx]) {
+                self.candidates.insert(
+                    best.sol().clone(),
+                    best.costs().to_vec(),
+                    &self.objective_multipliers,
+                );
+            }
+
             let joint_objective = {
                 let mut jobj = vec![0; self.max_obj_var.idx() + 1];
                 for (lit, weight) in self.kernel.objs[obj_idx].iter() {
@@ -896,13 +974,19 @@ where
                 }
                 jobj
             };
-            let Some((costs, _)) = self.single_obj_ihs(hss, &joint_objective)? else {
+            let mut lower_bound = 0.;
+            let Some((costs, sol)) =
+                self.single_obj_ihs(hss, &mut lower_bound, &joint_objective)?
+            else {
                 return Done(false);
             };
             lower_bounds.push(costs[obj_idx]);
+            candidates.insert(sol, costs, &objective_multipliers);
         }
         hss.change_lower_bounds(lower_bounds);
+        self.objective_multipliers = objective_multipliers;
         hss.change_multipliers(&self.objective_multipliers);
+        self.candidates = candidates;
         Done(true)
     }
 }
@@ -930,7 +1014,8 @@ where
         let Some(cb_res) = self.kernel.core_boost_with_callbacks(
             |kernel, _, sol| {
                 let costs = kernel.compute_costs(&sol);
-                self.candidates.insert(sol, costs);
+                self.candidates
+                    .insert(sol, costs, &self.objective_multipliers);
             },
             |_, obj_idx, id, bound| cores[obj_idx].push((id, bound)),
         )?
@@ -966,7 +1051,8 @@ where
         {
             if let Some(solution) = solution {
                 let costs = self.kernel.compute_costs(&solution);
-                self.candidates.insert(solution, costs);
+                self.candidates
+                    .insert(solution, costs, &self.objective_multipliers);
             }
 
             match opts.treatment {

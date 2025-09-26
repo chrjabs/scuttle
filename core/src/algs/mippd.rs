@@ -277,8 +277,11 @@ where
             }
             self.check_termination()?;
             let (costs, solution) = self.hitting_set_to_solution_and_internal_costs(hitting_set);
+            // introduce PD cut in the hitting set solver
+            self.hitting_set_solver.add_pd_cut(&costs);
             // store solution
-            let mut non_dominated = NonDomPoint::new(self.externalize_internal_costs(&costs));
+            let mut non_dominated =
+                NonDomPoint::new(self.externalize_internal_costs(&costs), costs);
             non_dominated.add_sol(solution);
             match self.log_solution() {
                 Done(_) => {
@@ -300,8 +303,6 @@ where
                 }
             }
             self.check_termination()?;
-            // introduce PD cut in the hitting set solver
-            self.hitting_set_solver.add_pd_cut(&costs);
         }
     }
 
