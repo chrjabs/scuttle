@@ -834,3 +834,114 @@ impl Instance {
         self.clauses.iter().map(|(cl, _)| cl)
     }
 }
+
+/// Computes up to `n` permutations of the input that aim to be as different as possible.
+///
+/// For lists with more than 8 elements or for `n > 8` this simply generates _random_ permutations
+/// with no guarantee to not generate duplicates.
+pub struct DiversePermIter<T>(DivPermInner<T>);
+
+enum DivPermInner<T> {
+    /// Generates some (deterministic) diverse permutations
+    /// This is used for lists up to length 8 and `n <= 8`
+    Incomplete { vals: Vec<T>, idx: usize, n: usize },
+    /// Randomly generates permutations
+    Random {
+        vals: Vec<T>,
+        n_left: usize,
+        rng: fastrand::Rng,
+    },
+}
+
+impl<T> DiversePermIter<T>
+where
+    T: Clone,
+{
+    pub fn new<I>(values: I, mut n: usize, seed: u64) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let vals: Vec<T> = values.into_iter().collect();
+        let len = vals.len();
+
+        // check whether we will enumerate all permutations
+        let factorials = [1, 1, 2, 6, 24, 120, 720, 5040];
+        if vals.len() < factorials.len() && n > factorials[len] {
+            n = factorials[len];
+        }
+
+        if vals.len() <= 8 && n <= 8 {
+            return Self(DivPermInner::Incomplete { vals, idx: 0, n });
+        }
+
+        Self(DivPermInner::Random {
+            vals,
+            n_left: n,
+            rng: fastrand::Rng::with_seed(seed),
+        })
+    }
+}
+
+/// A diverse grid of 4 permutations over 0..8
+/// This is designed so that outputting the permutations arising from each row, followed by the
+/// reversed row are as diverse as possible.
+const DIV_8_GRID: [[u8; 8]; 4] = [
+    [0, 1, 2, 3, 4, 5, 6, 7],
+    [1, 4, 3, 0, 5, 7, 2, 6],
+    [3, 7, 1, 6, 2, 0, 5, 4],
+    [2, 3, 6, 7, 1, 4, 0, 5],
+];
+
+impl<T> Iterator for DiversePermIter<T>
+where
+    T: Clone,
+{
+    type Item = Vec<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.0 {
+            DivPermInner::Incomplete { vals, idx, n } => {
+                if *idx >= *n {
+                    return None;
+                }
+                let row_idx = *idx / 2;
+                let reverse = *idx % 2 == 1;
+                *idx += 1;
+                Some(if reverse {
+                    DIV_8_GRID[row_idx]
+                        .iter()
+                        .rev()
+                        .filter_map(|&idx| {
+                            let idx = usize::from(idx);
+                            if idx < vals.len() {
+                                Some(vals[idx].clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                } else {
+                    DIV_8_GRID[row_idx]
+                        .iter()
+                        .filter_map(|&idx| {
+                            let idx = usize::from(idx);
+                            if idx < vals.len() {
+                                Some(vals[idx].clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                })
+            }
+            DivPermInner::Random { vals, n_left, rng } => {
+                if *n_left == 0 {
+                    return None;
+                }
+                *n_left -= 1;
+                rng.shuffle(vals);
+                Some(vals.clone())
+            }
+        }
+    }
+}

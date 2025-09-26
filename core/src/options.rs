@@ -401,6 +401,9 @@ pub struct IhsOptions {
     pub starting_points: bool,
     /// The objective multiplier strategy to use
     pub multipliers: ObjectiveMultipliers,
+    /// Compute up to a set number of lexicographic optima first, before starting the main Pareto
+    /// IHS algorithm. This allows for lazily introducing PD cuts only after this stage.
+    pub precompute_lexicographic: usize,
 }
 
 impl Default for IhsOptions {
@@ -413,6 +416,7 @@ impl Default for IhsOptions {
             core_minimization: CoreMinimization::Full,
             starting_points: true,
             multipliers: ObjectiveMultipliers::default(),
+            precompute_lexicographic: 0,
         }
     }
 }

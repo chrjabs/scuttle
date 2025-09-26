@@ -9,7 +9,7 @@ use std::{
 };
 
 use clap::{
-    builder::styling, crate_authors, crate_name, crate_version, Args, Parser, Subcommand, ValueEnum,
+    Args, Parser, Subcommand, ValueEnum, builder::styling, crate_authors, crate_name, crate_version,
 };
 use cpu_time::ProcessTime;
 use rustsat::{
@@ -22,22 +22,18 @@ use scuttle_core::options::{
 };
 use scuttle_core::prepro::FileFormat;
 use scuttle_core::{
+    EncodingStats, Limits, Phase, Stats, Termination, WriteSolverLog,
     options::{
         AfterCbOptions, CoreBoostingOptions, EnumOptions, HeurImprOptions, HeurImprWhen,
         KernelOptions,
     },
     types::{NonDomPoint, ParetoFront},
-    EncodingStats, Limits, Phase, Stats, Termination, WriteSolverLog,
 };
 use termcolor::{Buffer, BufferWriter, Color, ColorSpec, WriteColor};
 
 macro_rules! none_if_zero {
     ($val:expr_2021) => {
-        if $val == 0 {
-            None
-        } else {
-            Some($val)
-        }
+        if $val == 0 { None } else { Some($val) }
     };
 }
 
@@ -199,6 +195,12 @@ enum AlgorithmCommand {
         /// Use randomized objective multipliers for evaluating robustness
         #[arg(long, default_value_t = ObjectiveMultipliers::default(), global = true)]
         multipliers: ObjectiveMultipliers,
+        /// Precompute a given number of lexicographic optima, which is possible without adding PD
+        /// cuts
+        ///
+        /// It is recommended to not set this higher than 8
+        #[arg(long, default_value_t = IhsOptions::default().precompute_lexicographic, global = true)]
+        precompute_lexicographic: usize,
         #[command(flatten)]
         cb: IhsCoreBoostingArgs,
         #[command(flatten)]
@@ -552,11 +554,7 @@ impl fmt::Display for Bool {
 
 impl From<bool> for Bool {
     fn from(val: bool) -> Self {
-        if val {
-            Bool::True
-        } else {
-            Bool::False
-        }
+        if val { Bool::True } else { Bool::False }
     }
 }
 
@@ -872,6 +870,7 @@ impl Cli {
                 ihs_core_minimization,
                 use_starting_points,
                 multipliers,
+                precompute_lexicographic,
                 hss_threads,
                 cb,
                 file,
@@ -913,6 +912,7 @@ impl Cli {
                         core_minimization: ihs_core_minimization,
                         starting_points: use_starting_points.into(),
                         multipliers,
+                        precompute_lexicographic,
                     },
                     if args.core_boosting.into() {
                         Some(cb.into())

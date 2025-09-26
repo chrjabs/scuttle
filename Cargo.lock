@@ -168,10 +168,11 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.28"
+version = "1.2.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ad45f4f74e4e20eaa392913b7b33a7091c87e59628f4dd27888205ad888843c"
+checksum = "e1354349954c6fc9cb0deab020f27f783cf0b604e8bb754dc4658ecf0d29c35f"
 dependencies = [
+ "find-msvc-tools",
  "jobserver",
  "libc",
  "shlex",
@@ -432,6 +433,12 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
+name = "find-msvc-tools"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ced73b1dacfc750a6db6c0a0c3a3853c8b41997e2e2c563dc90804ae6867959"
 
 [[package]]
 name = "fnv"
@@ -946,7 +953,7 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 [[package]]
 name = "pigeons"
 version = "0.2.0"
-source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#0d0024cfc0a7904eb4e5fe3d4308a500b02b2886"
+source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#5c1090d18c223649b865ccc467318cc86746cbc3"
 dependencies = [
  "itertools 0.14.0",
  "rustc-hash",
@@ -1052,7 +1059,7 @@ dependencies = [
 [[package]]
 name = "rustsat"
 version = "0.7.2"
-source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#0d0024cfc0a7904eb4e5fe3d4308a500b02b2886"
+source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#5c1090d18c223649b865ccc467318cc86746cbc3"
 dependencies = [
  "anyhow",
  "cpu-time",
@@ -1068,7 +1075,7 @@ dependencies = [
 [[package]]
 name = "rustsat-cadical"
 version = "0.7.2"
-source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#0d0024cfc0a7904eb4e5fe3d4308a500b02b2886"
+source = "git+https://github.com/chrjabs/rustsat.git?branch=scuttle#5c1090d18c223649b865ccc467318cc86746cbc3"
 dependencies = [
  "anyhow",
  "bindgen 0.72.0",

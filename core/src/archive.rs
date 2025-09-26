@@ -17,12 +17,12 @@ impl<S> Archive<S> {
     }
 
     /// Changes the objective multipliers that the archive is sorted based on
-    pub fn reorder(self, multipliers: &[f64]) -> Self {
-        let mut heap = self.0.into_vec();
+    pub fn reorder(&mut self, multipliers: &[f64]) {
+        let mut heap = std::mem::take(&mut self.0).into_vec();
         for elem in heap.iter_mut() {
-            elem.ord = Self::compute_ord(&multipliers, &elem.costs);
+            elem.ord = Self::compute_ord(multipliers, &elem.costs);
         }
-        Self(BinaryHeap::from(heap))
+        self.0 = BinaryHeap::from(heap);
     }
 
     /// Inserts a new solution into the archive

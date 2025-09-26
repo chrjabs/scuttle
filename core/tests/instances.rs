@@ -136,6 +136,16 @@ fn main() {
                 },
             ),
         ),
+        (
+            "precomplex",
+            (
+                KernelOptions::default(),
+                IhsOptions {
+                    precompute_lexicographic: 8,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
     ];
     for (id, opts) in vars {
         tests.extend(

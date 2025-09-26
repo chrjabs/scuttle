@@ -27,7 +27,7 @@ use crate::{
         ObjectiveMultipliers,
     },
     termination::ensure,
-    types::{Objective, ParetoFront, VarManager},
+    types::{DiversePermIter, Objective, ParetoFront, VarManager},
     CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
     MaybeTerminatedError::{self, Done},
 };
@@ -43,6 +43,7 @@ pub struct ParetoIhs<O, Hss, OInit = DefaultInitializer, BCG = fn(Assignment) ->
     max_obj_var: Var,
     n_seeded: usize,
     cb_data: CbData,
+    all_pd_cuts: bool,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
     /// Archive of candidate solutions
@@ -201,6 +202,7 @@ where
             max_obj_var,
             n_seeded,
             cb_data: CbData::None,
+            all_pd_cuts: true,
             pareto_front: Default::default(),
             candidates: Archive::default(),
             opts,
@@ -257,20 +259,22 @@ where
     }
 
     fn alg_main_int(&mut self, hss: &mut Hss) -> MaybeTerminatedError {
+        self.precompute_lexicographic(hss);
+
         let joint_objective = {
-            let mut jobj = vec![0; self.max_obj_var.idx() + 1];
-            for obj in hss.objectives() {
+            let mut jobj = vec![0.; self.max_obj_var.idx() + 1];
+            for (obj, &mult) in hss.objectives().zip(&self.objective_multipliers) {
                 for (lit, weight) in obj {
-                    let mut weight =
-                        isize::try_from(weight).expect("weight does not fit in `isize`");
+                    let mut weight = mult * weight as f64;
                     if lit.is_neg() {
-                        weight *= -1;
+                        weight *= -1.;
                     }
                     jobj[lit.vidx()] += weight;
                 }
             }
             jobj
         };
+
         let mut lower_bound = 0.;
         loop {
             let Some((costs, solution)) =
@@ -301,13 +305,73 @@ where
         }
     }
 
+    fn precompute_lexicographic(&mut self, hss: &mut Hss) -> MaybeTerminatedError<bool> {
+        if self.opts.precompute_lexicographic == 0 {
+            return Done(true);
+        }
+        self.all_pd_cuts = false;
+        let mut joint_objective = vec![0.; self.max_obj_var.idx() + 1];
+        let obj_mult = self.objective_multipliers.clone();
+        // Eagerly compute lexicographic optima
+        // PD cuts are only added lazily _after_ doing this
+        for idx_perm in DiversePermIter::new(
+            0..self.kernel.objs.len(),
+            self.opts.precompute_lexicographic,
+            self.kernel.rng.u64(..),
+        ) {
+            dbg!(&idx_perm);
+            assert_eq!(idx_perm.len(), self.kernel.objs.len());
+            // compute multipliers for lexicographic optimization
+            let mut mult = 1;
+            for obj_idx in idx_perm.into_iter() {
+                self.objective_multipliers[obj_idx] = mult as f64;
+                let obj = &self.kernel.objs[obj_idx];
+                let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
+                mult *= sum + 1;
+            }
+            joint_objective.fill(0.);
+            for (obj, &mult) in hss.objectives().zip(&self.objective_multipliers) {
+                for (lit, weight) in obj {
+                    let mut weight = mult * weight as f64;
+                    if lit.is_neg() {
+                        weight *= -1.;
+                    }
+                    joint_objective[lit.vidx()] += weight;
+                }
+            }
+            hss.change_multipliers(&self.objective_multipliers);
+            self.candidates.reorder(&self.objective_multipliers);
+            // find optimum
+            let mut lower_bound = 0.;
+            let Some((costs, solution)) =
+                self.single_obj_ihs(hss, &mut lower_bound, &joint_objective)?
+            else {
+                return Done(false);
+            };
+            if self.is_dominated_by_pareto_front(&costs) {
+                continue;
+            }
+            self.kernel
+                .yield_solutions(costs.clone(), &[], solution, &mut self.pareto_front)?;
+        }
+        self.objective_multipliers = obj_mult;
+        hss.change_multipliers(&self.objective_multipliers);
+        self.candidates.reorder(&self.objective_multipliers);
+        // lazily add PD cuts only now
+        for non_dom in self.pareto_front.iter() {
+            hss.add_pd_cut(non_dom.internal_costs());
+        }
+        self.all_pd_cuts = true;
+        Done(true)
+    }
+
     /// Performs single-objective IHS to completion, returning the optimal solution and its
     /// objective values
     fn single_obj_ihs(
         &mut self,
         hss: &mut Hss,
         lower_bound: &mut f64,
-        joint_objective: &[isize],
+        joint_objective: &[f64],
     ) -> MaybeTerminatedError<Option<(Vec<usize>, Assignment)>> {
         let mut want_optimal = false;
         loop {
@@ -347,12 +411,19 @@ where
             let mut assumps = hitting_set.clone();
 
             self.kernel.check_termination()?;
-            assumps.retain(|lit| self.objective_lits.contains(&!*lit));
+            assumps.retain(|lit| {
+                self.objective_lits.contains(&!*lit)
+                    && joint_objective[lit.vidx()].abs() > f64::EPSILON
+            });
             // sort hitting set by weight for core minimization
             if self.opts.core_minimization.minimization() {
                 // NOTE: we _intentionally_ use stable sort here, so that we preserve literal order
                 // on equal weight
-                assumps.sort_by_key(|l| -joint_objective[l.vidx()].abs());
+                assumps.sort_by(|a, b| {
+                    joint_objective[b.vidx()]
+                        .abs()
+                        .total_cmp(&joint_objective[a.vidx()].abs())
+                });
             }
             if let CbData::TranslateReform { dbs, olit_map, .. } = &mut self.cb_data {
                 for &a in &assumps {
@@ -395,7 +466,9 @@ where
                             .zip(&self.objective_multipliers)
                             .map(|(&cst, &mult)| mult * (cst as f64))
                             .sum();
-                        debug_assert!(!self.is_dominated_by_pareto_front(&costs));
+                        debug_assert!(
+                            !self.all_pd_cuts || !self.is_dominated_by_pareto_front(&costs)
+                        );
                         self.candidates
                             .insert(solution, costs, &self.objective_multipliers);
                         if new_target >= old_head_cost {
@@ -583,28 +656,34 @@ where
                 // Abstract the hitting set to the reformulated objective
                 let assign: Assignment = hitting_set.iter().copied().collect();
                 let mut abstracted = Assignment::default();
-                let mut joint_objective = vec![0; self.kernel.var_manager.n_used() as usize + 1];
+                let mut joint_objective = vec![0.; self.kernel.var_manager.n_used() as usize + 1];
                 let mut olit_map = RsHashMap::default();
                 for (
                     obj_idx,
                     (
-                        &mut CbReformData {
-                            ref mut db,
-                            ref keep_lits,
-                            ref remaining_tots,
-                        },
-                        obj,
+                        (
+                            &mut CbReformData {
+                                ref mut db,
+                                ref keep_lits,
+                                ref remaining_tots,
+                            },
+                            obj,
+                        ),
+                        &mult,
                     ),
-                ) in reforms.iter_mut().zip(self.kernel.objs.iter()).enumerate()
+                ) in reforms
+                    .iter_mut()
+                    .zip(self.kernel.objs.iter())
+                    .zip(&self.objective_multipliers)
+                    .enumerate()
                 {
                     for &lit in keep_lits {
                         if assign.lit_value(lit) == TernaryVal::False {
                             debug_assert_ne!(abstracted.lit_value(lit), TernaryVal::True);
                             abstracted.assign_lit(!lit);
-                            let mut weight = isize::try_from(obj.weight(lit))
-                                .expect("weight does not fit in `isize`");
+                            let mut weight = mult * obj.weight(lit) as f64;
                             if lit.is_neg() {
-                                weight *= -1;
+                                weight *= -1.;
                             }
                             joint_objective[lit.vidx()] += weight;
                         }
@@ -623,11 +702,10 @@ where
                             abstracted.assign_lit(!lit);
                             olit_map.insert(lit, (obj_idx, node, value + 1));
                             if joint_objective.len() <= lit.vidx() {
-                                joint_objective.resize(lit.vidx() + 1, 0);
+                                joint_objective.resize(lit.vidx() + 1, 0.);
                             }
-                            debug_assert_eq!(joint_objective[lit.vidx()], 0);
-                            joint_objective[lit.vidx()] =
-                                isize::try_from(weight).expect("weight does not fit in `isize`");
+                            debug_assert_eq!(joint_objective[lit.vidx()], 0.);
+                            joint_objective[lit.vidx()] = mult * weight as f64;
                         }
                     }
                 }
@@ -638,7 +716,11 @@ where
                 if self.opts.core_minimization.minimization() {
                     // NOTE: we _intentionally_ use stable sort here, so that we preserve literal order
                     // on equal weight
-                    assumps.sort_by_key(|l| -joint_objective[l.vidx()].abs());
+                    assumps.sort_by(|a, b| {
+                        joint_objective[b.vidx()]
+                            .abs()
+                            .total_cmp(&joint_objective[a.vidx()].abs())
+                    });
                 }
                 loop {
                     match self.oracle_with_unit_learner(&assumps, hss)? {
@@ -887,13 +969,17 @@ where
         &mut self,
         core: &[Lit],
         assumps: &mut Vec<Lit>,
-        wce_obj: &mut [isize],
+        wce_obj: &mut [f64],
     ) -> MaybeTerminatedError {
         let _len_before = assumps.len();
         if self.opts.wce {
-            let min_cost = core.iter().fold(isize::MAX, |min, lit| {
-                std::cmp::min(wce_obj[lit.vidx()].abs(), min)
+            let min_cost = core.iter().fold(f64::MAX, |min, lit| {
+                std::cmp::min_by(wce_obj[lit.vidx()].abs(), min, |a, b| a.total_cmp(b))
             });
+            debug_assert!(
+                min_cost > f64::EPSILON,
+                "core cost ({min_cost}) should be positive"
+            );
             for lit in core {
                 if lit.is_pos() {
                     wce_obj[lit.vidx()] -= min_cost;
@@ -901,7 +987,7 @@ where
                     wce_obj[lit.vidx()] += min_cost;
                 }
             }
-            assumps.retain(|&lit| wce_obj[lit.vidx()] != 0);
+            assumps.retain(|&lit| wce_obj[lit.vidx()].abs() > f64::EPSILON);
         } else {
             // NOTE: core is in same order as hitting set, we can therefore remove the
             // core literals in a single sweep, knowing that the
@@ -963,12 +1049,11 @@ where
             }
 
             let joint_objective = {
-                let mut jobj = vec![0; self.max_obj_var.idx() + 1];
+                let mut jobj = vec![0.; self.max_obj_var.idx() + 1];
                 for (lit, weight) in self.kernel.objs[obj_idx].iter() {
-                    let mut weight =
-                        isize::try_from(weight).expect("weight does not fit in `isize`");
+                    let mut weight = weight as f64;
                     if lit.is_neg() {
-                        weight *= -1;
+                        weight *= -1.;
                     }
                     jobj[lit.vidx()] += weight;
                 }
