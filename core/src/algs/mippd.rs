@@ -134,17 +134,14 @@ where
                 hitting_set_solver.change_multipliers(&multipliers);
             }
             ObjectiveMultipliers::Lexicographic => {
+                let mut multipliers = Vec::with_capacity(objs.len());
                 let mut mult = 1;
-                let multipliers: Vec<_> = objs
-                    .iter()
-                    .rev()
-                    .map(|obj| {
-                        let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
-                        let ret = mult as f64;
-                        mult *= sum + 1;
-                        ret
-                    })
-                    .collect();
+                for obj in objs.iter().rev() {
+                    let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
+                    multipliers.push(mult as f64);
+                    mult *= sum + 1;
+                }
+                multipliers.reverse();
                 hitting_set_solver.change_multipliers(&multipliers);
             }
         }

@@ -150,7 +150,7 @@ where
             }
             (weight_sums, max_weight_sum)
         };
-        let objective_multipliers;
+        let mut objective_multipliers;
         match opts.multipliers {
             ObjectiveMultipliers::Ones => {
                 objective_multipliers = vec![1.; kernel.stats.n_objs];
@@ -178,18 +178,14 @@ where
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::Lexicographic => {
+                objective_multipliers = Vec::with_capacity(kernel.objs.len());
                 let mut mult = 1;
-                objective_multipliers = kernel
-                    .objs
-                    .iter()
-                    .rev()
-                    .map(|obj| {
-                        let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
-                        let ret = mult as f64;
-                        mult *= sum + 1;
-                        ret
-                    })
-                    .collect();
+                for obj in kernel.objs.iter().rev() {
+                    let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
+                    objective_multipliers.push(mult as f64);
+                    mult *= sum + 1;
+                }
+                objective_multipliers.reverse();
                 hitting_set_solver.change_multipliers(&objective_multipliers);
             }
         }
