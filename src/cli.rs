@@ -201,6 +201,9 @@ enum AlgorithmCommand {
         /// It is recommended to not set this higher than 8
         #[arg(long, default_value_t = IhsOptions::default().precompute_lexicographic, global = true)]
         precompute_lexicographic: usize,
+        /// Use reduced cost fixing
+        #[arg(long, default_value_t = Bool::from(IhsOptions::default().reduced_cost_fixing), global = true)]
+        reduced_cost_fixing: Bool,
         #[command(flatten)]
         cb: IhsCoreBoostingArgs,
         #[command(flatten)]
@@ -871,6 +874,7 @@ impl Cli {
                 use_starting_points,
                 multipliers,
                 precompute_lexicographic,
+                reduced_cost_fixing,
                 hss_threads,
                 cb,
                 file,
@@ -913,6 +917,7 @@ impl Cli {
                         starting_points: use_starting_points.into(),
                         multipliers,
                         precompute_lexicographic,
+                        reduced_cost_fixing: reduced_cost_fixing.into(),
                     },
                     if args.core_boosting.into() {
                         Some(cb.into())
@@ -1286,14 +1291,22 @@ impl Cli {
                 n_seeded,
                 n_learned_units,
                 n_solves,
+                n_lp_solves,
                 solve_time,
+                lp_solve_time,
             } = stats;
             Self::print_parameter(&mut buffer, "n-cores", n_cores)?;
             Self::print_parameter(&mut buffer, "n-abstract-cores", n_abstract_cores)?;
             Self::print_parameter(&mut buffer, "n-seeded", n_seeded)?;
             Self::print_parameter(&mut buffer, "n-learned-units", n_learned_units)?;
             Self::print_parameter(&mut buffer, "n-solve-calls", n_solves)?;
+            Self::print_parameter(&mut buffer, "n-lp-solve-calls", n_lp_solves)?;
             Self::print_parameter(&mut buffer, "cpu-solve-time", DurPrinter::new(solve_time))?;
+            Self::print_parameter(
+                &mut buffer,
+                "lp-cpu-solve-time",
+                DurPrinter::new(lp_solve_time),
+            )?;
             Self::end_block(&mut buffer)?;
             self.stdout.print(&buffer)?;
         }

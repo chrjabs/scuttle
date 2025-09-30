@@ -422,6 +422,25 @@ impl HittingSetSolver for Solver {
         let col = self.map[unit.var()];
         self.state.fix_value(col, unit.is_pos());
     }
+
+    fn reduced_costs_callback<Cb>(
+        &mut self,
+        cb: &mut Cb,
+    ) -> MaybeTerminated<crate::ReducedCostsResult>
+    where
+        Cb: Callbacks,
+    {
+        todo!()
+    }
+
+    fn fix<I>(&mut self, to_fix: I)
+    where
+        I: IntoIterator<Item = Lit>,
+    {
+        todo!()
+    }
+
+    fn unfix_all(&mut self) {}
 }
 
 #[inline]
@@ -700,6 +719,10 @@ impl BuildSolver for Builder {
 
     fn use_starting_points(&mut self, use_start: bool) -> &mut Self {
         self.use_start = use_start;
+        self
+    }
+
+    fn might_need_lp(&mut self, might_need: bool) -> &mut Self {
         self
     }
 }

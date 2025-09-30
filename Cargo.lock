@@ -491,7 +491,7 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 [[package]]
 name = "grb"
 version = "3.0.1"
-source = "git+https://github.com/chrjabs/rust-grb.git?branch=gurobi-9-support#5f936f113239d98c72b61e7d765b3b5676989a4a"
+source = "git+https://github.com/chrjabs/rust-grb.git?branch=scuttle#da1fb7866e44f661c657a3756cc50d12f4c414b0"
 dependencies = [
  "anyhow",
  "cfg-if",

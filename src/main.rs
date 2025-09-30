@@ -8,10 +8,9 @@ use rustsat::{
 };
 use rustsat_cadical::CaDiCaL;
 use scuttle_core::{
-    self, prepro,
+    self, BiOptSat, CoreBoost, Init, InitCertDefaultBlock, InitDefaultBlock, KernelFunctions,
+    LowerBounding, MaybeTerminatedError, PMinimal, ParetoIhs, Solve, prepro,
     types::{Instance, Reindexer},
-    BiOptSat, CoreBoost, Init, InitCertDefaultBlock, InitDefaultBlock, KernelFunctions,
-    LowerBounding, MaybeTerminatedError, PMinimal, ParetoIhs, Solve,
 };
 
 mod cli;
@@ -204,6 +203,10 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
         Algorithm::ParetoIhs(hitting_set_solver, kernel_opts, opts, ref cb_opts) => {
             match hitting_set_solver {
                 HittingSetSolver::Highs => {
+                    if opts.reduced_cost_fixing {
+                        cli.error("reduced cost fixing is currently only implemented for Gurobi")?;
+                        anyhow::bail!(Error::InvalidConfig);
+                    }
                     type IhsSlv<OInit = CaDiCaLDefaultInit> = Ihs<hitting_sets::HighsSolver, OInit>;
                     dispatch_options!(no-proof: IhsSlv, inst, prepro, reindexer, (kernel_opts, opts), cb_opts, cli)
                 }

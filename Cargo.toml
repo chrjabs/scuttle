@@ -80,7 +80,7 @@ inherits = "release"
 debug = 1
 
 [patch.crates-io]
-grb = { git = "https://github.com/chrjabs/rust-grb.git", branch = "gurobi-9-support" }
+grb = { git = "https://github.com/chrjabs/rust-grb.git", branch = "scuttle" }
 highs = { git = "https://github.com/chrjabs/highs.git", branch = "integer-vars" }
 highs-sys = { git = "https://github.com/chrjabs/highs-sys.git", branch = "bindgen-0.71" }
 rustsat = { git = "https://github.com/chrjabs/rustsat.git", branch = "scuttle" }

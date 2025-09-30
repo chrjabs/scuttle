@@ -6,7 +6,7 @@
 
 use std::{fmt, num::NonZero, str};
 
-use rustsat::types::{Cl, Lit, RsHashMap};
+use rustsat::types::{Cl, Lit, RsHashMap, Var};
 
 mod map;
 use map::{IndexedVar, VarMap};
@@ -57,6 +57,15 @@ impl From<CompleteSolveResult> for IncompleteSolveResult {
             CompleteSolveResult::Infeasible => IncompleteSolveResult::Infeasible,
         }
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ReducedCostsResult {
+    ReducedCosts {
+        obj_val: f64,
+        rcs: Vec<(Var, bool, f64)>,
+    },
+    Infeasible,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -175,6 +184,20 @@ pub trait HittingSetSolver {
         self.hitting_set_callbacks(start, &mut ()).unwrap()
     }
 
+    /// Computes the reduced costs of the objective variables by solving the LP relaxation of the
+    /// problem
+    fn reduced_costs_callback<Cb>(&mut self, cb: &mut Cb) -> MaybeTerminated<ReducedCostsResult>
+    where
+        Cb: Callbacks;
+
+    /// Fixes certain literals by changing their bounds
+    fn fix<I>(&mut self, to_fix: I)
+    where
+        I: IntoIterator<Item = Lit>;
+
+    /// Removes all fixings done via [`HittingSetSolver::fix`]
+    fn unfix_all(&mut self);
+
     /// Adds a PD cut to the hitting set solver
     fn add_pd_cut(&mut self, costs: &[usize]);
 
@@ -226,6 +249,9 @@ pub trait BuildSolver {
     ///
     /// The default value shall `true`
     fn use_starting_points(&mut self, use_start: bool) -> &mut Self;
+
+    /// Register to the solver that the user might want to solve an LP relaxation later
+    fn might_need_lp(&mut self, might_need: bool) -> &mut Self;
 }
 
 /// Trait for solver callbacks
@@ -251,7 +277,9 @@ pub enum CoreOrigin {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Statistics {
     pub solve_time: std::time::Duration,
+    pub lp_solve_time: std::time::Duration,
     pub n_solves: usize,
+    pub n_lp_solves: usize,
     pub n_cores: usize,
     pub n_abstract_cores: usize,
     pub n_seeded: usize,

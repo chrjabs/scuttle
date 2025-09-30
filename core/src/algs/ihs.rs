@@ -1,9 +1,10 @@
 //! # Multi-Objective IHS Algorithm
 
-use std::io;
+use std::{cmp::Ordering, io};
 
 use hitting_sets::{
     BuildSolver, CompleteSolveResult, CoreOrigin, HittingSetSolver, IncompleteSolveResult,
+    ReducedCostsResult,
 };
 use rustsat::{
     encodings::{
@@ -110,6 +111,7 @@ where
         );
         let mut builder = Hss::Builder::new(objs.iter().map(|obj| obj.iter()));
         builder.threads(opts.hss_threads);
+        builder.might_need_lp(opts.reduced_cost_fixing);
         builder.use_starting_points(opts.starting_points);
         let mut hitting_set_solver = builder.init();
         let clauses: Vec<_> = clauses.into_iter().collect();
@@ -315,7 +317,6 @@ where
             self.opts.precompute_lexicographic,
             self.kernel.rng.u64(..),
         ) {
-            dbg!(&idx_perm);
             assert_eq!(idx_perm.len(), self.kernel.objs.len());
             // compute multipliers for lexicographic optimization
             let mut mult = 1;
@@ -371,6 +372,59 @@ where
     ) -> MaybeTerminatedError<Option<(Vec<usize>, Assignment)>> {
         let mut want_optimal = false;
         loop {
+            // reduced cost fixing
+            if self.opts.reduced_cost_fixing && self.candidates.head().is_some() {
+                self.kernel
+                    .log_routine_start("solving lp for reduced costs")?;
+
+                let ReducedCostsResult::ReducedCosts { obj_val, rcs } =
+                    hss.reduced_costs_callback(self)?
+                else {
+                    self.kernel.log_routine_end()?;
+                    hss.unfix_all();
+                    return Done(None);
+                };
+
+                self.kernel.log_routine_end()?;
+
+                if obj_val.total_cmp(lower_bound) == Ordering::Greater {
+                    *lower_bound = obj_val;
+                }
+                let head = self.candidates.head().expect("checked in outer if");
+                if head.ord() <= *lower_bound {
+                    let Some(res) = self.candidates.pop() else {
+                        unreachable!("just checked with `head` right before");
+                    };
+                    hss.unfix_all();
+                    return Done(Some(res));
+                }
+                hss.fix(rcs.into_iter().filter_map(|(var, val, rc)| {
+                    let &cost = joint_objective.get(var.idx())?;
+                    if cost.abs() < f64::EPSILON {
+                        return None;
+                    }
+                    // Case split here is slightly more difficult, since _negated_ soft literals
+                    // are also negated in HSS
+                    if (!val && cost > 0.) || (val && cost < 0.) {
+                        if obj_val + rc > head.ord()
+                            || ((obj_val + rc - head.ord()).abs() < f64::EPSILON
+                                && head.sol().lit_value(var.lit(!val)) == TernaryVal::True)
+                        {
+                            Some(var.lit(!val))
+                        } else {
+                            None
+                        }
+                    } else if obj_val - rc > head.ord()
+                        || ((obj_val - rc - head.ord()).abs() < f64::EPSILON
+                            && head.sol().var_value(var) == TernaryVal::False)
+                    {
+                        Some(var.lit(val))
+                    } else {
+                        None
+                    }
+                }));
+            }
+
             self.kernel.log_routine_start("extract hitting set")?;
 
             let hitting_set_answer: IncompleteSolveResult =
@@ -394,6 +448,7 @@ where
                 }
                 IncompleteSolveResult::Infeasible => {
                     self.kernel.log_routine_end()?;
+                    hss.unfix_all();
                     return Done(None);
                 }
                 IncompleteSolveResult::Feasible(cost, hitting_set) => (cost, hitting_set, false),
@@ -441,6 +496,7 @@ where
                     let Some(res) = self.candidates.pop() else {
                         unreachable!("just checked with `head` right before");
                     };
+                    hss.unfix_all();
                     return Done(Some(res));
                 }
             }
@@ -450,6 +506,7 @@ where
                     if is_optimal {
                         // found pareto-optimal solution
                         self.candidates.remove_dominated(&costs);
+                        hss.unfix_all();
                         return Done(Some((costs, solution)));
                     } else {
                         let old_head_cost = self
@@ -479,6 +536,7 @@ where
                         let core = self.kernel.oracle.core()?;
                         if core.is_empty() {
                             self.kernel.log_routine_end()?;
+                            hss.unfix_all();
                             return Done(None);
                         }
                         let orig_len = core.len();

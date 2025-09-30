@@ -146,6 +146,16 @@ fn main() {
                 },
             ),
         ),
+        (
+            "other-rcf",
+            (
+                KernelOptions::default(),
+                IhsOptions {
+                    reduced_cost_fixing: !IhsOptions::default().reduced_cost_fixing,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
     ];
     for (id, opts) in vars {
         tests.extend(
