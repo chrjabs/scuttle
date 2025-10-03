@@ -388,6 +388,12 @@ where
             }
         }
         self.all_pd_cuts = true;
+        if let Some(logger) = &mut self.kernel.logger {
+            logger.log_message(&format!(
+                "precomputed {} lexicographic optima",
+                self.pareto_front.len()
+            ))?;
+        }
         Done(true)
     }
 
@@ -1013,6 +1019,12 @@ where
             // lazily add PD cuts only now
             for non_dom in self.pareto_front.iter() {
                 hss.add_pd_cut(non_dom.internal_costs());
+            }
+            if let Some(logger) = &mut self.kernel.logger {
+                logger.log_message(&format!(
+                    "precomputed {} lexicographic optima",
+                    self.pareto_front.len()
+                ))?;
             }
         }
 

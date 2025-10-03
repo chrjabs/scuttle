@@ -314,6 +314,12 @@ where
             for non_dom in self.pareto_front.iter() {
                 self.hitting_set_solver.add_pd_cut(non_dom.internal_costs());
             }
+            if let Some(logger) = &mut self.logger {
+                logger.log_message(&format!(
+                    "precomputed {} lexicographic optima",
+                    self.pareto_front.len()
+                ))?;
+            }
         }
         loop {
             if let Some(logger) = &mut self.logger {
