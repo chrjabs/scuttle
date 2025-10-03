@@ -345,6 +345,7 @@ where
                                 ProofGoalId::specific(idx + 2),
                                 [Derivation::from(
                                     OperationSequence::from(ConstraintId::from(reform_id))
+                                        * obj.unit_weight()
                                         + ConstraintId::last(1),
                                 )],
                             )
