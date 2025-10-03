@@ -41,6 +41,10 @@ pub struct ParetoIhs<O, Hss, OInit = DefaultInitializer, BCG = fn(Assignment) ->
     hitting_set_solver: Option<Hss>,
     objective_lits: RsHashSet<Lit>,
     objective_multipliers: Vec<f64>,
+    /// Early termination criteria for the entire algorithm, when the lower bound exceeds this.
+    /// This is computed based on a nadir point estimation, which is only possible in bi-objective
+    /// problems with either core boosting or precomputation of lexicographic optima activated.
+    nadir_ub: f64,
     max_obj_var: Var,
     n_seeded: usize,
     cb_data: CbData,
@@ -197,6 +201,7 @@ where
             hitting_set_solver: Some(hitting_set_solver),
             objective_lits,
             objective_multipliers,
+            nadir_ub: f64::INFINITY,
             max_obj_var,
             n_seeded,
             cb_data: CbData::None,
@@ -358,6 +363,30 @@ where
         for non_dom in self.pareto_front.iter() {
             hss.add_pd_cut(non_dom.internal_costs());
         }
+        if self.kernel.stats.n_objs == 2 {
+            // compute global upper bound based on nadir point
+            let mut nadir = [0, 0];
+            for (idx, nadir) in nadir.iter_mut().enumerate() {
+                *nadir = self
+                    .pareto_front
+                    .iter()
+                    .map(|nd| nd.internal_costs()[idx])
+                    .max()
+                    .unwrap();
+            }
+            self.nadir_ub = nadir
+                .iter()
+                .zip(&self.objective_multipliers)
+                .map(|(&nd, &mult)| nd as f64 * mult)
+                .sum();
+            if let Some(log) = &mut self.kernel.logger {
+                log.log_nadir(&nadir)?;
+                log.log_message(&format!(
+                    "global termination upper bound: {}",
+                    self.nadir_ub
+                ))?;
+            }
+        }
         self.all_pd_cuts = true;
         Done(true)
     }
@@ -389,6 +418,14 @@ where
 
                 if obj_val.total_cmp(lower_bound) == Ordering::Greater {
                     *lower_bound = obj_val;
+                }
+                if self.nadir_ub < *lower_bound {
+                    // overall termination based on nadir point
+                    hss.unfix_all();
+                    if let Some(logger) = &mut self.kernel.logger {
+                        logger.log_message("terminating by nadir bound")?;
+                    }
+                    return Done(None);
                 }
                 let head = self.candidates.head().expect("checked in outer if");
                 if head.ord() <= *lower_bound {
@@ -491,6 +528,14 @@ where
                 }
             };
             // termination by bounds
+            if self.nadir_ub < *lower_bound {
+                // overall termination based on nadir point
+                hss.unfix_all();
+                if let Some(logger) = &mut self.kernel.logger {
+                    logger.log_message("terminating by nadir bound")?;
+                }
+                return Done(None);
+            }
             if let Some(head) = self.candidates.head() {
                 if head.ord() <= *lower_bound {
                     let Some(res) = self.candidates.pop() else {
@@ -1126,6 +1171,30 @@ where
         self.objective_multipliers = objective_multipliers;
         hss.change_multipliers(&self.objective_multipliers);
         self.candidates = candidates;
+        if self.kernel.stats.n_objs == 2 {
+            // compute global upper bound based on nadir point
+            let mut nadir = [0, 0];
+            for (idx, nadir) in nadir.iter_mut().enumerate() {
+                *nadir = self
+                    .candidates
+                    .iter()
+                    .map(|cand| cand.costs()[idx])
+                    .max()
+                    .unwrap();
+            }
+            self.nadir_ub = nadir
+                .iter()
+                .zip(&self.objective_multipliers)
+                .map(|(&nd, &mult)| nd as f64 * mult)
+                .sum();
+            if let Some(log) = &mut self.kernel.logger {
+                log.log_nadir(&nadir)?;
+                log.log_message(&format!(
+                    "global termination upper bound: {}",
+                    self.nadir_ub
+                ))?;
+            }
+        }
         Done(true)
     }
 }
@@ -1384,6 +1453,31 @@ where
                         });
                     }
                 }
+            }
+        }
+
+        if self.kernel.stats.n_objs == 2 {
+            // compute global upper bound based on nadir point
+            let mut nadir = [0, 0];
+            for (idx, nadir) in nadir.iter_mut().enumerate() {
+                *nadir = self
+                    .candidates
+                    .iter()
+                    .map(|cand| cand.costs()[idx])
+                    .max()
+                    .unwrap();
+            }
+            self.nadir_ub = nadir
+                .iter()
+                .zip(&self.objective_multipliers)
+                .map(|(&nd, &mult)| nd as f64 * mult)
+                .sum();
+            if let Some(log) = &mut self.kernel.logger {
+                log.log_nadir(&nadir)?;
+                log.log_message(&format!(
+                    "global termination upper bound: {}",
+                    self.nadir_ub
+                ))?;
             }
         }
 
