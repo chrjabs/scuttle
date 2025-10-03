@@ -224,6 +224,12 @@ enum AlgorithmCommand {
         /// Use randomized objective multipliers for evaluating robustness
         #[arg(long, default_value_t = ObjectiveMultipliers::default(), global = true)]
         multipliers: ObjectiveMultipliers,
+        /// Precompute a given number of lexicographic optima, which is possible without adding PD
+        /// cuts
+        ///
+        /// It is recommended to not set this higher than 8
+        #[arg(long, default_value_t = IhsOptions::default().precompute_lexicographic, global = true)]
+        precompute_lexicographic: usize,
         #[command(flatten)]
         file: FileArgs,
     },
@@ -931,6 +937,7 @@ impl Cli {
                 random_seed,
                 mip_solver,
                 multipliers,
+                precompute_lexicographic,
                 threads,
                 file,
             } => Cli {
@@ -962,6 +969,7 @@ impl Cli {
                         random_seed,
                         threads,
                         multipliers,
+                        precompute_lexicographic,
                     },
                 ),
                 proof_paths: None,

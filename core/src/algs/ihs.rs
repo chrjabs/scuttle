@@ -964,6 +964,58 @@ where
                 < f64::EPSILON
         );
         self.kernel.log_routine_start("ihs (fully seeded)")?;
+
+        if self.opts.precompute_lexicographic > 0 {
+            let obj_mult = self.objective_multipliers.clone();
+            for idx_perm in DiversePermIter::new(
+                0..self.kernel.objs.len(),
+                self.opts.precompute_lexicographic,
+                self.kernel.rng.u64(..),
+            ) {
+                assert_eq!(idx_perm.len(), self.kernel.objs.len());
+                // compute multipliers for lexicographic optimization
+                let mut mult = 1;
+                for obj_idx in idx_perm.into_iter() {
+                    self.objective_multipliers[obj_idx] = mult as f64;
+                    let obj = &self.kernel.objs[obj_idx];
+                    let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
+                    mult *= sum + 1;
+                }
+                hss.change_multipliers(&self.objective_multipliers);
+                // find optimum
+                self.kernel.log_routine_start("extract hitting set")?;
+                let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;
+                self.kernel.check_termination()?;
+                let (_, hitting_set) = match hitting_set_answer {
+                    CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
+                    CompleteSolveResult::Infeasible => {
+                        self.kernel.log_routine_end()?;
+                        self.kernel.log_routine_end()?;
+                        return Done(());
+                    }
+                };
+                self.kernel.log_routine_end()?;
+                self.kernel.check_termination()?;
+                let (costs, solution) =
+                    self.hitting_set_to_solution_and_internal_costs(hitting_set);
+                if self.is_dominated_by_pareto_front(&costs) {
+                    continue;
+                }
+                self.kernel.yield_solutions(
+                    costs.clone(),
+                    &[],
+                    solution,
+                    &mut self.pareto_front,
+                )?;
+            }
+            self.objective_multipliers = obj_mult;
+            hss.change_multipliers(&self.objective_multipliers);
+            // lazily add PD cuts only now
+            for non_dom in self.pareto_front.iter() {
+                hss.add_pd_cut(non_dom.internal_costs());
+            }
+        }
+
         loop {
             self.kernel.log_routine_start("extract hitting set")?;
             let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;

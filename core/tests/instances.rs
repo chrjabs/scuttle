@@ -273,6 +273,13 @@ fn main() {
                 ..MipPdOptions::default()
             },
         ),
+        (
+            "precomplex",
+            MipPdOptions {
+                precompute_lexicographic: 8,
+                ..MipPdOptions::default()
+            },
+        ),
     ];
     for (id, opts) in vars {
         tests.extend(

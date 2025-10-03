@@ -14,7 +14,7 @@ use rustsat::{
 
 use crate::{
     options::{MipPdOptions, ObjectiveMultipliers},
-    types::{Instance, NonDomPoint, Objective, ParetoFront},
+    types::{DiversePermIter, Instance, NonDomPoint, Objective, ParetoFront},
     EncodingStats, Limits, MaybeTerminated,
     MaybeTerminatedError::{self, Done},
     Stats, Termination,
@@ -30,6 +30,9 @@ pub struct MipPd<Hss> {
     term_flag: Arc<AtomicBool>,
     /// The objectives
     objs: Vec<Objective>,
+    objective_multipliers: Vec<f64>,
+    opts: MipPdOptions,
+    rng: fastrand::Rng,
 }
 
 impl<Hss> super::Solve for MipPd<Hss>
@@ -110,39 +113,42 @@ where
             }
             (weight_sums, max_weight_sum)
         };
+        let mut objective_multipliers;
         match opts.multipliers {
-            ObjectiveMultipliers::Ones => (),
+            ObjectiveMultipliers::Ones => {
+                objective_multipliers = vec![1.; objs.len()];
+            }
             ObjectiveMultipliers::Normalized => {
                 let (sums, max) = weight_sums_and_max(&objs);
-                let multipliers: Vec<_> = sums
+                objective_multipliers = sums
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64))
                     .collect();
-                hitting_set_solver.change_multipliers(&multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::Random => {
-                let multipliers: Vec<_> =
+                objective_multipliers =
                     (0..objs.len()).map(|_| f64::from(rng.i8(1..=10))).collect();
-                hitting_set_solver.change_multipliers(&multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::NormalizedRandom => {
                 let (sums, max) = weight_sums_and_max(&objs);
-                let multipliers: Vec<_> = sums
+                objective_multipliers = sums
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64) * f64::from(rng.i8(1..=10)))
                     .collect();
-                hitting_set_solver.change_multipliers(&multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers);
             }
             ObjectiveMultipliers::Lexicographic => {
-                let mut multipliers = Vec::with_capacity(objs.len());
+                objective_multipliers = Vec::with_capacity(objs.len());
                 let mut mult = 1;
                 for obj in objs.iter().rev() {
                     let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
-                    multipliers.push(mult as f64);
+                    objective_multipliers.push(mult as f64);
                     mult *= sum + 1;
                 }
-                multipliers.reverse();
-                hitting_set_solver.change_multipliers(&multipliers);
+                objective_multipliers.reverse();
+                hitting_set_solver.change_multipliers(&objective_multipliers);
             }
         }
 
@@ -169,6 +175,9 @@ where
             logger: None,
             term_flag: Arc::new(AtomicBool::new(false)),
             objs,
+            objective_multipliers,
+            opts,
+            rng,
         })
     }
 
@@ -253,6 +262,59 @@ where
         if let Some(logger) = &mut self.logger {
             logger.log_routine_start("mip-pd")?;
         }
+        if self.opts.precompute_lexicographic > 0 {
+            let obj_mult = self.objective_multipliers.clone();
+            for idx_perm in DiversePermIter::new(
+                0..self.objs.len(),
+                self.opts.precompute_lexicographic,
+                self.rng.u64(..),
+            ) {
+                assert_eq!(idx_perm.len(), self.objs.len());
+                // compute multipliers for lexicographic optimization
+                let mut mult = 1;
+                for obj_idx in idx_perm.into_iter() {
+                    self.objective_multipliers[obj_idx] = mult as f64;
+                    let obj = &self.objs[obj_idx];
+                    let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
+                    mult *= sum + 1;
+                }
+                self.hitting_set_solver
+                    .change_multipliers(&self.objective_multipliers);
+                // find optimum
+                if let Some(logger) = &mut self.logger {
+                    logger.log_routine_start("MIP find solution")?;
+                }
+                let hitting_set_answer = self.hitting_set_solver.optimal_hitting_set(None);
+                self.check_termination()?;
+                let (_, hitting_set) = match hitting_set_answer {
+                    CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
+                    CompleteSolveResult::Infeasible => {
+                        if let Some(logger) = &mut self.logger {
+                            logger.log_routine_end()?;
+                            logger.log_routine_end()?;
+                        }
+                        return Done(());
+                    }
+                };
+                if let Some(logger) = &mut self.logger {
+                    logger.log_routine_end()?;
+                }
+                self.check_termination()?;
+                let (costs, solution) =
+                    self.hitting_set_to_solution_and_internal_costs(hitting_set);
+                if self.is_dominated_by_pareto_front(&costs) {
+                    continue;
+                }
+                self.yield_solution(costs, solution)?;
+            }
+            self.objective_multipliers = obj_mult;
+            self.hitting_set_solver
+                .change_multipliers(&self.objective_multipliers);
+            // lazily add PD cuts only now
+            for non_dom in self.pareto_front.iter() {
+                self.hitting_set_solver.add_pd_cut(non_dom.internal_costs());
+            }
+        }
         loop {
             if let Some(logger) = &mut self.logger {
                 logger.log_routine_start("MIP find solution")?;
@@ -277,30 +339,35 @@ where
             // introduce PD cut in the hitting set solver
             self.hitting_set_solver.add_pd_cut(&costs);
             // store solution
-            let mut non_dominated =
-                NonDomPoint::new(self.externalize_internal_costs(&costs), costs);
-            non_dominated.add_sol(solution);
-            match self.log_solution() {
-                Done(_) => {
-                    let nd_term = self.log_non_dominated(&non_dominated);
-                    self.pareto_front.extend([non_dominated]);
-                    nd_term?;
-                }
-                MaybeTerminatedError::Terminated(term) => {
-                    let nd_term = self.log_non_dominated(&non_dominated);
-                    self.pareto_front.extend([non_dominated]);
-                    nd_term?;
-                    return MaybeTerminatedError::Terminated(term);
-                }
-                MaybeTerminatedError::Error(err) => {
-                    let nd_term = self.log_non_dominated(&non_dominated);
-                    self.pareto_front.extend([non_dominated]);
-                    nd_term?;
-                    return MaybeTerminatedError::Error(err);
-                }
-            }
+            self.yield_solution(costs, solution)?;
             self.check_termination()?;
         }
+    }
+
+    fn yield_solution(&mut self, costs: Vec<usize>, solution: Assignment) -> MaybeTerminatedError {
+        let mut non_dominated = NonDomPoint::new(self.externalize_internal_costs(&costs), costs);
+        non_dominated.add_sol(solution);
+        match self.log_solution() {
+            Done(_) => {
+                let nd_term = self.log_non_dominated(&non_dominated);
+                self.pareto_front.extend([non_dominated]);
+                nd_term?;
+            }
+            MaybeTerminatedError::Terminated(term) => {
+                let nd_term = self.log_non_dominated(&non_dominated);
+                self.pareto_front.extend([non_dominated]);
+                nd_term?;
+                return MaybeTerminatedError::Terminated(term);
+            }
+            MaybeTerminatedError::Error(err) => {
+                let nd_term = self.log_non_dominated(&non_dominated);
+                self.pareto_front.extend([non_dominated]);
+                nd_term?;
+                return MaybeTerminatedError::Error(err);
+            }
+        }
+        self.check_termination()?;
+        Done(())
     }
 
     fn compute_internal_costs(&self, solution: &Assignment) -> Vec<usize> {
@@ -326,5 +393,17 @@ where
         let costs = self.compute_internal_costs(&sol);
         debug_assert_eq!(costs.len(), self.stats.n_objs);
         (costs, sol)
+    }
+
+    fn is_dominated_by_pareto_front(&self, costs: &[usize]) -> bool {
+        'non_dom: for non_dom in self.pareto_front.iter() {
+            for (&non_dom_cst, &current_cst) in non_dom.internal_costs().iter().zip(costs) {
+                if current_cst < non_dom_cst {
+                    continue 'non_dom;
+                }
+            }
+            return true;
+        }
+        false
     }
 }
