@@ -176,6 +176,16 @@ fn main() {
                 },
             ),
         ),
+        (
+            "no-seeding",
+            (
+                KernelOptions::default(),
+                IhsOptions {
+                    seeding: false,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
     ];
     for (id, opts) in vars {
         tests.extend(
@@ -1082,7 +1092,7 @@ mod setup {
     ) -> Result<(), Failed> {
         println!("start checking proof");
         let out = std::process::Command::new("veripb")
-            .arg("--forceCheckDeletion")
+            .arg("--force-checked-deletion")
             .arg(instance.as_ref())
             .arg(proof.as_ref())
             .output()
