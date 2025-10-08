@@ -317,6 +317,7 @@ where
         let obj_mult = self.objective_multipliers.clone();
         // Eagerly compute lexicographic optima
         // PD cuts are only added lazily _after_ doing this
+        let mut fails_in_a_row = 0;
         for idx_perm in DiversePermIter::new(
             0..self.kernel.objs.len(),
             self.opts.precompute_lexicographic,
@@ -351,8 +352,17 @@ where
                 return Done(false);
             };
             if self.is_dominated_by_pareto_front(&costs) {
+                fails_in_a_row += 1;
+                if fails_in_a_row >= self.opts.max_failed_precompute_lex {
+                    if let Some(logger) = &mut self.kernel.logger {
+                        logger.log_message(&format!("breaking early out of lexicogarphic precomputation because of {fails_in_a_row} failures in a row")
+                        )?;
+                    }
+                    break;
+                }
                 continue;
             }
+            fails_in_a_row = 0;
             self.kernel
                 .yield_solutions(costs.clone(), &[], solution, &mut self.pareto_front)?;
         }
@@ -973,6 +983,7 @@ where
 
         if self.opts.precompute_lexicographic > 0 {
             let obj_mult = self.objective_multipliers.clone();
+            let mut fails_in_a_row = 0;
             for idx_perm in DiversePermIter::new(
                 0..self.kernel.objs.len(),
                 self.opts.precompute_lexicographic,
@@ -1005,8 +1016,17 @@ where
                 let (costs, solution) =
                     self.hitting_set_to_solution_and_internal_costs(hitting_set);
                 if self.is_dominated_by_pareto_front(&costs) {
+                    fails_in_a_row += 1;
+                    if fails_in_a_row >= self.opts.max_failed_precompute_lex {
+                        if let Some(logger) = &mut self.kernel.logger {
+                            logger.log_message(&format!("breaking early out of lexicogarphic precomputation because of {fails_in_a_row} failures in a row")
+                        )?;
+                        }
+                        break;
+                    }
                     continue;
                 }
+                fails_in_a_row = 0;
                 self.kernel.yield_solutions(
                     costs.clone(),
                     &[],

@@ -201,6 +201,9 @@ enum AlgorithmCommand {
         /// It is recommended to not set this higher than 8
         #[arg(long, default_value_t = IhsOptions::default().precompute_lexicographic, global = true)]
         precompute_lexicographic: usize,
+        /// The maximum number of allowed failures when precomputing lexicographic optima
+        #[arg(long, default_value_t = IhsOptions::default().max_failed_precompute_lex, global = true)]
+        max_failed_precompute_lex: usize,
         /// Use reduced cost fixing
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().reduced_cost_fixing), global = true)]
         reduced_cost_fixing: Bool,
@@ -880,6 +883,7 @@ impl Cli {
                 use_starting_points,
                 multipliers,
                 precompute_lexicographic,
+                max_failed_precompute_lex,
                 reduced_cost_fixing,
                 hss_threads,
                 cb,
@@ -923,6 +927,7 @@ impl Cli {
                         starting_points: use_starting_points.into(),
                         multipliers,
                         precompute_lexicographic,
+                        max_failed_precompute_lex,
                         reduced_cost_fixing: reduced_cost_fixing.into(),
                     },
                     if args.core_boosting.into() {

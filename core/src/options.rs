@@ -404,6 +404,8 @@ pub struct IhsOptions {
     /// Compute up to a set number of lexicographic optima first, before starting the main Pareto
     /// IHS algorithm. This allows for lazily introducing PD cuts only after this stage.
     pub precompute_lexicographic: usize,
+    /// The maximum number of allowed failures when precomputing lexicographic optima
+    pub max_failed_precompute_lex: usize,
     /// Use reduced cost fixing
     pub reduced_cost_fixing: bool,
 }
@@ -419,6 +421,7 @@ impl Default for IhsOptions {
             starting_points: true,
             multipliers: ObjectiveMultipliers::default(),
             precompute_lexicographic: 0,
+            max_failed_precompute_lex: 2,
             reduced_cost_fixing: false,
         }
     }
