@@ -204,6 +204,9 @@ enum AlgorithmCommand {
         /// The maximum number of allowed failures when precomputing lexicographic optima
         #[arg(long, default_value_t = IhsOptions::default().max_failed_precompute_lex, global = true)]
         max_failed_precompute_lex: usize,
+        /// Whether to precompute lexicographic solutions when the instance is fully seeded
+        #[arg(long, default_value_t = Bool::from(IhsOptions::default().fully_seeded_precompute_lex), global = true)]
+        fully_seeded_precompute_lex: Bool,
         /// Use reduced cost fixing
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().reduced_cost_fixing), global = true)]
         reduced_cost_fixing: Bool,
@@ -884,6 +887,7 @@ impl Cli {
                 multipliers,
                 precompute_lexicographic,
                 max_failed_precompute_lex,
+                fully_seeded_precompute_lex: precompute_fully_seeded,
                 reduced_cost_fixing,
                 hss_threads,
                 cb,
@@ -928,6 +932,7 @@ impl Cli {
                         multipliers,
                         precompute_lexicographic,
                         max_failed_precompute_lex,
+                        fully_seeded_precompute_lex: precompute_fully_seeded.into(),
                         reduced_cost_fixing: reduced_cost_fixing.into(),
                     },
                     if args.core_boosting.into() {
@@ -1111,6 +1116,26 @@ impl Cli {
                     )?;
                     Self::print_parameter(&mut buffer, "hss-threads", opts.hss_threads)?;
                     Self::print_parameter(&mut buffer, "multipliers", opts.multipliers)?;
+                    Self::print_parameter(
+                        &mut buffer,
+                        "precompute-lexicographic",
+                        opts.precompute_lexicographic,
+                    )?;
+                    Self::print_parameter(
+                        &mut buffer,
+                        "max-failed-precompute-lex",
+                        opts.max_failed_precompute_lex,
+                    )?;
+                    Self::print_parameter(
+                        &mut buffer,
+                        "fully-seeded-precompute-lex",
+                        opts.fully_seeded_precompute_lex,
+                    )?;
+                    Self::print_parameter(
+                        &mut buffer,
+                        "reduced-cost-fixing",
+                        opts.reduced_cost_fixing,
+                    )?;
                 }
                 Algorithm::MipPd(mip_solver, opts) => {
                     Self::print_parameter(&mut buffer, "mip-solver", mip_solver)?;

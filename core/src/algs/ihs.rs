@@ -981,7 +981,7 @@ where
         );
         self.kernel.log_routine_start("ihs (fully seeded)")?;
 
-        if self.opts.precompute_lexicographic > 0 {
+        if self.opts.fully_seeded_precompute_lex && self.opts.precompute_lexicographic > 0 {
             let obj_mult = self.objective_multipliers.clone();
             let mut fails_in_a_row = 0;
             for idx_perm in DiversePermIter::new(

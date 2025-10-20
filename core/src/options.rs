@@ -406,6 +406,8 @@ pub struct IhsOptions {
     pub precompute_lexicographic: usize,
     /// The maximum number of allowed failures when precomputing lexicographic optima
     pub max_failed_precompute_lex: usize,
+    /// Whether to precompute lexicographic solutions when fully seeded
+    pub fully_seeded_precompute_lex: bool,
     /// Use reduced cost fixing
     pub reduced_cost_fixing: bool,
 }
@@ -421,7 +423,8 @@ impl Default for IhsOptions {
             starting_points: true,
             multipliers: ObjectiveMultipliers::default(),
             precompute_lexicographic: 0,
-            max_failed_precompute_lex: 2,
+            max_failed_precompute_lex: 100,
+            fully_seeded_precompute_lex: false,
             reduced_cost_fixing: false,
         }
     }
@@ -506,9 +509,9 @@ pub enum IhsCbTreatment {
     /// Translate the OLL semantics to the hitting set solver after core boosting. Introduce
     /// further semantics as needed, and extract cores over both the original, and the reformulated
     /// objective. This is reminiscent of abstract cores.
-    #[default]
     Abstract,
     /// Run IHS-based core boosting rather than OLL-based
+    #[default]
     Ihs,
 }
 
