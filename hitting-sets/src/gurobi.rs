@@ -761,6 +761,7 @@ mod model {
             I: IntoIterator<Item = Var>,
         {
             let vars: Vec<_> = vars.into_iter().collect();
+            self.model.update().expect("failed to update model");
             self.model
                 .set_obj_attr_batch(attr::UB, vars.iter().map(|&v| (v, 1.)))
                 .expect("failed to set variable bounds");
@@ -768,6 +769,7 @@ mod model {
                 .set_obj_attr_batch(attr::LB, vars.iter().map(|&v| (v, 0.)))
                 .expect("failed to set variable bounds");
             if let Some(relax) = &mut self.relax {
+                relax.update().expect("failed to update model (lp)");
                 relax
                     .set_obj_attr_batch(
                         attr::UB,
@@ -792,23 +794,31 @@ mod model {
         pub fn add_constr(&mut self, name: &str, con: IneqExpr) {
             if let Some(relax) = &mut self.relax {
                 let IneqExpr {
-                    lhs: Expr::Linear(lhs),
+                    lhs,
                     sense,
                     rhs: Expr::Constant(rhs),
                 } = &con
                 else {
                     panic!("unexpected type of constraint");
                 };
-                let con = IneqExpr {
-                    lhs: {
-                        let new_expr: LinExpr = lhs
-                            .iter_terms()
-                            .map(|(&var, &coeff)| (coeff, Var::from_raw(var.id(), relax.id())))
-                            .collect();
-                        new_expr + lhs.get_offset()
+                let con = match lhs {
+                    Expr::Constant(lhs) => IneqExpr {
+                        lhs: Expr::Constant(*lhs),
+                        sense: *sense,
+                        rhs: Expr::Constant(*rhs),
                     },
-                    sense: *sense,
-                    rhs: Expr::Constant(*rhs),
+                    Expr::Linear(lhs) => IneqExpr {
+                        lhs: {
+                            let new_expr: LinExpr = lhs
+                                .iter_terms()
+                                .map(|(&var, &coeff)| (coeff, Var::from_raw(var.id(), relax.id())))
+                                .collect();
+                            new_expr + lhs.get_offset()
+                        },
+                        sense: *sense,
+                        rhs: Expr::Constant(*rhs),
+                    },
+                    _ => panic!("unexpected type of constraint"),
                 };
                 relax
                     .add_constr(name, con)
@@ -822,7 +832,6 @@ mod model {
         pub fn add_indicator_constr(&mut self, name: &str, ind: Var, ind_val: bool, con: IneqExpr) {
             if self.might_need_lp {
                 let relax = self.relax.get_or_insert_with(|| {
-                    assert!(self.might_need_lp);
                     self.model.update().expect("failed to update model");
                     let relax = self
                         .model
@@ -874,9 +883,9 @@ mod model {
                             );
                         let big_m = max_lhs - rhs;
                         if ind_val {
-                            rhs + (big_m * ind)
-                        } else {
                             rhs + big_m - (big_m * ind)
+                        } else {
+                            rhs + (big_m * ind)
                         }
                     }
                 };

@@ -92,6 +92,17 @@ where
     }
 }
 
+impl<S> FromIterator<NonDomPoint<S>> for ParetoFront<S>
+where
+    S: Clone + Eq,
+{
+    fn from_iter<T: IntoIterator<Item = NonDomPoint<S>>>(iter: T) -> Self {
+        ParetoFront {
+            ndoms: iter.into_iter().collect(),
+        }
+    }
+}
+
 impl<S> Extend<NonDomPoint<S>> for ParetoFront<S>
 where
     S: Clone + Eq,
@@ -161,7 +172,7 @@ where
     }
 
     /// Adds a solution to the non-dominated point
-    pub(crate) fn add_sol(&mut self, sol: S) {
+    pub fn add_sol(&mut self, sol: S) {
         self.sols.push(sol)
     }
 

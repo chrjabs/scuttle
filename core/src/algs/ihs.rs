@@ -262,7 +262,9 @@ where
     }
 
     fn alg_main_int(&mut self, hss: &mut Hss) -> MaybeTerminatedError {
-        self.precompute_lexicographic(hss);
+        if !self.precompute_lexicographic(hss)? {
+            return Done(());
+        };
 
         let joint_objective = {
             let mut jobj = vec![0.; self.max_obj_var.idx() + 1];
@@ -313,6 +315,11 @@ where
             return Done(true);
         }
         self.all_pd_cuts = false;
+
+        // since we're changing the used objective, can't use the nadir_ub computed so far
+        // if we have one, will compute a new one below anyway
+        self.nadir_ub = f64::INFINITY;
+
         let mut joint_objective = vec![0.; self.max_obj_var.idx() + 1];
         let obj_mult = self.objective_multipliers.clone();
         // Eagerly compute lexicographic optima
@@ -502,6 +509,12 @@ where
                 IncompleteSolveResult::Infeasible => {
                     self.kernel.log_routine_end()?;
                     hss.unfix_all();
+                    // NOTE: infeasibility might be due to reduced costs, in which case the upper
+                    // bound solution needs to be returned
+                    if let Some(head) = self.candidates.pop() {
+                        assert!(self.opts.reduced_cost_fixing);
+                        return Done(Some(head));
+                    }
                     return Done(None);
                 }
                 IncompleteSolveResult::Feasible(cost, hitting_set) => (cost, hitting_set, false),

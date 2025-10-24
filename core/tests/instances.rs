@@ -137,11 +137,11 @@ fn main() {
             ),
         ),
         (
-            "precomplex",
+            "no-precomplex",
             (
                 KernelOptions::default(),
                 IhsOptions {
-                    precompute_lexicographic: 8,
+                    precompute_lexicographic: 0,
                     ..IhsOptions::default()
                 },
             ),
@@ -170,6 +170,7 @@ fn main() {
                 >,
                 opts,
             )
+            .allow_dominated(true)
             .collect_tests(),
         );
     }
@@ -187,6 +188,7 @@ fn main() {
                 >,
                 opts,
             )
+            .allow_dominated(true)
             .collect_tests(),
         );
     }
@@ -236,6 +238,7 @@ fn main() {
                 >,
                 opts,
             )
+            .allow_dominated(true)
             .collect_tests(),
         );
     }
@@ -253,6 +256,7 @@ fn main() {
                 >,
                 opts,
             )
+            .allow_dominated(true)
             .collect_tests(),
         );
     }
@@ -680,6 +684,7 @@ mod setup {
         alg: &'a str,
         variant: &'a str,
         sol_enum: bool,
+        allow_dominated: bool,
         filter: Box<dyn Fn(Meta) -> bool>,
         #[cfg(feature = "maxpre")]
         techniques: Option<&'static str>,
@@ -708,6 +713,7 @@ mod setup {
                 alg,
                 variant,
                 sol_enum: false,
+                allow_dominated: false,
                 filter: Box::new(|_| false),
                 #[cfg(feature = "maxpre")]
                 techniques: None,
@@ -787,6 +793,11 @@ mod setup {
             self
         }
 
+        pub fn allow_dominated(mut self, val: bool) -> Self {
+            self.allow_dominated = val;
+            self
+        }
+
         #[cfg(feature = "maxpre")]
         pub fn preprocessing(mut self, techniques: Option<&'static str>) -> Self {
             self.techniques = techniques;
@@ -819,7 +830,13 @@ mod setup {
                             #[cfg(not(feature = "maxpre"))]
                             tests.push(
                                 Trial::test(name, move || {
-                                    run_test(&path, run_fn, opts, self.sol_enum)
+                                    run_test(
+                                        &path,
+                                        run_fn,
+                                        opts,
+                                        self.sol_enum,
+                                        self.allow_dominated,
+                                    )
                                 })
                                 .with_kind(self.kind())
                                 .with_ignored_flag(dec == Decision::Ignore),
@@ -904,13 +921,99 @@ mod setup {
         Skip,
     }
 
-    fn check_pf_shape(path: &Path, pf: ParetoFront, sol_enum: bool) -> Result<(), Failed> {
+    #[derive(Clone, Copy, Debug)]
+    enum ParetoCmp {
+        Equal,
+        ADomB,
+        BDomA,
+        Incomparable,
+    }
+
+    fn pareto_compare(a: &[isize], b: &[isize]) -> ParetoCmp {
+        a.iter()
+            .zip(b)
+            .fold(ParetoCmp::Equal, |cmp, (a, b)| match a.cmp(b) {
+                std::cmp::Ordering::Less => match cmp {
+                    ParetoCmp::Equal | ParetoCmp::ADomB => ParetoCmp::ADomB,
+                    ParetoCmp::BDomA | ParetoCmp::Incomparable => ParetoCmp::Incomparable,
+                },
+                std::cmp::Ordering::Equal => cmp,
+                std::cmp::Ordering::Greater => match cmp {
+                    ParetoCmp::Equal | ParetoCmp::BDomA => ParetoCmp::BDomA,
+                    ParetoCmp::ADomB | ParetoCmp::Incomparable => ParetoCmp::Incomparable,
+                },
+            })
+    }
+
+    fn check_pf_shape(
+        path: &Path,
+        pf: ParetoFront,
+        sol_enum: bool,
+        allow_dominated: bool,
+    ) -> Result<(), Failed> {
         let prefix = match path.extension() {
             Some(ext) if ext == OsStr::new("mcnf") => 'c',
             Some(ext) if ext == OsStr::new("opb") => '*',
             _ => panic!("unknown file extension"),
         };
         let mut truth = rustsat::types::RsHashSet::<(Vec<isize>, usize)>::default();
+        // filter out dominated points
+        let pf: ParetoFront = if allow_dominated {
+            let mut points: Vec<_> = pf.into_iter().collect();
+            dbg!(points.len());
+            let mut new_last = 0;
+            'outer: for last in 0..points.len() {
+                points.swap(last, new_last);
+                for cmp in 0..new_last {
+                    match pareto_compare(points[cmp].costs(), points[new_last].costs()) {
+                        ParetoCmp::Equal => {
+                            dbg!(points[cmp].costs());
+                            dbg!(points[new_last].costs());
+                            let (head, tail) = points.split_at_mut(new_last);
+                            for sol in tail[0].iter() {
+                                head[cmp].add_sol(sol.clone())
+                            }
+                            continue 'outer;
+                        }
+                        ParetoCmp::ADomB => continue 'outer,
+                        ParetoCmp::BDomA => {
+                            points.swap(cmp, new_last);
+                            // check whether cmp+1..new_last is dominated by cmp
+                            let mut other = cmp + 1;
+                            while other < new_last {
+                                match pareto_compare(points[cmp].costs(), points[other].costs()) {
+                                    ParetoCmp::Equal => {
+                                        let (head, tail) = points.split_at_mut(other);
+                                        for sol in tail[0].iter() {
+                                            head[cmp].add_sol(sol.clone())
+                                        }
+                                        new_last -= 1;
+                                        points.swap(other, new_last);
+                                    }
+                                    ParetoCmp::ADomB => {
+                                        new_last -= 1;
+                                        points.swap(other, new_last);
+                                    }
+                                    ParetoCmp::BDomA => unreachable!(),
+                                    ParetoCmp::Incomparable => {
+                                        other += 1;
+                                    }
+                                }
+                            }
+                            continue 'outer;
+                        }
+                        ParetoCmp::Incomparable => {}
+                    }
+                }
+                new_last += 1;
+            }
+            points.truncate(new_last);
+            dbg!(points.len());
+            points.into_iter().collect()
+        } else {
+            pf
+        };
+
         for line in BufReader::new(File::open(path).expect("failed to open instance file")).lines()
         {
             let line = line.expect("failed to read test config");
@@ -944,7 +1047,7 @@ mod setup {
         }
         let pf: rustsat::types::RsHashSet<(Vec<isize>, usize)> = pf
             .into_iter()
-            .map(|pp| (pp.costs().to_vec(), pp.n_sols()))
+            .map(|pp| (pp.costs().to_vec(), if sol_enum { pp.n_sols() } else { 1 }))
             .collect();
         if pf != truth {
             return Err(format!(
@@ -955,7 +1058,13 @@ mod setup {
         Ok(())
     }
 
-    fn run_test<F, O>(path: &Path, run_fn: F, opts: O, sol_enum: bool) -> Result<(), Failed>
+    fn run_test<F, O>(
+        path: &Path,
+        run_fn: F,
+        opts: O,
+        sol_enum: bool,
+        allow_dominated: bool,
+    ) -> Result<(), Failed>
     where
         F: Fn(Instance, O) -> Result<ParetoFront, Failed>,
     {
@@ -969,7 +1078,7 @@ mod setup {
             &None,
         )
         .expect("failed to parse instance");
-        check_pf_shape(path, run_fn(inst, opts)?, sol_enum)
+        check_pf_shape(path, run_fn(inst, opts)?, sol_enum, allow_dominated)
     }
 
     #[cfg(feature = "maxpre")]
@@ -998,6 +1107,7 @@ mod setup {
             path,
             run_fn(inst, opts)?.convert_solutions(&mut |s| prepro.reconstruct(s)),
             false,
+            false,
         )
     }
 
@@ -1019,7 +1129,7 @@ mod setup {
         .expect("failed to parse instance");
         let proof = proof.unwrap();
         print_file(&input_path);
-        check_pf_shape(path, run_fn(inst, proof, opts)?, false)?;
+        check_pf_shape(path, run_fn(inst, proof, opts)?, false, false)?;
         verify_proof(input_path, proof_path)
     }
 

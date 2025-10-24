@@ -422,10 +422,10 @@ impl Default for IhsOptions {
             core_minimization: CoreMinimization::Full,
             starting_points: true,
             multipliers: ObjectiveMultipliers::default(),
-            precompute_lexicographic: 0,
+            precompute_lexicographic: 8,
             max_failed_precompute_lex: 100,
             fully_seeded_precompute_lex: false,
-            reduced_cost_fixing: false,
+            reduced_cost_fixing: true,
         }
     }
 }
