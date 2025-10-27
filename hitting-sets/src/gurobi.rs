@@ -2,14 +2,14 @@
 
 use std::cmp;
 
-use grb::{c, expr::Expr, param, Env, Status};
+use grb::{Env, Status, c, expr::Expr, param};
 use rustsat::types::{Lit, RsHashMap, TernaryVal, Var};
 
 use crate::{
-    map::IndexedVar,
     Callbacks, CompleteSolveResult, IncompleteSolveResult,
     MaybeTerminated::{self, Done},
     ReducedCostsResult,
+    map::IndexedVar,
 };
 
 use super::{BuildSolver, CoreOrigin, HittingSetSolver, Obj, VarMap};
@@ -393,7 +393,7 @@ impl HittingSetSolver for Solver {
         })
     }
 
-    fn fix<I>(&mut self, to_fix: I)
+    fn fix<I>(&mut self, to_fix: I) -> bool
     where
         I: IntoIterator<Item = Lit>,
     {
@@ -404,13 +404,13 @@ impl HittingSetSolver for Solver {
                 .get(var.index())
                 .copied()
                 .unwrap_or(TernaryVal::DontCare);
-            debug_assert_eq!(
-                unit.to_bool_with_def(lit.is_pos()),
-                lit.is_pos(),
-                "fixing should not disagree with unit"
-            );
+            if unit.to_bool_with_def(lit.is_pos()) != lit.is_pos() {
+                // fixing disagrees with unit -> unsat
+                return false;
+            }
             self.model.fix_var(var, lit.is_pos());
         }
+        true
     }
 
     fn unfix_all(&mut self) {
@@ -670,8 +670,8 @@ impl IndexedVar for grb::Var {
 
 mod model {
     use grb::{
-        add_binvar, add_ctsvar, attr, callback::Callback, constr::IneqExpr, expr::LinExpr, Expr,
-        ModelObject, Var,
+        Expr, ModelObject, Var, add_binvar, add_ctsvar, attr, callback::Callback, constr::IneqExpr,
+        expr::LinExpr,
     };
 
     /// Gurobi model with LP relaxation
@@ -860,35 +860,32 @@ mod model {
                     panic!("unexpected type of constraint");
                 };
                 let rhs = *rhs;
-                let rhs = match sense {
-                    grb::ConstrSense::Equal => panic!("equality constraints not supported"),
-                    grb::ConstrSense::Greater => {
-                        let min_lhs =
-                            lhs.iter_terms().fold(
-                                0.,
-                                |min, (_, &coeff)| if coeff < 0. { min + coeff } else { min },
-                            );
-                        let big_m = rhs - min_lhs;
-                        if ind_val {
-                            rhs - big_m + (big_m * ind)
-                        } else {
-                            rhs - (big_m * ind)
+                let rhs =
+                    match sense {
+                        grb::ConstrSense::Equal => panic!("equality constraints not supported"),
+                        grb::ConstrSense::Greater => {
+                            let min_lhs = lhs.iter_terms().fold(0., |min, (_, &coeff)| {
+                                if coeff < 0. { min + coeff } else { min }
+                            });
+                            let big_m = rhs - min_lhs;
+                            if ind_val {
+                                rhs - big_m + (big_m * ind)
+                            } else {
+                                rhs - (big_m * ind)
+                            }
                         }
-                    }
-                    grb::ConstrSense::Less => {
-                        let max_lhs =
-                            lhs.iter_terms().fold(
-                                0.,
-                                |max, (_, &coeff)| if coeff > 0. { max + coeff } else { max },
-                            );
-                        let big_m = max_lhs - rhs;
-                        if ind_val {
-                            rhs + big_m - (big_m * ind)
-                        } else {
-                            rhs + (big_m * ind)
+                        grb::ConstrSense::Less => {
+                            let max_lhs = lhs.iter_terms().fold(0., |max, (_, &coeff)| {
+                                if coeff > 0. { max + coeff } else { max }
+                            });
+                            let big_m = max_lhs - rhs;
+                            if ind_val {
+                                rhs + big_m - (big_m * ind)
+                            } else {
+                                rhs + (big_m * ind)
+                            }
                         }
-                    }
-                };
+                    };
                 let con = IneqExpr {
                     lhs: {
                         let new_expr: LinExpr = lhs

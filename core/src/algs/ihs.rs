@@ -18,9 +18,11 @@ use rustsat::{
     },
     types::{Assignment, Cl, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions};
+use scuttle_proc::{KernelFunctions, oracle_bounds};
 
 use crate::{
+    CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
+    MaybeTerminatedError::{self, Done},
     algs::{coreboosting::CbResult, coreguided::ReformData},
     archive::Archive,
     options::{
@@ -29,8 +31,6 @@ use crate::{
     },
     termination::ensure,
     types::{DiversePermIter, Objective, ParetoFront, VarManager},
-    CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
-    MaybeTerminatedError::{self, Done},
 };
 
 use super::Kernel;
@@ -452,13 +452,14 @@ where
                 }
                 let head = self.candidates.head().expect("checked in outer if");
                 if head.ord() <= *lower_bound {
-                    let Some(res) = self.candidates.pop() else {
-                        unreachable!("just checked with `head` right before");
-                    };
+                    let res = self
+                        .candidates
+                        .pop()
+                        .expect("just checked with `head` right before");
                     hss.unfix_all();
                     return Done(Some(res));
                 }
-                hss.fix(rcs.into_iter().filter_map(|(var, val, rc)| {
+                if !hss.fix(rcs.into_iter().filter_map(|(var, val, rc)| {
                     let &cost = joint_objective.get(var.idx())?;
                     if cost.abs() < f64::EPSILON {
                         return None;
@@ -482,7 +483,14 @@ where
                     } else {
                         None
                     }
-                }));
+                })) {
+                    hss.unfix_all();
+                    let head = self
+                        .candidates
+                        .pop()
+                        .expect("just checked with `head` right before");
+                    return Done(Some(head));
+                }
             }
 
             self.kernel.log_routine_start("extract hitting set")?;
@@ -1451,9 +1459,9 @@ where
                                     );
                                 } else {
                                     debug_assert!(
-                                            translated[lit.vidx()],
-                                            "this literal must have appeared in a another core, which must have been before in `cores`"
-                                            );
+                                        translated[lit.vidx()],
+                                        "this literal must have appeared in a another core, which must have been before in `cores`"
+                                    );
                                 }
                                 lits.push(lit);
                             }

@@ -140,11 +140,7 @@ impl HittingSetSolver for Solver {
                 0,
             ),
             |(b, n), lit| {
-                if lit.is_neg() {
-                    (b - 1, n)
-                } else {
-                    (b, n + 1)
-                }
+                if lit.is_neg() { (b - 1, n) } else { (b, n + 1) }
             },
         );
         let mut factors: Vec<_> = lits
@@ -378,7 +374,7 @@ impl HittingSetSolver for Solver {
                 }
                 // update objectives
                 for var in vars {
-                    let weight = self.objectives.iter().fold(0., |sum, Obj{lits,..}| {
+                    let weight = self.objectives.iter().fold(0., |sum, Obj { lits, .. }| {
                         if let Some(&weight) = lits.get(&var.pos_lit()) {
                             return sum + (weight as f64);
                         }
@@ -387,11 +383,15 @@ impl HittingSetSolver for Solver {
                         }
                         sum
                     });
-                    let col = self.map.ensure_mapped(var, |_| problem.add_integer_column(weight, 0..=1));
+                    let col = self
+                        .map
+                        .ensure_mapped(var, |_| problem.add_integer_column(weight, 0..=1));
                     problem.change_column_cost(col, weight);
                 }
             }
-            State::Main(_) => todo!("since this is only used in core boosting, the solver should alwasy be in the Init state"),
+            State::Main(_) => todo!(
+                "since this is only used in core boosting, the solver should alwasy be in the Init state"
+            ),
             State::Working => unreachable!("working state should never happen externally"),
         }
     }
@@ -433,7 +433,7 @@ impl HittingSetSolver for Solver {
         todo!()
     }
 
-    fn fix<I>(&mut self, to_fix: I)
+    fn fix<I>(&mut self, to_fix: I) -> bool
     where
         I: IntoIterator<Item = Lit>,
     {

@@ -191,7 +191,9 @@ pub trait HittingSetSolver {
         Cb: Callbacks;
 
     /// Fixes certain literals by changing their bounds
-    fn fix<I>(&mut self, to_fix: I)
+    ///
+    /// Returns false if unsatisfiability is detected
+    fn fix<I>(&mut self, to_fix: I) -> bool
     where
         I: IntoIterator<Item = Lit>;
 
