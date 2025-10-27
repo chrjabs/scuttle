@@ -34,13 +34,17 @@ enum State {
 impl HittingSetSolver for Solver {
     type Builder = Builder;
 
-    fn change_multipliers(&mut self, multi: &[f64]) {
+    fn change_multipliers(&mut self, multi: &[f64], _prios: Option<&[usize]>) {
+        for (obj, &mult) in self.objectives.iter_mut().zip(multi) {
+            obj.mult = mult;
+        }
         match &mut self.state {
             State::Init { problem, .. } => {
                 for (var, &col) in self.map.iter() {
-                    let weight = self.objectives.iter().zip(multi).fold(
-                        0.,
-                        |sum, (Obj { lits, .. }, &mult)| {
+                    let weight = self
+                        .objectives
+                        .iter()
+                        .fold(0., |sum, Obj { lits, mult, .. }| {
                             if let Some(&weight) = lits.get(&var.pos_lit()) {
                                 return sum + (weight as f64) * mult;
                             }
@@ -48,16 +52,16 @@ impl HittingSetSolver for Solver {
                                 return sum - (weight as f64) * mult;
                             }
                             sum
-                        },
-                    );
+                        });
                     problem.change_column_cost(col, weight);
                 }
             }
             State::Main(model) => {
                 for (var, &col) in self.map.iter() {
-                    let weight = self.objectives.iter().zip(multi).fold(
-                        0.,
-                        |sum, (Obj { lits, .. }, &mult)| {
+                    let weight = self
+                        .objectives
+                        .iter()
+                        .fold(0., |sum, Obj { lits, mult, .. }| {
                             if let Some(&weight) = lits.get(&var.pos_lit()) {
                                 return sum + (weight as f64) * mult;
                             }
@@ -65,8 +69,7 @@ impl HittingSetSolver for Solver {
                                 return sum - (weight as f64) * mult;
                             }
                             sum
-                        },
-                    );
+                        });
                     model.change_column_cost(col, weight);
                 }
             }
@@ -140,7 +143,11 @@ impl HittingSetSolver for Solver {
                 0,
             ),
             |(b, n), lit| {
-                if lit.is_neg() { (b - 1, n) } else { (b, n + 1) }
+                if lit.is_neg() {
+                    (b - 1, n)
+                } else {
+                    (b, n + 1)
+                }
             },
         );
         let mut factors: Vec<_> = lits
@@ -356,6 +363,7 @@ impl HittingSetSolver for Solver {
                 lits: inner.into_iter().collect(),
                 offset,
                 lower_bound: cmp::max(*lower_bound, offset),
+                mult: 1.,
             })
             .collect();
         debug_assert_eq!(_n_old_objs, self.objectives.len());
@@ -449,14 +457,12 @@ fn collect_hitting_set(sol: &Solution, map: &VarMap<Col>) -> Vec<Lit> {
         .iter()
         .enumerate()
         .take(map.max_mapped().unwrap().index() + 1)
-        .filter_map(|(idx, val)| {
+        .filter_map(|(idx, &val)| {
             let var = map.map_back(idx)?;
-            if *val >= super::TRUE {
+            if crate::bool_val(val) {
                 Some(var.pos_lit())
-            } else if *val <= super::FALSE {
-                Some(var.neg_lit())
             } else {
-                panic!("variable assigned to non-integer value");
+                Some(var.neg_lit())
             }
         })
         .collect()

@@ -577,10 +577,10 @@ where
     match alg.solve(scuttle_core::Limits::none()) {
         scuttle_core::MaybeTerminatedError::Done(_) => (),
         scuttle_core::MaybeTerminatedError::Terminated(t) => {
-            return Err(format!("solving terminated early: {t}").into())
+            return Err(format!("solving terminated early: {t}").into());
         }
         scuttle_core::MaybeTerminatedError::Error(e) => {
-            return Err(format!("solving error: {e}").into())
+            return Err(format!("solving error: {e}").into());
         }
     }
     Ok(alg.pareto_front())
@@ -597,20 +597,20 @@ where
     let cont = match alg.core_boost(cb_opts) {
         scuttle_core::MaybeTerminatedError::Done(cont) => cont,
         scuttle_core::MaybeTerminatedError::Terminated(t) => {
-            return Err(format!("solving terminated early: {t}").into())
+            return Err(format!("solving terminated early: {t}").into());
         }
         scuttle_core::MaybeTerminatedError::Error(e) => {
-            return Err(format!("solving error: {e}").into())
+            return Err(format!("solving error: {e}").into());
         }
     };
     if cont {
         match alg.solve(scuttle_core::Limits::none()) {
             scuttle_core::MaybeTerminatedError::Done(_) => (),
             scuttle_core::MaybeTerminatedError::Terminated(t) => {
-                return Err(format!("solving terminated early: {t}").into())
+                return Err(format!("solving terminated early: {t}").into());
             }
             scuttle_core::MaybeTerminatedError::Error(e) => {
-                return Err(format!("solving error: {e}").into())
+                return Err(format!("solving error: {e}").into());
             }
         }
     }
@@ -629,10 +629,10 @@ where
     match alg.solve(scuttle_core::Limits::none()) {
         scuttle_core::MaybeTerminatedError::Done(_) => (),
         scuttle_core::MaybeTerminatedError::Terminated(t) => {
-            return Err(format!("solving terminated early: {t}").into())
+            return Err(format!("solving terminated early: {t}").into());
         }
         scuttle_core::MaybeTerminatedError::Error(e) => {
-            return Err(format!("solving error: {e}").into())
+            return Err(format!("solving error: {e}").into());
         }
     }
     Ok(alg.pareto_front())
@@ -651,20 +651,20 @@ where
     let cont = match alg.core_boost(cb_opts) {
         scuttle_core::MaybeTerminatedError::Done(cont) => cont,
         scuttle_core::MaybeTerminatedError::Terminated(t) => {
-            return Err(format!("solving terminated early: {t}").into())
+            return Err(format!("solving terminated early: {t}").into());
         }
         scuttle_core::MaybeTerminatedError::Error(e) => {
-            return Err(format!("solving error: {e}").into())
+            return Err(format!("solving error: {e}").into());
         }
     };
     if cont {
         match alg.solve(scuttle_core::Limits::none()) {
             scuttle_core::MaybeTerminatedError::Done(_) => (),
             scuttle_core::MaybeTerminatedError::Terminated(t) => {
-                return Err(format!("solving terminated early: {t}").into())
+                return Err(format!("solving terminated early: {t}").into());
             }
             scuttle_core::MaybeTerminatedError::Error(e) => {
-                return Err(format!("solving error: {e}").into())
+                return Err(format!("solving error: {e}").into());
             }
         }
     }
@@ -679,10 +679,10 @@ where
     match alg.solve(scuttle_core::Limits::none()) {
         scuttle_core::MaybeTerminatedError::Done(_) => (),
         scuttle_core::MaybeTerminatedError::Terminated(t) => {
-            return Err(format!("solving terminated early: {t}").into())
+            return Err(format!("solving terminated early: {t}").into());
         }
         scuttle_core::MaybeTerminatedError::Error(e) => {
-            return Err(format!("solving error: {e}").into())
+            return Err(format!("solving error: {e}").into());
         }
     }
     Ok(alg.pareto_front())
@@ -973,12 +973,6 @@ mod setup {
         sol_enum: bool,
         allow_dominated: bool,
     ) -> Result<(), Failed> {
-        let prefix = match path.extension() {
-            Some(ext) if ext == OsStr::new("mcnf") => 'c',
-            Some(ext) if ext == OsStr::new("opb") => '*',
-            _ => panic!("unknown file extension"),
-        };
-        let mut truth = rustsat::types::RsHashSet::<(Vec<isize>, usize)>::default();
         // filter out dominated points
         let pf: ParetoFront = if allow_dominated {
             let mut points: Vec<_> = pf.into_iter().collect();
@@ -1036,6 +1030,12 @@ mod setup {
             pf
         };
 
+        let prefix = match path.extension() {
+            Some(ext) if ext == OsStr::new("mcnf") => 'c',
+            Some(ext) if ext == OsStr::new("opb") => '*',
+            _ => panic!("unknown file extension"),
+        };
+        let mut truth = rustsat::types::RsHashSet::<(Vec<isize>, usize)>::default();
         for line in BufReader::new(File::open(path).expect("failed to open instance file")).lines()
         {
             let line = line.expect("failed to read test config");

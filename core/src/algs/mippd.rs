@@ -127,12 +127,12 @@ where
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64))
                     .collect();
-                hitting_set_solver.change_multipliers(&objective_multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers, None);
             }
             ObjectiveMultipliers::Random => {
                 objective_multipliers =
                     (0..objs.len()).map(|_| f64::from(rng.i8(1..=10))).collect();
-                hitting_set_solver.change_multipliers(&objective_multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers, None);
             }
             ObjectiveMultipliers::NormalizedRandom => {
                 let (sums, max) = weight_sums_and_max(&objs);
@@ -140,7 +140,7 @@ where
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64) * f64::from(rng.i8(1..=10)))
                     .collect();
-                hitting_set_solver.change_multipliers(&objective_multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers, None);
             }
             ObjectiveMultipliers::Lexicographic => {
                 objective_multipliers = Vec::with_capacity(objs.len());
@@ -151,7 +151,10 @@ where
                     mult *= sum + 1;
                 }
                 objective_multipliers.reverse();
-                hitting_set_solver.change_multipliers(&objective_multipliers);
+                hitting_set_solver.change_multipliers(
+                    &objective_multipliers,
+                    Some(&(0..objs.len()).rev().collect::<Vec<_>>()),
+                );
             }
         }
 
@@ -267,6 +270,7 @@ where
         }
         if self.opts.precompute_lexicographic > 0 {
             let obj_mult = self.objective_multipliers.clone();
+            let mut prios = vec![0; self.objs.len()];
             for idx_perm in DiversePermIter::new(
                 0..self.objs.len(),
                 self.opts.precompute_lexicographic,
@@ -275,13 +279,14 @@ where
                 assert_eq!(idx_perm.len(), self.objs.len());
                 // compute multipliers for lexicographic optimization
                 let mut mult = 1;
-                for obj_idx in idx_perm.into_iter() {
+                for (prio_idx, obj_idx) in idx_perm.into_iter().enumerate() {
                     self.objective_multipliers[obj_idx] = mult as f64;
                     let obj = &self.objs[obj_idx];
                     let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
                     mult *= sum + 1;
+                    prios[obj_idx] = self.objs.len() - prio_idx - 1;
                 }
-                hss.change_multipliers(&self.objective_multipliers);
+                hss.change_multipliers(&self.objective_multipliers, Some(&prios));
                 // find optimum
                 if let Some(logger) = &mut self.logger {
                     logger.log_routine_start("MIP find solution")?;
@@ -310,7 +315,14 @@ where
                 self.yield_solution(costs, solution)?;
             }
             self.objective_multipliers = obj_mult;
-            hss.change_multipliers(&self.objective_multipliers);
+            if matches!(self.opts.multipliers, ObjectiveMultipliers::Lexicographic) {
+                hss.change_multipliers(
+                    &self.objective_multipliers,
+                    Some(&(0..self.objs.len()).rev().collect::<Vec<_>>()),
+                );
+            } else {
+                hss.change_multipliers(&self.objective_multipliers, None);
+            }
             // lazily add PD cuts only now
             for non_dom in self.pareto_front.iter() {
                 hss.add_pd_cut(non_dom.internal_costs());

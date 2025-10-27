@@ -25,6 +25,17 @@ pub const EPSILON: f64 = 0.05;
 pub const TRUE: f64 = 1. - EPSILON;
 pub const FALSE: f64 = 0. + EPSILON;
 
+#[inline]
+fn bool_val(val: f64) -> bool {
+    if val >= crate::TRUE {
+        true
+    } else if val <= crate::FALSE {
+        false
+    } else {
+        panic!("variable assigned to non-interger value");
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum CompleteSolveResult {
     Optimal(f64, Vec<Lit>),
@@ -118,8 +129,12 @@ pub trait HittingSetSolver {
 
     /// Changes the multipliers for the individual objectives
     ///
+    /// Optionally, if the multipliers enforce a strict priority, these priorities can be provided
+    /// to the hitting set solver, in which case the solver is allowed to ignore the multipliers,
+    /// and enforce the priority order in another way
+    ///
     /// The default multipliers are 1 for each objective
-    fn change_multipliers(&mut self, multi: &[f64]);
+    fn change_multipliers(&mut self, multi: &[f64], prios: Option<&[usize]>);
 
     /// Adds a new core to the solver
     fn add_core(&mut self, core: &Cl, origin: CoreOrigin) {
@@ -293,6 +308,7 @@ struct Obj {
     lits: RsHashMap<Lit, usize>,
     offset: usize,
     lower_bound: usize,
+    mult: f64,
 }
 
 /// Return type for interruptible functions

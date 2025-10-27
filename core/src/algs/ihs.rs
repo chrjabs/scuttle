@@ -160,6 +160,7 @@ where
         match opts.multipliers {
             ObjectiveMultipliers::Ones => {
                 objective_multipliers = vec![1.; kernel.stats.n_objs];
+                hitting_set_solver.change_multipliers(&objective_multipliers, None);
             }
             ObjectiveMultipliers::Normalized => {
                 let (sums, max) = weight_sums_and_max(&kernel.objs);
@@ -167,13 +168,13 @@ where
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64))
                     .collect();
-                hitting_set_solver.change_multipliers(&objective_multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers, None);
             }
             ObjectiveMultipliers::Random => {
                 objective_multipliers = (0..kernel.stats.n_objs)
                     .map(|_| f64::from(kernel.rng.i8(1..=10)))
                     .collect();
-                hitting_set_solver.change_multipliers(&objective_multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers, None);
             }
             ObjectiveMultipliers::NormalizedRandom => {
                 let (sums, max) = weight_sums_and_max(&kernel.objs);
@@ -181,7 +182,7 @@ where
                     .into_iter()
                     .map(|sum| (max as f64) / (sum as f64) * f64::from(kernel.rng.i8(1..=10)))
                     .collect();
-                hitting_set_solver.change_multipliers(&objective_multipliers);
+                hitting_set_solver.change_multipliers(&objective_multipliers, None);
             }
             ObjectiveMultipliers::Lexicographic => {
                 objective_multipliers = Vec::with_capacity(kernel.objs.len());
@@ -192,7 +193,10 @@ where
                     mult *= sum + 1;
                 }
                 objective_multipliers.reverse();
-                hitting_set_solver.change_multipliers(&objective_multipliers);
+                hitting_set_solver.change_multipliers(
+                    &objective_multipliers,
+                    Some(&(0..kernel.objs.len()).rev().collect::<Vec<_>>()),
+                );
             }
         }
 
@@ -323,6 +327,7 @@ where
 
         let mut joint_objective = vec![0.; self.max_obj_var.idx() + 1];
         let obj_mult = self.objective_multipliers.clone();
+        let mut prios = vec![0; self.kernel.objs.len()];
         // Eagerly compute lexicographic optima
         // PD cuts are only added lazily _after_ doing this
         let mut fails_in_a_row = 0;
@@ -334,11 +339,12 @@ where
             assert_eq!(idx_perm.len(), self.kernel.objs.len());
             // compute multipliers for lexicographic optimization
             let mut mult = 1;
-            for obj_idx in idx_perm.into_iter() {
+            for (prio_idx, obj_idx) in idx_perm.into_iter().enumerate() {
                 self.objective_multipliers[obj_idx] = mult as f64;
                 let obj = &self.kernel.objs[obj_idx];
                 let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
                 mult *= sum + 1;
+                prios[obj_idx] = prio_idx;
             }
             joint_objective.fill(0.);
             for (obj, &mult) in hss.objectives().zip(&self.objective_multipliers) {
@@ -350,7 +356,7 @@ where
                     joint_objective[lit.vidx()] += weight;
                 }
             }
-            hss.change_multipliers(&self.objective_multipliers);
+            hss.change_multipliers(&self.objective_multipliers, Some(&prios));
             self.candidates.reorder(&self.objective_multipliers);
             // find optimum
             let mut lower_bound = 0.;
@@ -375,7 +381,14 @@ where
                 .yield_solutions(costs.clone(), &[], solution, &mut self.pareto_front)?;
         }
         self.objective_multipliers = obj_mult;
-        hss.change_multipliers(&self.objective_multipliers);
+        if matches!(self.opts.multipliers, ObjectiveMultipliers::Lexicographic) {
+            hss.change_multipliers(
+                &self.objective_multipliers,
+                Some(&(0..self.kernel.objs.len()).rev().collect::<Vec<_>>()),
+            );
+        } else {
+            hss.change_multipliers(&self.objective_multipliers, None);
+        }
         self.candidates.reorder(&self.objective_multipliers);
         // lazily add PD cuts only now
         for non_dom in self.pareto_front.iter() {
@@ -1015,6 +1028,7 @@ where
 
         if self.opts.fully_seeded_precompute_lex && self.opts.precompute_lexicographic > 0 {
             let obj_mult = self.objective_multipliers.clone();
+            let mut prios = vec![0; self.kernel.objs.len()];
             let mut fails_in_a_row = 0;
             for idx_perm in DiversePermIter::new(
                 0..self.kernel.objs.len(),
@@ -1024,13 +1038,14 @@ where
                 assert_eq!(idx_perm.len(), self.kernel.objs.len());
                 // compute multipliers for lexicographic optimization
                 let mut mult = 1;
-                for obj_idx in idx_perm.into_iter() {
+                for (prio_idx, obj_idx) in idx_perm.into_iter().enumerate() {
                     self.objective_multipliers[obj_idx] = mult as f64;
                     let obj = &self.kernel.objs[obj_idx];
                     let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
                     mult *= sum + 1;
+                    prios[obj_idx] = self.kernel.objs.len() - prio_idx - 1;
                 }
-                hss.change_multipliers(&self.objective_multipliers);
+                hss.change_multipliers(&self.objective_multipliers, Some(&prios));
                 // find optimum
                 self.kernel.log_routine_start("extract hitting set")?;
                 let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;
@@ -1067,7 +1082,14 @@ where
                 )?;
             }
             self.objective_multipliers = obj_mult;
-            hss.change_multipliers(&self.objective_multipliers);
+            if matches!(self.opts.multipliers, ObjectiveMultipliers::Lexicographic) {
+                hss.change_multipliers(
+                    &self.objective_multipliers,
+                    Some(&(0..self.kernel.objs.len()).rev().collect::<Vec<_>>()),
+                );
+            } else {
+                hss.change_multipliers(&self.objective_multipliers, None);
+            }
             // lazily add PD cuts only now
             for non_dom in self.pareto_front.iter() {
                 hss.add_pd_cut(non_dom.internal_costs());
@@ -1264,7 +1286,7 @@ where
         for obj_idx in 0..self.kernel.stats.n_objs {
             self.objective_multipliers.fill(0.);
             self.objective_multipliers[obj_idx] = 1.0;
-            hss.change_multipliers(&self.objective_multipliers);
+            hss.change_multipliers(&self.objective_multipliers, None);
             // insert best found solution for the current objective only into the temporary archive
             self.candidates = Archive::default();
             if self.opts.upper_bounds {
@@ -1301,7 +1323,14 @@ where
         }
         hss.change_lower_bounds(lower_bounds);
         self.objective_multipliers = objective_multipliers;
-        hss.change_multipliers(&self.objective_multipliers);
+        if matches!(self.opts.multipliers, ObjectiveMultipliers::Lexicographic) {
+            hss.change_multipliers(
+                &self.objective_multipliers,
+                Some(&(0..self.kernel.objs.len()).rev().collect::<Vec<_>>()),
+            );
+        } else {
+            hss.change_multipliers(&self.objective_multipliers, None);
+        }
         self.candidates = candidates;
         if self.kernel.stats.n_objs == 2 {
             // compute global upper bound based on nadir point

@@ -33,6 +33,11 @@ impl<S> Archive<S> {
             }
         }
         costs.shrink_to_fit();
+        for e in &self.0 {
+            if weakly_dominates(&e.costs, &costs) {
+                return;
+            }
+        }
         self.0.retain(|e| !weakly_dominates(&costs, &e.costs));
         let ord = Self::compute_ord(multipliers, &costs);
         self.0.push(Elem { ord, costs, sol });
