@@ -21,7 +21,7 @@ use crate::{
 };
 
 pub struct MipPd<Hss> {
-    hitting_set_solver: Hss,
+    hitting_set_solver: Option<Hss>,
     /// The Pareto front discovered so far
     pareto_front: ParetoFront,
     stats: crate::Stats,
@@ -42,7 +42,10 @@ where
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
         self.stats.n_solve_calls += 1;
         self.lims = limits;
-        self.alg_main()
+        let mut hss = self.hitting_set_solver.take().unwrap();
+        let res = self.alg_main(&mut hss);
+        self.hitting_set_solver = Some(hss);
+        res
     }
 
     fn all_stats(
@@ -57,7 +60,7 @@ where
             self.stats,
             None,
             None,
-            Some(self.hitting_set_solver.statistics()),
+            Some(self.hitting_set_solver.as_ref().unwrap().statistics()),
         )
     }
 }
@@ -168,7 +171,7 @@ where
             hitting_set_solver.add_clause(&cl);
         }
         Ok(Self {
-            hitting_set_solver,
+            hitting_set_solver: Some(hitting_set_solver),
             pareto_front: Default::default(),
             stats,
             lims: Limits::none(),
@@ -258,7 +261,7 @@ where
     }
 
     /// The solving algorithm main routine.
-    fn alg_main(&mut self) -> MaybeTerminatedError {
+    fn alg_main(&mut self, hss: &mut Hss) -> MaybeTerminatedError {
         if let Some(logger) = &mut self.logger {
             logger.log_routine_start("mip-pd")?;
         }
@@ -278,13 +281,12 @@ where
                     let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
                     mult *= sum + 1;
                 }
-                self.hitting_set_solver
-                    .change_multipliers(&self.objective_multipliers);
+                hss.change_multipliers(&self.objective_multipliers);
                 // find optimum
                 if let Some(logger) = &mut self.logger {
                     logger.log_routine_start("MIP find solution")?;
                 }
-                let hitting_set_answer = self.hitting_set_solver.optimal_hitting_set(None);
+                let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;
                 self.check_termination()?;
                 let (_, hitting_set) = match hitting_set_answer {
                     CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
@@ -308,11 +310,10 @@ where
                 self.yield_solution(costs, solution)?;
             }
             self.objective_multipliers = obj_mult;
-            self.hitting_set_solver
-                .change_multipliers(&self.objective_multipliers);
+            hss.change_multipliers(&self.objective_multipliers);
             // lazily add PD cuts only now
             for non_dom in self.pareto_front.iter() {
-                self.hitting_set_solver.add_pd_cut(non_dom.internal_costs());
+                hss.add_pd_cut(non_dom.internal_costs());
             }
             if let Some(logger) = &mut self.logger {
                 logger.log_message(&format!(
@@ -325,7 +326,7 @@ where
             if let Some(logger) = &mut self.logger {
                 logger.log_routine_start("MIP find solution")?;
             }
-            let hitting_set_answer = self.hitting_set_solver.optimal_hitting_set(None);
+            let hitting_set_answer = hss.optimal_hitting_set_callbacks(None, self)?;
             let (cost, hitting_set) = match hitting_set_answer {
                 CompleteSolveResult::Optimal(cost, hitting_set) => (cost, hitting_set),
                 CompleteSolveResult::Infeasible => {
@@ -343,7 +344,7 @@ where
             self.check_termination()?;
             let (costs, solution) = self.hitting_set_to_solution_and_internal_costs(hitting_set);
             // introduce PD cut in the hitting set solver
-            self.hitting_set_solver.add_pd_cut(&costs);
+            hss.add_pd_cut(&costs);
             // store solution
             self.yield_solution(costs, solution)?;
             self.check_termination()?;
@@ -411,5 +412,11 @@ where
             return true;
         }
         false
+    }
+}
+
+impl<Hss> hitting_sets::Callbacks for MipPd<Hss> {
+    fn check_termination(&self) -> bool {
+        self.term_flag.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
