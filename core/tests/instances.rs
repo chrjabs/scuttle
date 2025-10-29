@@ -293,6 +293,7 @@ fn main() {
                 run_mippd_test::<hitting_sets::HighsSolver>,
                 opts,
             )
+            .allow_dominated(true)
             .collect_tests(),
         );
         #[cfg(any(feature = "gurobi9", feature = "gurobi12"))]
@@ -303,6 +304,7 @@ fn main() {
                 run_mippd_test::<hitting_sets::GurobiSolver>,
                 opts,
             )
+            .allow_dominated(true)
             .collect_tests(),
         );
     }
