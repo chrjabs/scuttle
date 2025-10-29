@@ -27,6 +27,11 @@ impl<S> Archive<S> {
 
     /// Inserts a new solution into the archive
     pub fn insert(&mut self, sol: S, mut costs: Vec<usize>, multipliers: &[f64]) {
+        for e in &self.0 {
+            if weakly_dominates(&e.costs, &costs) {
+                return;
+            }
+        }
         costs.shrink_to_fit();
         self.0.retain(|e| !weakly_dominates(&costs, &e.costs));
         let ord = Self::compute_ord(multipliers, &costs);

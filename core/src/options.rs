@@ -456,10 +456,10 @@ impl fmt::Display for CandidateSeeding {
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum ObjectiveMultipliers {
     /// Use `1` as the multiplier for each objective
+    #[default]
     Ones,
     /// Normalize the objectives, effectively using `1/M` where `M` is the maximum value of the
     /// objective
-    #[default]
     Normalized,
     /// Use random objective multipliers in `1..=10`
     Random,

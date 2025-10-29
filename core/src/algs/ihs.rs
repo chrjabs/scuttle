@@ -296,9 +296,10 @@ where
             while let Some(head) = self.candidates.head()
                 && head.ord() <= lower_bound
             {
-                let Some((costs, solution)) = self.candidates.pop() else {
-                    unreachable!("just checked with `head` right before");
-                };
+                let (costs, solution) = self
+                    .candidates
+                    .pop()
+                    .expect("just checked with `head` right before");
                 self.kernel.yield_solutions(
                     costs.clone(),
                     &[],
@@ -575,9 +576,10 @@ where
             }
             if let Some(head) = self.candidates.head() {
                 if head.ord() <= *lower_bound {
-                    let Some(res) = self.candidates.pop() else {
-                        unreachable!("just checked with `head` right before");
-                    };
+                    let res = self
+                        .candidates
+                        .pop()
+                        .expect("just checked with `head` right before");
                     hss.unfix_all();
                     return Done(Some(res));
                 }
