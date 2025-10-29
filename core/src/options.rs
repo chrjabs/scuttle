@@ -393,8 +393,8 @@ pub struct IhsOptions {
     pub seeding: bool,
     /// The candidate seeding options
     pub candidate_seeding: CandidateSeeding,
-    /// Whether to use weight-aware core extraction in the IHS algorithm
-    pub wce: bool,
+    /// The core extraction method to use
+    pub core_extraction: CoreExtraction,
     /// Core minimization in the IHS loop
     pub core_minimization: CoreMinimization,
     /// Use solutions from upper bounds as starting point for the hitting set solver
@@ -418,7 +418,7 @@ impl Default for IhsOptions {
             hss_threads: Default::default(),
             seeding: true,
             candidate_seeding: Default::default(),
-            wce: true,
+            core_extraction: CoreExtraction::default(),
             core_minimization: CoreMinimization::Full,
             starting_points: true,
             multipliers: ObjectiveMultipliers::default(),
@@ -478,6 +478,29 @@ impl fmt::Display for ObjectiveMultipliers {
             ObjectiveMultipliers::Random => write!(f, "random"),
             ObjectiveMultipliers::NormalizedRandom => write!(f, "normalized-random"),
             ObjectiveMultipliers::Lexicographic => write!(f, "lexicographic"),
+        }
+    }
+}
+
+/// Core extraction methods to be used in IHS
+#[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+pub enum CoreExtraction {
+    /// (Simulated) weight-aware core extraction
+    #[default]
+    Wce,
+    /// Disjoint core extraction
+    Disjoint,
+    /// Single core extraction
+    Single,
+}
+
+impl fmt::Display for CoreExtraction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CoreExtraction::Wce => write!(f, "wce"),
+            CoreExtraction::Disjoint => write!(f, "disjoint"),
+            CoreExtraction::Single => write!(f, "single"),
         }
     }
 }

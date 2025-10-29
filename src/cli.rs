@@ -17,8 +17,8 @@ use rustsat::{
     solvers::{SolverResult, SolverStats},
 };
 use scuttle_core::options::{
-    CandidateSeeding, CoreMinimization, IhsCbOptions, IhsCbTreatment, IhsOptions, MipPdOptions,
-    ObjectiveMultipliers, Stratification,
+    CandidateSeeding, CoreExtraction, CoreMinimization, IhsCbOptions, IhsCbTreatment, IhsOptions,
+    MipPdOptions, ObjectiveMultipliers, Stratification,
 };
 use scuttle_core::prepro::FileFormat;
 use scuttle_core::{
@@ -180,9 +180,9 @@ enum AlgorithmCommand {
         /// Whether to seed constraints over only objective variables into the hitting set solver
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().seeding))]
         seeding: Bool,
-        /// Whether to use weight-aware core extraction in the IHS algorithm
-        #[arg(long, default_value_t = Bool::from(IhsOptions::default().wce))]
-        ihs_wce: Bool,
+        /// The core extraction method to use in IHS
+        #[arg(long, default_value_t = IhsOptions::default().core_extraction)]
+        ihs_core_extraction: CoreExtraction,
         /// Candidate seeding
         #[arg(long, default_value_t = CandidateSeeding::default())]
         candidate_seeding: CandidateSeeding,
@@ -880,7 +880,7 @@ impl Cli {
                 log_hitting_sets,
                 log_seeding_ratio,
                 seeding,
-                ihs_wce,
+                ihs_core_extraction,
                 candidate_seeding,
                 ihs_core_minimization,
                 use_starting_points,
@@ -924,7 +924,7 @@ impl Cli {
                     kernel_opts,
                     IhsOptions {
                         seeding: seeding.into(),
-                        wce: ihs_wce.into(),
+                        core_extraction: ihs_core_extraction,
                         candidate_seeding,
                         hss_threads,
                         core_minimization: ihs_core_minimization,
@@ -1113,6 +1113,11 @@ impl Cli {
                         &mut buffer,
                         "candidate-seeding",
                         opts.candidate_seeding,
+                    )?;
+                    Self::print_parameter(
+                        &mut buffer,
+                        "ihs-core-extraction",
+                        opts.core_extraction,
                     )?;
                     Self::print_parameter(&mut buffer, "hss-threads", opts.hss_threads)?;
                     Self::print_parameter(&mut buffer, "multipliers", opts.multipliers)?;

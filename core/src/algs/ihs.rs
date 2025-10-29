@@ -18,19 +18,19 @@ use rustsat::{
     },
     types::{Assignment, Cl, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
 };
-use scuttle_proc::{KernelFunctions, oracle_bounds};
+use scuttle_proc::{oracle_bounds, KernelFunctions};
 
 use crate::{
-    CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
-    MaybeTerminatedError::{self, Done},
     algs::{coreboosting::CbResult, coreguided::ReformData},
     archive::Archive,
     options::{
-        CandidateSeeding, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions,
+        CandidateSeeding, CoreExtraction, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions,
         ObjectiveMultipliers,
     },
     termination::ensure,
     types::{DiversePermIter, Objective, ParetoFront, VarManager},
+    CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
+    MaybeTerminatedError::{self, Done},
 };
 
 use super::Kernel;
@@ -1178,53 +1178,60 @@ where
         wce_obj: &mut [f64],
     ) -> MaybeTerminatedError {
         let _len_before = assumps.len();
-        if self.opts.wce {
-            let min_cost = core.iter().fold(f64::MAX, |min, lit| {
-                std::cmp::min_by(wce_obj[lit.vidx()].abs(), min, |a, b| a.total_cmp(b))
-            });
-            debug_assert!(
-                min_cost > f64::EPSILON,
-                "core cost ({min_cost}) should be positive"
-            );
-            for lit in core {
-                if lit.is_pos() {
-                    wce_obj[lit.vidx()] -= min_cost;
-                } else {
-                    wce_obj[lit.vidx()] += min_cost;
+        match self.opts.core_extraction {
+            CoreExtraction::Wce => {
+                let min_cost = core.iter().fold(f64::MAX, |min, lit| {
+                    std::cmp::min_by(wce_obj[lit.vidx()].abs(), min, |a, b| a.total_cmp(b))
+                });
+                debug_assert!(
+                    min_cost > f64::EPSILON,
+                    "core cost ({min_cost}) should be positive"
+                );
+                for lit in core {
+                    if lit.is_pos() {
+                        wce_obj[lit.vidx()] -= min_cost;
+                    } else {
+                        wce_obj[lit.vidx()] += min_cost;
+                    }
                 }
+                assumps.retain(|&lit| wce_obj[lit.vidx()].abs() > f64::EPSILON);
             }
-            assumps.retain(|&lit| wce_obj[lit.vidx()].abs() > f64::EPSILON);
-        } else {
-            // NOTE: core is in same order as hitting set, we can therefore remove the
-            // core literals in a single sweep, knowing that the
-            // with core minimization, the assumptions are ordered by weight,
-            // otherwise by literal (from the hitting set solver / abstraction)
-            let mut core_idx = 0;
-            if self.opts.core_minimization.minimization() {
-                assumps.retain(|&lit| {
-                    while core_idx < core.len()
-                        && (wce_obj[core[core_idx].vidx()].abs() > wce_obj[lit.vidx()].abs()
-                            || (wce_obj[core[core_idx].vidx()].abs() == wce_obj[lit.vidx()].abs()
-                                && core[core_idx] < !lit))
-                    {
-                        core_idx += 1;
-                    }
-                    if core_idx >= core.len() || !lit != core[core_idx] {
-                        return true;
-                    }
-                    false
-                });
-            } else {
-                assumps.retain(|&lit| {
-                    while core_idx < core.len() && core[core_idx] < !lit {
-                        core_idx += 1;
-                    }
-                    if core_idx >= core.len() || !lit != core[core_idx] {
-                        return true;
-                    }
-                    false
-                });
-            };
+            CoreExtraction::Disjoint => {
+                // NOTE: core is in same order as hitting set, we can therefore remove the
+                // core literals in a single sweep, knowing that the
+                // with core minimization, the assumptions are ordered by weight,
+                // otherwise by literal (from the hitting set solver / abstraction)
+                let mut core_idx = 0;
+                if self.opts.core_minimization.minimization() {
+                    assumps.retain(|&lit| {
+                        while core_idx < core.len()
+                            && (wce_obj[core[core_idx].vidx()].abs() > wce_obj[lit.vidx()].abs()
+                                || (wce_obj[core[core_idx].vidx()].abs()
+                                    == wce_obj[lit.vidx()].abs()
+                                    && core[core_idx] < !lit))
+                        {
+                            core_idx += 1;
+                        }
+                        if core_idx >= core.len() || !lit != core[core_idx] {
+                            return true;
+                        }
+                        false
+                    });
+                } else {
+                    assumps.retain(|&lit| {
+                        while core_idx < core.len() && core[core_idx] < !lit {
+                            core_idx += 1;
+                        }
+                        if core_idx >= core.len() || !lit != core[core_idx] {
+                            return true;
+                        }
+                        false
+                    });
+                };
+            }
+            CoreExtraction::Single => {
+                assumps.clear();
+            }
         }
         debug_assert!(
             assumps.len() < _len_before,

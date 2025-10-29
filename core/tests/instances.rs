@@ -5,8 +5,8 @@ use pigeons::Proof;
 use scuttle_core::{
     algs::{InitDefaultBlock, Solve},
     options::{
-        CoreMinimization, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions, MipPdOptions,
-        ObjectiveMultipliers,
+        CoreExtraction, CoreMinimization, EnumOptions, IhsCbOptions, IhsCbTreatment, IhsOptions,
+        MipPdOptions, ObjectiveMultipliers,
     },
     types::{Instance, ParetoFront},
     CoreBoost, CoreBoostingOptions, Init, InitCert, InitCertDefaultBlock, KernelFunctions,
@@ -96,21 +96,31 @@ fn main() {
             ),
         ),
         (
-            "other-wce",
+            "single-core",
             (
                 KernelOptions::default(),
                 IhsOptions {
-                    wce: !IhsOptions::default().wce,
+                    core_extraction: CoreExtraction::Single,
                     ..IhsOptions::default()
                 },
             ),
         ),
         (
-            "nomin-other-wce",
+            "disjoint",
             (
                 KernelOptions::default(),
                 IhsOptions {
-                    wce: !IhsOptions::default().wce,
+                    core_extraction: CoreExtraction::Disjoint,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
+        (
+            "nomin-disjoint",
+            (
+                KernelOptions::default(),
+                IhsOptions {
+                    core_extraction: CoreExtraction::Disjoint,
                     core_minimization: CoreMinimization::None,
                     ..IhsOptions::default()
                 },
