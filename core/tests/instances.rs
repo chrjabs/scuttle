@@ -96,6 +96,16 @@ fn main() {
             ),
         ),
         (
+            "noub",
+            (
+                KernelOptions::default(),
+                IhsOptions {
+                    upper_bounds: false,
+                    ..IhsOptions::default()
+                },
+            ),
+        ),
+        (
             "single-core",
             (
                 KernelOptions::default(),

@@ -410,6 +410,8 @@ pub struct IhsOptions {
     pub fully_seeded_precompute_lex: bool,
     /// Use reduced cost fixing
     pub reduced_cost_fixing: bool,
+    /// Whether to use upper bounds
+    pub upper_bounds: bool,
 }
 
 impl Default for IhsOptions {
@@ -426,6 +428,7 @@ impl Default for IhsOptions {
             max_failed_precompute_lex: 100,
             fully_seeded_precompute_lex: false,
             reduced_cost_fixing: true,
+            upper_bounds: true,
         }
     }
 }

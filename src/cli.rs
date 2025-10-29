@@ -210,6 +210,9 @@ enum AlgorithmCommand {
         /// Use reduced cost fixing
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().reduced_cost_fixing), global = true)]
         reduced_cost_fixing: Bool,
+        /// Use upper bounds
+        #[arg(long, default_value_t = Bool::from(IhsOptions::default().upper_bounds), global = true)]
+        upper_bounds: Bool,
         #[command(flatten)]
         cb: IhsCoreBoostingArgs,
         #[command(flatten)]
@@ -889,6 +892,7 @@ impl Cli {
                 max_failed_precompute_lex,
                 fully_seeded_precompute_lex: precompute_fully_seeded,
                 reduced_cost_fixing,
+                upper_bounds,
                 hss_threads,
                 cb,
                 file,
@@ -934,6 +938,7 @@ impl Cli {
                         max_failed_precompute_lex,
                         fully_seeded_precompute_lex: precompute_fully_seeded.into(),
                         reduced_cost_fixing: reduced_cost_fixing.into(),
+                        upper_bounds: upper_bounds.into(),
                     },
                     if args.core_boosting.into() {
                         Some(cb.into())

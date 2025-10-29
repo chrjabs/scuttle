@@ -606,8 +606,10 @@ where
                         debug_assert!(
                             !self.all_pd_cuts || !self.is_dominated_by_pareto_front(&costs)
                         );
-                        self.candidates
-                            .insert(solution, costs, &self.objective_multipliers);
+                        if self.opts.upper_bounds {
+                            self.candidates
+                                .insert(solution, costs, &self.objective_multipliers);
+                        }
                         if new_target >= old_head_cost {
                             want_optimal = true;
                         }
@@ -765,11 +767,13 @@ where
                                 if self.is_dominated_by_pareto_front(&costs) {
                                     break;
                                 }
-                                self.candidates.insert(
-                                    solution,
-                                    costs,
-                                    &self.objective_multipliers,
-                                );
+                                if self.opts.upper_bounds {
+                                    self.candidates.insert(
+                                        solution,
+                                        costs,
+                                        &self.objective_multipliers,
+                                    );
+                                }
                                 break;
                             }
                             SolverResult::Unsat => {}
@@ -868,8 +872,13 @@ where
                             if self.is_dominated_by_pareto_front(&costs) {
                                 break;
                             }
-                            self.candidates
-                                .insert(solution, costs, &self.objective_multipliers);
+                            if self.opts.upper_bounds {
+                                self.candidates.insert(
+                                    solution,
+                                    costs,
+                                    &self.objective_multipliers,
+                                );
+                            }
                             break;
                         }
                         SolverResult::Unsat => {}
@@ -1099,6 +1108,9 @@ where
 
     /// Initializes the candidates according to the selected strategy
     fn seed_candidates(&mut self) -> MaybeTerminatedError<bool> {
+        if !self.opts.upper_bounds {
+            return Done(false);
+        }
         match self.opts.candidate_seeding {
             CandidateSeeding::None => Done(false),
             CandidateSeeding::OneSolution => {
@@ -1109,8 +1121,10 @@ where
                     SolverResult::Sat => {
                         let (costs, solution) =
                             self.kernel.get_solution_and_internal_costs(false)?;
-                        self.candidates
-                            .insert(solution, costs, &self.objective_multipliers);
+                        if self.opts.upper_bounds {
+                            self.candidates
+                                .insert(solution, costs, &self.objective_multipliers);
+                        }
                         Done(false)
                     }
                     SolverResult::Unsat => Done(true),
@@ -1253,12 +1267,14 @@ where
             hss.change_multipliers(&self.objective_multipliers);
             // insert best found solution for the current objective only into the temporary archive
             self.candidates = Archive::default();
-            if let Some(best) = candidates.iter().min_by_key(|elem| elem.costs()[obj_idx]) {
-                self.candidates.insert(
-                    best.sol().clone(),
-                    best.costs().to_vec(),
-                    &self.objective_multipliers,
-                );
+            if self.opts.upper_bounds {
+                if let Some(best) = candidates.iter().min_by_key(|elem| elem.costs()[obj_idx]) {
+                    self.candidates.insert(
+                        best.sol().clone(),
+                        best.costs().to_vec(),
+                        &self.objective_multipliers,
+                    );
+                }
             }
 
             let joint_objective = {
@@ -1279,7 +1295,9 @@ where
                 return Done(false);
             };
             lower_bounds.push(costs[obj_idx]);
-            candidates.insert(sol, costs, &objective_multipliers);
+            if self.opts.upper_bounds {
+                candidates.insert(sol, costs, &objective_multipliers);
+            }
         }
         hss.change_lower_bounds(lower_bounds);
         self.objective_multipliers = objective_multipliers;
@@ -1336,8 +1354,10 @@ where
         let Some(cb_res) = self.kernel.core_boost_with_callbacks(
             |kernel, _, sol| {
                 let costs = kernel.compute_costs(&sol);
-                self.candidates
-                    .insert(sol, costs, &self.objective_multipliers);
+                if self.opts.upper_bounds {
+                    self.candidates
+                        .insert(sol, costs, &self.objective_multipliers);
+                }
             },
             |_, obj_idx, id, bound| cores[obj_idx].push((id, bound)),
         )?
@@ -1373,8 +1393,10 @@ where
         {
             if let Some(solution) = solution {
                 let costs = self.kernel.compute_costs(&solution);
-                self.candidates
-                    .insert(solution, costs, &self.objective_multipliers);
+                if self.opts.upper_bounds {
+                    self.candidates
+                        .insert(solution, costs, &self.objective_multipliers);
+                }
             }
 
             match opts.treatment {
