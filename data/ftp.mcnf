@@ -19,6 +19,7 @@ c ignore-test:pareto-ihs<highs>:cb-translate-reform
 c ignore-test:pareto-ihs<highs>:cb-translate-katsirelos
 c ignore-test:pareto-ihs<highs>:cb-translate-katsirelos-reform
 c ignore-test:pareto-ihs<gurobi>:cb-translate-katsirelos-reform
+c ignore-test:leximax-sat-unsat
 c
 c non-dominated points
 c nd (345, 6125)

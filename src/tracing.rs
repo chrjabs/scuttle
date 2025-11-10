@@ -222,20 +222,24 @@ fn config(alg: &Algorithm, styles: &Styles) {
             print_kv!("multipliers", multipliers, styles);
             print_kv!("precompute-lexicographic", precompute_lexicographic, styles);
         }
-        _ => (),
+        Algorithm::PMinimal(_, _)
+        | Algorithm::LowerBounding(_, _)
+        | Algorithm::LeximaxSatUnsat(_, _) => (),
     }
 
     if let Algorithm::PMinimal(opts, _)
     | Algorithm::BiOptSat(opts, _, _, _)
     | Algorithm::LowerBounding(opts, _)
-    | Algorithm::ParetoIhs(_, opts, _, _) = alg
+    | Algorithm::ParetoIhs(_, opts, _, _)
+    | Algorithm::LeximaxSatUnsat(opts, _) = alg
     {
         kernel_opts(opts, styles);
     }
 
     if let Algorithm::PMinimal(_, cb)
     | Algorithm::BiOptSat(_, _, _, cb)
-    | Algorithm::LowerBounding(_, cb) = alg
+    | Algorithm::LowerBounding(_, cb)
+    | Algorithm::LeximaxSatUnsat(_, cb) = alg
     {
         core_boosting(cb, styles);
     }
@@ -273,6 +277,59 @@ pub fn wrap_up<S>(
         Styles::plain()
     };
     print_pareto_front(pareto_front, options.print_solutions, &styles);
+    if options.print_stats {
+        print_stats(stats, &styles);
+    }
+}
+
+pub fn wrap_up_leximax<S>(
+    pareto_front: ParetoFront<S>,
+    #[cfg(not(feature = "maxpre"))] stats: (
+        Stats,
+        Option<SolverStats>,
+        Option<Vec<EncodingStats>>,
+        Option<hitting_sets::Statistics>,
+    ),
+    #[cfg(feature = "maxpre")] stats: (
+        Stats,
+        Option<SolverStats>,
+        Option<Vec<EncodingStats>>,
+        Option<hitting_sets::Statistics>,
+        Option<maxpre::Stats>,
+    ),
+    options: WrapUpOptions,
+) where
+    S: Clone + Eq + fmt::Display,
+{
+    let color = match options.color {
+        cli::ColorOpt::Always => true,
+        cli::ColorOpt::Auto => std::io::stdout().is_terminal(),
+        cli::ColorOpt::Never => false,
+    };
+    let styles = if color {
+        Styles::colored()
+    } else {
+        Styles::plain()
+    };
+
+    if let Some(non_dom) = pareto_front.leximax_optimum() {
+        println!(
+            "{}{} costs={:?} n_sols={}",
+            "[".style(styles.scope),
+            "Leximax optimum".style(styles.h2),
+            non_dom.costs(),
+            non_dom.n_sols(),
+        );
+        if options.print_solutions {
+            for sol in non_dom {
+                println!("{} {}", "v".style(styles.key), sol.style(styles.val));
+            }
+        }
+        println!("{}", "]".style(styles.scope));
+    } else {
+        println!("{}", "UNSATISFIABLE".style(styles.warn.event_name));
+    }
+
     if options.print_stats {
         print_stats(stats, &styles);
     }

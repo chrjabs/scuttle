@@ -219,6 +219,16 @@ enum AlgorithmCommand {
         #[command(flatten)]
         file: FileArgs,
     },
+    /// SAT-based Leximax optimization - Cabral et al. SAT'22 (Sat-Unsat variant)
+    #[command(alias = "lm-su")]
+    LeximaxSatUnsat {
+        #[command(flatten)]
+        cb: CoreBoostingArgs,
+        #[command(flatten)]
+        file: FileArgs,
+        #[command(flatten)]
+        proof: ProofArgs,
+    },
 }
 
 #[derive(Args, Copy, Clone)]
@@ -682,6 +692,7 @@ pub enum Algorithm {
         Option<IhsCbOptions>,
     ),
     MipPd(HittingSetSolver, MipPdOptions),
+    LeximaxSatUnsat(KernelOptions, Option<CoreBoostingOptions>),
 }
 
 impl fmt::Display for Algorithm {
@@ -692,6 +703,7 @@ impl fmt::Display for Algorithm {
             Algorithm::LowerBounding(..) => write!(f, "lower-bounding"),
             Algorithm::ParetoIhs(..) => write!(f, "pareto-ihs"),
             Algorithm::MipPd(..) => write!(f, "mip-pd"),
+            Algorithm::LeximaxSatUnsat(..) => write!(f, "leximax"),
         }
     }
 }
@@ -914,6 +926,42 @@ impl Cli {
                 tracing_opts: args.log.into(),
                 wrap_up_opts: args.log.into(),
             },
+            AlgorithmCommand::LeximaxSatUnsat { cb, file, proof } => {
+                let cb = if args.core_boosting.into() {
+                    let (cbo, store) = cb.parse(
+                        #[cfg(feature = "maxpre")]
+                        args.prepro.maxpre_techniques.clone(),
+                    );
+                    if store {
+                        kernel_opts.store_cnf = true;
+                    }
+                    Some(cbo)
+                } else {
+                    None
+                };
+                let proof_paths = proof.proof_paths();
+                Cli {
+                    limits: args.limits.into(),
+                    file_format: file.file_format,
+                    opb_options: fio::opb::Options {
+                        first_var_idx: file.first_var_idx,
+                        ..Default::default()
+                    },
+                    inst_path: file.inst_path.clone(),
+                    #[cfg(feature = "maxpre")]
+                    preprocessing: args.prepro.preprocessing.into(),
+                    #[cfg(feature = "maxpre")]
+                    maxpre_techniques: args.prepro.maxpre_techniques.clone(),
+                    reindexing: args.prepro.reindexing.into(),
+                    #[cfg(feature = "maxpre")]
+                    maxpre_reindexing: args.prepro.maxpre_reindexing.into(),
+                    cadical_config: args.cadical_config,
+                    alg: Algorithm::LeximaxSatUnsat(kernel_opts, cb),
+                    proof_paths,
+                    tracing_opts: args.log.into(),
+                    wrap_up_opts: args.log.into(),
+                }
+            }
         }
     }
 }

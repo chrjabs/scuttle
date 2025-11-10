@@ -23,6 +23,7 @@ pub use algs::{
 // Reexport algorithms
 pub use algs::bioptsat::BiOptSat;
 pub use algs::ihs::ParetoIhs;
+pub use algs::leximax::LeximaxIst;
 pub use algs::lowerbounding::LowerBounding;
 pub use algs::mippd::MipPd;
 pub use algs::pminimal::PMinimal;

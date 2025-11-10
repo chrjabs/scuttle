@@ -582,6 +582,22 @@ fn main() {
         );
     }
 
+    tests.extend(
+        TestSetup::new(
+            "leximax-sat-unsat",
+            "",
+            run_test::<
+                scuttle_core::LeximaxIst<
+                    rustsat_cadical::CaDiCaL<'static, 'static>,
+                    scuttle_core::algs::leximax::SatUnsat,
+                >,
+            >,
+            KernelOptions::default(),
+        )
+        .leximax(true)
+        .collect_tests(),
+    );
+
     libtest_mimic::run(&args, tests).exit();
 }
 
@@ -723,6 +739,7 @@ mod setup {
         alg: &'a str,
         variant: &'a str,
         sol_enum: bool,
+        leximax: bool,
         filter: Box<dyn Fn(Meta) -> bool>,
         #[cfg(feature = "maxpre")]
         techniques: Option<&'static str>,
@@ -751,6 +768,7 @@ mod setup {
                 alg,
                 variant,
                 sol_enum: false,
+                leximax: false,
                 filter: Box::new(|_| false),
                 #[cfg(feature = "maxpre")]
                 techniques: None,
@@ -830,6 +848,11 @@ mod setup {
             self
         }
 
+        pub fn leximax(mut self, val: bool) -> Self {
+            self.leximax = val;
+            self
+        }
+
         #[cfg(feature = "maxpre")]
         pub fn preprocessing(mut self, techniques: Option<&'static str>) -> Self {
             self.techniques = techniques;
@@ -862,7 +885,7 @@ mod setup {
                             #[cfg(not(feature = "maxpre"))]
                             tests.push(
                                 Trial::test(name, move || {
-                                    run_test(&path, run_fn, opts, self.sol_enum)
+                                    run_test(&path, run_fn, opts, self.sol_enum, self.leximax)
                                 })
                                 .with_kind(self.kind())
                                 .with_ignored_flag(dec == Decision::Ignore),
@@ -879,7 +902,7 @@ mod setup {
                             } else {
                                 tests.push(
                                     Trial::test(name, move || {
-                                        run_test(&path, run_fn, opts, self.sol_enum)
+                                        run_test(&path, run_fn, opts, self.sol_enum, self.leximax)
                                     })
                                     .with_kind(self.kind())
                                     .with_ignored_flag(dec == Decision::Ignore),
@@ -925,9 +948,11 @@ mod setup {
                             let run_fn = self.run_fn.clone();
                             let opts = self.opts.clone();
                             tests.push(
-                                Trial::test(name, move || run_certified_test(&path, run_fn, opts))
-                                    .with_kind(self.kind())
-                                    .with_ignored_flag(dec == Decision::Ignore),
+                                Trial::test(name, move || {
+                                    run_certified_test(&path, run_fn, opts, self.leximax)
+                                })
+                                .with_kind(self.kind())
+                                .with_ignored_flag(dec == Decision::Ignore),
                             );
                         }
                         _ => eprintln!("skipping file `{path:?}`"),
@@ -956,7 +981,12 @@ mod setup {
         num_solutions: usize,
     }
 
-    fn check_pf_shape(path: &Path, pf: ParetoFront, sol_enum: bool) -> Result<(), Failed> {
+    fn check_pf_shape(
+        path: &Path,
+        pf: ParetoFront,
+        sol_enum: bool,
+        leximax: bool,
+    ) -> Result<(), Failed> {
         let prefix = match path.extension() {
             Some(ext) if ext == OsStr::new("mcnf") => 'c',
             Some(ext) if ext == OsStr::new("opb") => '*',
@@ -990,6 +1020,56 @@ mod setup {
                 num_solutions: count,
             });
         }
+
+        if leximax {
+            let truth_leximax = truth
+                .0
+                .iter()
+                .min_by_key(|ParetoPoint { costs, .. }| {
+                    let mut sorted_costs = costs.to_vec();
+                    sorted_costs.sort_unstable();
+                    sorted_costs.reverse();
+                    sorted_costs
+                })
+                .unwrap();
+            let mut truth_leximax_sorted = truth_leximax.costs.to_vec();
+            truth_leximax_sorted.sort_unstable();
+            let claim = pf.leximax_optimum().unwrap();
+            let mut claim_sorted = claim.costs().to_vec();
+            claim_sorted.sort_unstable();
+            if !claim_sorted
+                .iter()
+                .zip(&truth_leximax_sorted)
+                .all(|(&a, &b)| a == b)
+            {
+                return Err(format!(
+                    "leximax optimum does not have the right costs: was {claim_sorted:?}, should be {truth_leximax_sorted:?}",
+                )
+                .into());
+            }
+            if sol_enum && claim.n_sols() != truth_leximax.num_solutions {
+                return Err(format!(
+                    "reported incorrect number of solutions for leximax optimum: was {}, should be {}",
+                    claim.n_sols(),
+                    truth_leximax.num_solutions
+                )
+                .into());
+            }
+            let truth_costs: rustsat::types::RsHashSet<_> = truth
+                .0
+                .into_iter()
+                .map(|ParetoPoint { costs, .. }| costs)
+                .collect();
+            if !truth_costs.contains(claim.costs()) {
+                return Err(format!(
+                    "claimed leximax costs not in pareto front: {:?}",
+                    claim.n_sols(),
+                )
+                .into());
+            }
+            return Ok(());
+        }
+
         truth.0.sort_unstable();
         let mut pf = SimpleParetoFront(
             pf.into_iter()
@@ -1016,7 +1096,13 @@ mod setup {
         Ok(())
     }
 
-    fn run_test<F, O>(path: &Path, run_fn: F, opts: O, sol_enum: bool) -> Result<(), Failed>
+    fn run_test<F, O>(
+        path: &Path,
+        run_fn: F,
+        opts: O,
+        sol_enum: bool,
+        leximax: bool,
+    ) -> Result<(), Failed>
     where
         F: Fn(Instance, O) -> Result<ParetoFront, Failed>,
     {
@@ -1030,7 +1116,7 @@ mod setup {
             &None,
         )
         .expect("failed to parse instance");
-        check_pf_shape(path, run_fn(inst, opts)?, sol_enum)
+        check_pf_shape(path, run_fn(inst, opts)?, sol_enum, leximax)
     }
 
     #[cfg(feature = "maxpre")]
@@ -1063,7 +1149,12 @@ mod setup {
         )
     }
 
-    fn run_certified_test<F, O>(path: &Path, run_fn: F, opts: O) -> Result<(), Failed>
+    fn run_certified_test<F, O>(
+        path: &Path,
+        run_fn: F,
+        opts: O,
+        leximax: bool,
+    ) -> Result<(), Failed>
     where
         F: Fn(Instance, Proof<BufWriter<File>>, O) -> Result<ParetoFront, Failed>,
     {
@@ -1081,7 +1172,7 @@ mod setup {
         .expect("failed to parse instance");
         let proof = proof.unwrap();
         print_file(&input_path);
-        check_pf_shape(path, run_fn(inst, proof, opts)?, false)?;
+        check_pf_shape(path, run_fn(inst, proof, opts)?, false, leximax)?;
         verify_proof(input_path, proof_path)
     }
 

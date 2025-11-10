@@ -57,6 +57,16 @@ where
         self.ndoms.iter()
     }
 
+    /// Gets the leximax optimum among the non-dominated points in the pareto front
+    pub fn leximax_optimum(&self) -> Option<&NonDomPoint<S>> {
+        self.ndoms.iter().min_by_key(|nd| {
+            let mut costs = nd.costs().to_vec();
+            costs.sort_unstable();
+            costs.reverse();
+            costs
+        })
+    }
+
     /// Removes all dominated solutions in the Pareto front
     // the two nested loops using `new_last` confuse clippy: while the bound of the `for` loop can
     // indeed not be modified, the condition of the inner `while` loop can, and after the while

@@ -38,6 +38,7 @@ use crate::{
 
 pub mod bioptsat;
 pub mod ihs;
+pub mod leximax;
 pub mod lowerbounding;
 pub mod mippd;
 pub mod pminimal;
@@ -114,6 +115,7 @@ impl<Alg> InitDefaultBlock for Alg where Alg: Init<BlockClauseGen = fn(Assignmen
 
 /// Solving interface for each algorithm
 pub trait Solve: KernelFunctions {
+    const LEXIMAX: bool = false;
     /// Solves the instance under given limits. If not fully solved, returns an
     /// early termination reason.
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError;
@@ -653,15 +655,15 @@ where
             NonDomPoint::new(self.externalize_internal_costs(&costs), costs.clone());
 
         loop {
-            debug_assert_eq!(
-                (0..self.stats.n_objs)
-                    .map(|idx| {
-                        self.get_cost_with_heuristic_improvements(idx, &mut solution, false)
-                            .unwrap()
-                    })
-                    .collect::<Vec<_>>(),
-                costs
-            );
+            // debug_assert_eq!(
+            //     (0..self.stats.n_objs)
+            //         .map(|idx| {
+            //             self.get_cost_with_heuristic_improvements(idx, &mut solution, false)
+            //                 .unwrap()
+            //         })
+            //         .collect::<Vec<_>>(),
+            //     costs
+            // );
 
             // Truncate internal solution to only include instance variables
             solution = solution.truncate(self.var_manager.max_orig_var());

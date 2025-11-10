@@ -9,7 +9,9 @@ use rustsat::{
 use rustsat_cadical::CaDiCaL;
 use scuttle_core::{
     self, BiOptSat, CoreBoost, Init, InitCertDefaultBlock, InitDefaultBlock, KernelFunctions,
-    LowerBounding, MaybeTerminatedError, PMinimal, ParetoIhs, Solve, prepro,
+    LeximaxIst, LowerBounding, MaybeTerminatedError, PMinimal, ParetoIhs, Solve,
+    algs::leximax::SatUnsat,
+    prepro,
     types::{Instance, Reindexer},
 };
 
@@ -38,6 +40,8 @@ type Lb<OInit = CaDiCaLDefaultInit> = LowerBounding<
 >;
 /// Paretop-k IHS instantiation used
 type Ihs<Hss, OInit = CaDiCaLDefaultInit> = ParetoIhs<Oracle, Hss, OInit>;
+type LmSu<OInit = CaDiCaLDefaultInit> =
+    LeximaxIst<Oracle, SatUnsat<pb::GeneralizedTotalizer, card::Totalizer>, OInit>;
 
 macro_rules! run {
     // with proof
@@ -263,6 +267,9 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
                 post_solve(alg, cli, prepro, reindexer)?;
             }
         },
+        Algorithm::LeximaxSatUnsat(opts, ref cb_opts) => {
+            dispatch_options!(no-proof: LmSu, inst, prepro, reindexer, opts, cb_opts, cli)
+        }
     }
     Ok(())
 }
@@ -355,17 +362,32 @@ where
 
     let stats = alg.all_stats();
 
-    #[cfg(not(feature = "maxpre"))]
-    tracing::wrap_up(pareto_front, stats, cli.wrap_up_opts);
-    #[cfg(feature = "maxpre")]
-    {
-        use maxpre::PreproClauses;
-        let maxpre_stats = prepro.map(|mp| mp.stats());
-        tracing::wrap_up(
-            pareto_front,
-            (stats.0, stats.1, stats.2, stats.3, maxpre_stats),
-            cli.wrap_up_opts,
-        );
+    if Alg::LEXIMAX {
+        #[cfg(not(feature = "maxpre"))]
+        tracing::wrap_up_leximax(pareto_front, stats, cli.wrap_up_opts);
+        #[cfg(feature = "maxpre")]
+        {
+            use maxpre::PreproClauses;
+            let maxpre_stats = prepro.map(|mp| mp.stats());
+            tracing::wrap_up_leximax(
+                pareto_front,
+                (stats.0, stats.1, stats.2, stats.3, maxpre_stats),
+                cli.wrap_up_opts,
+            );
+        }
+    } else {
+        #[cfg(not(feature = "maxpre"))]
+        tracing::wrap_up(pareto_front, stats, cli.wrap_up_opts);
+        #[cfg(feature = "maxpre")]
+        {
+            use maxpre::PreproClauses;
+            let maxpre_stats = prepro.map(|mp| mp.stats());
+            tracing::wrap_up(
+                pareto_front,
+                (stats.0, stats.1, stats.2, stats.3, maxpre_stats),
+                cli.wrap_up_opts,
+            );
+        }
     }
 
     Ok(())
