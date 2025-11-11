@@ -45,6 +45,10 @@ where
         let mut hss = self.hitting_set_solver.take().unwrap();
         let res = self.alg_main(&mut hss);
         self.hitting_set_solver = Some(hss);
+        // due to numerical issues in the hitting set solver, this algorithm might report dominated
+        // points as pareto-optimal
+        self.pareto_front.remove_dominated();
+        self.stats.n_non_dominated = self.pareto_front.len();
         res
     }
 

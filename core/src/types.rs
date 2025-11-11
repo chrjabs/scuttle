@@ -8,10 +8,10 @@ use std::{
 };
 
 use rustsat::{
-    encodings::{card, cert::CollectClauses as CollectCertClauses, pb, totdb, CollectClauses},
+    encodings::{CollectClauses, card, cert::CollectClauses as CollectCertClauses, pb, totdb},
     instances::{ManageVars, ReindexVars},
     types::{
-        constraints::PbConstraint, Assignment, Clause, Lit, LitIter, RsHashMap, Var, WLitIter,
+        Assignment, Clause, Lit, LitIter, RsHashMap, Var, WLitIter, constraints::PbConstraint,
     },
 };
 
@@ -55,6 +55,68 @@ where
 
     pub fn iter(&self) -> std::slice::Iter<'_, NonDomPoint<S>> {
         self.ndoms.iter()
+    }
+
+    /// Removes all dominated solutions in the Pareto front
+    // the two nested loops using `new_last` confuse clippy: while the bound of the `for` loop can
+    // indeed not be modified, the condition of the inner `while` loop can, and after the while
+    // loop we break out of the `for` loop
+    #[expect(clippy::mut_range_bound)]
+    pub fn remove_dominated(&mut self) {
+        let mut new_last = 0;
+        'outer: for last in 0..self.ndoms.len() {
+            if last > new_last {
+                self.ndoms.swap(last, new_last);
+            }
+            for cmp in 0..new_last {
+                match pareto_compare(self.ndoms[cmp].costs(), self.ndoms[new_last].costs()) {
+                    ParetoCmp::Equal => {
+                        // merge non-dom points
+                        let (head, tail) = self.ndoms.split_at_mut(new_last);
+                        for sol in tail[0].iter() {
+                            head[cmp].add_sol(sol.clone())
+                        }
+                        continue 'outer;
+                    }
+                    ParetoCmp::ADomB => {
+                        // drop current non-dom point
+                        continue 'outer;
+                    }
+                    ParetoCmp::BDomA => {
+                        // current non-dom point dominates previously checked point
+                        self.ndoms.swap(cmp, new_last);
+                        // check whether cmp+1..new_last is dominated by cmp
+                        let mut other = cmp + 1;
+                        while other < new_last {
+                            match pareto_compare(self.ndoms[cmp].costs(), self.ndoms[other].costs())
+                            {
+                                ParetoCmp::Equal => {
+                                    let (head, tail) = self.ndoms.split_at_mut(other);
+                                    for sol in tail[0].iter() {
+                                        head[cmp].add_sol(sol.clone())
+                                    }
+                                    new_last -= 1;
+                                    self.ndoms.swap(other, new_last);
+                                }
+                                ParetoCmp::ADomB => {
+                                    new_last -= 1;
+                                    self.ndoms.swap(other, new_last);
+                                }
+                                ParetoCmp::BDomA => unreachable!(),
+                                ParetoCmp::Incomparable => {
+                                    other += 1;
+                                }
+                            }
+                        }
+                        continue 'outer;
+                    }
+                    ParetoCmp::Incomparable => {}
+                }
+            }
+            // this is only if all are incomparable since only that case doesn't have a `continue`
+            new_last += 1;
+        }
+        self.ndoms.truncate(new_last);
     }
 }
 
@@ -955,4 +1017,40 @@ where
             }
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ParetoCmp {
+    Equal,
+    ADomB,
+    BDomA,
+    Incomparable,
+}
+
+fn pareto_compare(a: &[isize], b: &[isize]) -> ParetoCmp {
+    let mut cmp = ParetoCmp::Equal;
+    for (a, b) in a.iter().zip(b) {
+        match a.cmp(b) {
+            std::cmp::Ordering::Less => match cmp {
+                ParetoCmp::Equal | ParetoCmp::ADomB => {
+                    cmp = ParetoCmp::ADomB;
+                }
+                ParetoCmp::BDomA => return ParetoCmp::Incomparable,
+                ParetoCmp::Incomparable => {
+                    unreachable!("immediately returns on detecting incomparability")
+                }
+            },
+            std::cmp::Ordering::Equal => {}
+            std::cmp::Ordering::Greater => match cmp {
+                ParetoCmp::Equal | ParetoCmp::BDomA => {
+                    cmp = ParetoCmp::BDomA;
+                }
+                ParetoCmp::ADomB => return ParetoCmp::Incomparable,
+                ParetoCmp::Incomparable => {
+                    unreachable!("immediately returns on detecting incomparability")
+                }
+            },
+        }
+    }
+    cmp
 }

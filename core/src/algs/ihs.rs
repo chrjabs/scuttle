@@ -64,7 +64,12 @@ where
 {
     fn solve(&mut self, limits: Limits) -> MaybeTerminatedError {
         self.kernel.start_solving(limits);
-        self.alg_main()
+        let res = self.alg_main();
+        // due to numerical issues in the hitting set solver, this algorithm might report dominated
+        // points as pareto-optimal
+        self.pareto_front.remove_dominated();
+        self.kernel.stats.n_non_dominated = self.pareto_front.len();
+        res
     }
 
     fn all_stats(
