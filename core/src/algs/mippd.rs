@@ -1,8 +1,8 @@
 //! # Multi-Objective IHS Algorithm
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 use anyhow::Context;
@@ -13,11 +13,11 @@ use rustsat::{
 };
 
 use crate::{
-    options::{MipPdOptions, ObjectiveMultipliers},
-    types::{DiversePermIter, Instance, NonDomPoint, Objective, ParetoFront},
     EncodingStats, Limits, MaybeTerminated,
     MaybeTerminatedError::{self, Done},
     Stats, Termination,
+    options::{MipPdOptions, ObjectiveMultipliers},
+    types::{DiversePermIter, Instance, NonDomPoint, Objective, ParetoFront},
 };
 
 pub struct MipPd<Hss> {
@@ -148,7 +148,8 @@ where
                 for obj in objs.iter().rev() {
                     let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
                     objective_multipliers.push(mult as f64);
-                    mult *= sum + 1;
+                    mult *= sum;
+                    mult += 1;
                 }
                 objective_multipliers.reverse();
                 hitting_set_solver.change_multipliers(&objective_multipliers);
@@ -279,7 +280,8 @@ where
                     self.objective_multipliers[obj_idx] = mult as f64;
                     let obj = &self.objs[obj_idx];
                     let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
-                    mult *= sum + 1;
+                    mult *= sum;
+                    mult += 1;
                 }
                 hss.change_multipliers(&self.objective_multipliers);
                 // find optimum

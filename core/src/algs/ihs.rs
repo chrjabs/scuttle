@@ -18,9 +18,11 @@ use rustsat::{
     },
     types::{Assignment, Cl, Clause, Lit, RsHashMap, RsHashSet, TernaryVal, Var},
 };
-use scuttle_proc::{oracle_bounds, KernelFunctions};
+use scuttle_proc::{KernelFunctions, oracle_bounds};
 
 use crate::{
+    CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
+    MaybeTerminatedError::{self, Done},
     algs::{coreboosting::CbResult, coreguided::ReformData},
     archive::Archive,
     options::{
@@ -29,8 +31,6 @@ use crate::{
     },
     termination::ensure,
     types::{DiversePermIter, Objective, ParetoFront, VarManager},
-    CoreBoost, EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
-    MaybeTerminatedError::{self, Done},
 };
 
 use super::Kernel;
@@ -189,7 +189,8 @@ where
                 for obj in kernel.objs.iter().rev() {
                     let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
                     objective_multipliers.push(mult as f64);
-                    mult *= sum + 1;
+                    mult *= sum;
+                    mult += 1;
                 }
                 objective_multipliers.reverse();
                 hitting_set_solver.change_multipliers(&objective_multipliers);
@@ -338,7 +339,8 @@ where
                 self.objective_multipliers[obj_idx] = mult as f64;
                 let obj = &self.kernel.objs[obj_idx];
                 let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
-                mult *= sum + 1;
+                mult *= sum;
+                mult += 1;
             }
             joint_objective.fill(0.);
             for (obj, &mult) in hss.objectives().zip(&self.objective_multipliers) {
@@ -1028,7 +1030,8 @@ where
                     self.objective_multipliers[obj_idx] = mult as f64;
                     let obj = &self.kernel.objs[obj_idx];
                     let sum = obj.iter().fold(0, |sum, (_, w)| sum + w);
-                    mult *= sum + 1;
+                    mult *= sum;
+                    mult += 1;
                 }
                 hss.change_multipliers(&self.objective_multipliers);
                 // find optimum
