@@ -1,3 +1,8 @@
+# CPAIOR'26 Submission Supplement
+
+This tag contains the code of the Scuttle MO-MaxSAT solver as used in our CPAIOR'26 submission.
+Additional data and information specific to the CPAIOR'26 submission can be found in the `cpaior26/` directory.
+
 # Scuttle - A Multi-Objective MaxSAT Solver in Rust
 
 Scuttle is a multi-objective MaxSAT solver written in Rust and based on the
