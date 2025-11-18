@@ -44,7 +44,7 @@ pub enum Inactives {
 }
 
 impl Inactives {
-    pub fn iter(&self) -> InactIter {
+    pub fn iter(&self) -> InactIter<'_> {
         self.into()
     }
 
@@ -385,7 +385,7 @@ where
                         return Done(Some(sol));
                     }
                     sol_cb(
-                        &self,
+                        self,
                         self.oracle.solution(self.var_manager.max_var().unwrap())?,
                     );
                     if unreform_cores.is_empty() {
@@ -414,7 +414,7 @@ where
                         let root = con.id;
                         let (olit, oidx, proof_id) =
                             self.exhaust_core(root, base_assumps, tot_db, proof_id)?;
-                        core_cb(&self, root, oidx);
+                        core_cb(self, root, oidx);
                         if oidx > 1 {
                             reform.offset += (oidx - 1) * weight;
                             if let Some(log) = &mut self.logger {

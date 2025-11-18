@@ -425,7 +425,7 @@ impl HittingSetSolver for Solver {
 
     fn reduced_costs_callback<Cb>(
         &mut self,
-        cb: &mut Cb,
+        _cb: &mut Cb,
     ) -> MaybeTerminated<crate::ReducedCostsResult>
     where
         Cb: Callbacks,
@@ -433,7 +433,7 @@ impl HittingSetSolver for Solver {
         todo!()
     }
 
-    fn fix<I>(&mut self, to_fix: I) -> bool
+    fn fix<I>(&mut self, _to_fix: I) -> bool
     where
         I: IntoIterator<Item = Lit>,
     {
@@ -722,7 +722,7 @@ impl BuildSolver for Builder {
         self
     }
 
-    fn might_need_lp(&mut self, might_need: bool) -> &mut Self {
+    fn might_need_lp(&mut self, _might_need: bool) -> &mut Self {
         self
     }
 }

@@ -725,7 +725,7 @@ mod model {
             let ip_var =
                 add_binvar!(model, name: name, obj: obj).expect("failed to create Gurobi variable");
             if let Some(relax) = &mut self.relax {
-                let lp_var = add_ctsvar!(relax, name: name, obj: obj, bounds: 0..1)
+                let lp_var = add_ctsvar!(relax, name: name, obj: obj, bounds: 0..1_f64)
                     .expect("failed to create Gurobi variable (LP)");
                 debug_assert_eq!(grb::Var::from_raw(ip_var.id(), relax.id()), lp_var);
             }

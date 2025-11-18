@@ -399,22 +399,22 @@ where
                 tot_db.reset_vars();
             }
             if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
-                if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.kernel.proof_stuff {
-                    if !reform.reformulations.is_empty() {
-                        // delete remaining reformulation constraints from proof
-                        let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
-                        #[cfg(feature = "verbose-proofs")]
-                        proof.comment(&format_args!(
-                            "deleting remaining reformulation constraints from OLL of objective {oidx}"
-                        ))?;
-                        proof.delete_ids::<Var, Clause, _, _>(
-                            reform
-                                .reformulations
-                                .values()
-                                .map(|re| ConstraintId::from(re.proof_id.unwrap())),
-                            None,
-                        )?;
-                    }
+                if let Some(proofs::ProofStuff { pt_handle, .. }) = &self.kernel.proof_stuff
+                    && !reform.reformulations.is_empty()
+                {
+                    // delete remaining reformulation constraints from proof
+                    let proof = self.kernel.oracle.proof_tracer_mut(pt_handle).proof_mut();
+                    #[cfg(feature = "verbose-proofs")]
+                    proof.comment(&format_args!(
+                        "deleting remaining reformulation constraints from OLL of objective {oidx}"
+                    ))?;
+                    proof.delete_ids::<Var, Clause, _, _>(
+                        reform
+                            .reformulations
+                            .values()
+                            .map(|re| ConstraintId::from(re.proof_id.unwrap())),
+                        None,
+                    )?;
                 }
 
                 self.obj_encs[oidx] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);

@@ -581,15 +581,15 @@ where
                 }
                 return Done(None);
             }
-            if let Some(head) = self.candidates.head() {
-                if head.ord() <= *lower_bound {
-                    let res = self
-                        .candidates
-                        .pop()
-                        .expect("just checked with `head` right before");
-                    hss.unfix_all();
-                    return Done(Some(res));
-                }
+            if let Some(head) = self.candidates.head()
+                && head.ord() <= *lower_bound
+            {
+                let res = self
+                    .candidates
+                    .pop()
+                    .expect("just checked with `head` right before");
+                hss.unfix_all();
+                return Done(Some(res));
             }
             match self.oracle_with_unit_learner(&assumps, hss)? {
                 SolverResult::Sat => {
@@ -1275,14 +1275,14 @@ where
             hss.change_multipliers(&self.objective_multipliers);
             // insert best found solution for the current objective only into the temporary archive
             self.candidates = Archive::default();
-            if self.opts.upper_bounds {
-                if let Some(best) = candidates.iter().min_by_key(|elem| elem.costs()[obj_idx]) {
-                    self.candidates.insert(
-                        best.sol().clone(),
-                        best.costs().to_vec(),
-                        &self.objective_multipliers,
-                    );
-                }
+            if self.opts.upper_bounds
+                && let Some(best) = candidates.iter().min_by_key(|elem| elem.costs()[obj_idx])
+            {
+                self.candidates.insert(
+                    best.sol().clone(),
+                    best.costs().to_vec(),
+                    &self.objective_multipliers,
+                );
             }
 
             let joint_objective = {
