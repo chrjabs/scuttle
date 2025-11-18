@@ -598,6 +598,35 @@ fn main() {
         .collect_tests(),
     );
 
+    let vars = [
+        ("cb", CoreBoostingOptions::default()),
+        (
+            "cb-rebase",
+            CoreBoostingOptions {
+                rebase: true,
+                ..CoreBoostingOptions::default()
+            },
+        ),
+    ];
+
+    for (id, opts) in vars {
+        tests.extend(
+            TestSetup::new(
+                "leximax-sat-unsat",
+                id,
+                run_cb_test::<
+                    scuttle_core::LeximaxIst<
+                        rustsat_cadical::CaDiCaL<'static, 'static>,
+                        scuttle_core::algs::leximax::SatUnsat,
+                    >,
+                >,
+                opts.clone(),
+            )
+            .leximax(true)
+            .collect_tests(),
+        );
+    }
+
     libtest_mimic::run(&args, tests).exit();
 }
 

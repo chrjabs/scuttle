@@ -202,7 +202,7 @@ where
                         s.n_vars = enc.n_vars();
                         s.n_clauses = enc.n_clauses()
                     }
-                    ObjEncoding::Constant => (),
+                    ObjEncoding::Constant(_) => (),
                 };
                 s
             })
@@ -232,7 +232,7 @@ where
                 kernel.opts.reserve_enc_vars,
                 &mut kernel.var_manager,
             ),
-            Objective::Constant { .. } => ObjEncoding::Constant,
+            Objective::Constant { .. } => ObjEncoding::Constant(0),
         };
         let dec_enc = match &kernel.objs[1] {
             Objective::Weighted { lits, .. } => ObjEncoding::<PBE, CE>::new_weighted(
@@ -245,7 +245,7 @@ where
                 kernel.opts.reserve_enc_vars,
                 &mut kernel.var_manager,
             ),
-            Objective::Constant { .. } => ObjEncoding::Constant,
+            Objective::Constant { .. } => ObjEncoding::Constant(0),
         };
         Self {
             kernel,

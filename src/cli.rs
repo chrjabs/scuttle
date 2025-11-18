@@ -220,7 +220,7 @@ enum AlgorithmCommand {
         file: FileArgs,
     },
     /// SAT-based Leximax optimization - Cabral et al. SAT'22 (Sat-Unsat variant)
-    #[command(alias = "lm-su")]
+    #[command(alias = "lm-su", alias = "leximax-su")]
     LeximaxSatUnsat {
         #[command(flatten)]
         cb: CoreBoostingArgs,

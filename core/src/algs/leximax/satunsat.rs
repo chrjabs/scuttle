@@ -19,8 +19,12 @@ use tracing::{Level, info, instrument, span, trace};
 use crate::{
     EncodingStats, LeximaxIst,
     MaybeTerminatedError::{self, Done},
-    algs::{CoreBoost, Kernel, ObjEncoding, Objective, coreboosting::MergeOllRef},
-    options::CoreBoostingOptions,
+    algs::{
+        CoreBoost, Kernel, ObjEncoding, Objective,
+        coreboosting::{CbResult, MergeOllRef},
+    },
+    options::{AfterCbOptions, CoreBoostingOptions},
+    termination::ensure,
     types::ParetoFront,
 };
 
@@ -61,7 +65,7 @@ where
                         s.n_vars = enc.n_vars();
                         s.n_clauses = enc.n_clauses()
                     }
-                    ObjEncoding::Constant => (),
+                    ObjEncoding::Constant(_) => (),
                 };
                 s
             })
@@ -84,7 +88,7 @@ where
                     kernel.opts.reserve_enc_vars,
                     &mut kernel.var_manager,
                 ),
-                Objective::Constant { .. } => ObjEncoding::Constant,
+                Objective::Constant { .. } => ObjEncoding::Constant(0),
             })
             .collect();
         Self { obj_encs }
@@ -308,6 +312,68 @@ where
 {
     #[instrument(name = "core-boost", skip(self), fields(opts = %opts))]
     fn core_boost(&mut self, opts: CoreBoostingOptions) -> MaybeTerminatedError<bool> {
-        todo!()
+        ensure!(
+            self.kernel.stats.n_solve_calls == 0,
+            "cannot perform core boosting after solve has been called"
+        );
+        let Some(cb_res) = self.kernel.core_boost()? else {
+            return Done(false);
+        };
+        self.kernel.check_termination()?;
+        let reset_dbs = match &opts.after {
+            AfterCbOptions::Nothing => false,
+            AfterCbOptions::Reset => {
+                self.kernel.reset_oracle(true)?;
+                self.kernel.check_termination()?;
+                true
+            }
+            #[cfg(feature = "maxpre")]
+            AfterCbOptions::Inpro(techs) => {
+                self.obj_encs = self.kernel.inprocess(techs, cb_res)?;
+                self.kernel.check_termination()?;
+                return Done(true);
+            }
+        };
+        let span = span!(Level::DEBUG, "merge-encodings");
+        let _enter = span.enter();
+        for (
+            oidx,
+            CbResult {
+                reform,
+                mut tot_db,
+                solution,
+            },
+        ) in cb_res.into_iter().enumerate()
+        {
+            if reset_dbs {
+                debug_assert!(self.kernel.proof_stuff.is_none());
+                tot_db.reset_vars();
+            }
+            if !matches!(self.kernel.objs[oidx], Objective::Constant { .. }) {
+                self.opt.obj_encs[oidx] = <(PBE, CE)>::merge(reform, tot_db, opts.rebase);
+            }
+
+            if let Some(solution) = solution {
+                let costs = self.kernel.compute_costs(&solution);
+                self.starting_point = Some(
+                    if let Some((start_costs, start)) = self.starting_point.take() {
+                        let mut start_sorted = start_costs.clone();
+                        start_sorted.sort_unstable_by_key(|v| Reverse(*v));
+                        let mut costs_sorted = costs.clone();
+                        costs_sorted.sort_unstable_by_key(|v| Reverse(*v));
+                        if costs_sorted < start_sorted {
+                            (costs, solution)
+                        } else {
+                            (start_costs, start)
+                        }
+                    } else {
+                        (costs, solution)
+                    },
+                );
+            }
+
+            self.kernel.check_termination()?;
+        }
+        Done(true)
     }
 }

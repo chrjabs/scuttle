@@ -85,7 +85,7 @@ impl MergeOllRef for (GeneralizedTotalizer, Totalizer) {
     ) -> ObjEncoding<Self::PBE, Self::CE> {
         if matches!(reform.inactives, Inactives::Constant) {
             // core boosting derived constant objective
-            return ObjEncoding::Constant;
+            return ObjEncoding::Constant(reform.offset);
         }
         let mut cons = vec![];
         let mut max_leaf_weight = 0;

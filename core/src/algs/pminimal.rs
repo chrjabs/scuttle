@@ -209,7 +209,7 @@ where
                         s.n_vars = enc.n_vars();
                         s.n_clauses = enc.n_clauses()
                     }
-                    ObjEncoding::Constant => (),
+                    ObjEncoding::Constant(_) => (),
                 };
                 s
             })
@@ -240,7 +240,7 @@ where
                     kernel.opts.reserve_enc_vars,
                     &mut kernel.var_manager,
                 ),
-                Objective::Constant { .. } => ObjEncoding::Constant,
+                Objective::Constant { .. } => ObjEncoding::Constant(0),
             })
             .collect();
         Self {
@@ -646,7 +646,7 @@ where
                 continue;
             }
             let enc = &mut obj_encs[idx];
-            if matches!(enc, ObjEncoding::Constant) {
+            if matches!(enc, ObjEncoding::Constant(_)) {
                 continue;
             }
             // Encode and add to solver

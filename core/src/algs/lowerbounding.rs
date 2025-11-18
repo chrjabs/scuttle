@@ -26,7 +26,7 @@ use rustsat::{
     types::{Assignment, Clause, Lit, Var},
 };
 use scuttle_proc::KernelFunctions;
-use tracing::{debug, instrument, span, Level};
+use tracing::{Level, debug, instrument, span};
 
 use crate::{
     EncodingStats, ExtendedSolveStats, KernelOptions, Limits,
@@ -210,7 +210,7 @@ where
                         s.n_vars = enc.n_vars();
                         s.n_clauses = enc.n_clauses()
                     }
-                    ObjEncoding::Constant => (),
+                    ObjEncoding::Constant(_) => (),
                 };
                 s
             })
@@ -242,7 +242,7 @@ where
                     kernel.opts.reserve_enc_vars,
                     &mut kernel.var_manager,
                 ),
-                Objective::Constant { .. } => ObjEncoding::Constant,
+                Objective::Constant { .. } => ObjEncoding::Constant(0),
             })
             .collect();
         Ok(Self {

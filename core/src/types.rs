@@ -3,7 +3,7 @@
 //! Shared types for the $P$-minimal solver.
 
 use std::{
-    cmp,
+    cmp::{self, Reverse},
     ops::{Index, Range},
 };
 
@@ -61,8 +61,7 @@ where
     pub fn leximax_optimum(&self) -> Option<&NonDomPoint<S>> {
         self.ndoms.iter().min_by_key(|nd| {
             let mut costs = nd.costs().to_vec();
-            costs.sort_unstable();
-            costs.reverse();
+            costs.sort_unstable_by_key(|v| Reverse(*v));
             costs
         })
     }
@@ -493,7 +492,7 @@ impl Iterator for ObjIter<'_> {
 pub(crate) enum ObjEncoding<PBE, CE> {
     Weighted(PBE, usize),
     Unweighted(CE, usize),
-    Constant,
+    Constant(usize),
 }
 
 impl<PBE, CE> ObjEncoding<PBE, CE>
@@ -538,7 +537,7 @@ impl<PBE, CE> ObjEncoding<PBE, CE> {
         match self {
             ObjEncoding::Weighted(_, offset) => *offset,
             ObjEncoding::Unweighted(_, offset) => *offset,
-            ObjEncoding::Constant => 0,
+            ObjEncoding::Constant(offset) => *offset,
         }
     }
 }
@@ -553,7 +552,7 @@ where
         match self {
             ObjEncoding::Weighted(enc, offset) => enc.next_higher(val - offset) + offset,
             ObjEncoding::Unweighted(..) => val + 1,
-            ObjEncoding::Constant => val,
+            ObjEncoding::Constant(_) => val,
         }
     }
 
@@ -578,7 +577,7 @@ where
                 collector,
                 var_manager,
             ),
-            ObjEncoding::Constant => Ok(()),
+            ObjEncoding::Constant(_) => Ok(()),
         }
     }
 
@@ -599,7 +598,7 @@ where
                     Err(rustsat::encodings::EnforceError::Unsat)
                 }
             }
-            ObjEncoding::Constant => Ok(vec![]),
+            ObjEncoding::Constant(_) => Ok(vec![]),
         }
     }
 
@@ -657,7 +656,7 @@ where
                     proof,
                 )?;
             }
-            ObjEncoding::Constant => (),
+            ObjEncoding::Constant(_) => (),
         }
         Ok(())
     }
@@ -672,7 +671,7 @@ impl ObjEncoding<pb::GeneralizedTotalizer, card::Totalizer> {
             ObjEncoding::Unweighted(enc, offset) => {
                 enc.output_proof_details(value - *offset).unwrap()
             }
-            ObjEncoding::Constant => {
+            ObjEncoding::Constant(_) => {
                 panic!("cannot get output proof details for constant objective")
             }
         }
@@ -685,14 +684,14 @@ impl ObjEncoding<pb::GeneralizedTotalizer, card::Totalizer> {
         match self {
             ObjEncoding::Weighted(enc, _) => enc.strictly_extend_assignment(assign),
             ObjEncoding::Unweighted(enc, _) => enc.strictly_extend_assignment(assign),
-            ObjEncoding::Constant => None.into_iter().flatten(),
+            ObjEncoding::Constant(_) => None.into_iter().flatten(),
         }
     }
 
     pub fn is_buffer_empty(&self) -> bool {
         match self {
             ObjEncoding::Weighted(enc, _) => enc.is_buffer_empty(),
-            ObjEncoding::Unweighted(_, _) | ObjEncoding::Constant => true,
+            ObjEncoding::Unweighted(_, _) | ObjEncoding::Constant(_) => true,
         }
     }
 
@@ -700,7 +699,7 @@ impl ObjEncoding<pb::GeneralizedTotalizer, card::Totalizer> {
         match self {
             ObjEncoding::Weighted(enc, _) => enc.n_output_lits(),
             ObjEncoding::Unweighted(enc, _) => enc.n_output_lits(),
-            ObjEncoding::Constant => 0,
+            ObjEncoding::Constant(_) => 0,
         }
     }
 }
