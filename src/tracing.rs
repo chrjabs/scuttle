@@ -224,14 +224,16 @@ fn config(alg: &Algorithm, styles: &Styles) {
         }
         Algorithm::PMinimal(_, _)
         | Algorithm::LowerBounding(_, _)
-        | Algorithm::LeximaxSatUnsat(_, _) => (),
+        | Algorithm::LeximaxSatUnsat(_, _)
+        | Algorithm::LeximaxMsu3(_, _) => (),
     }
 
     if let Algorithm::PMinimal(opts, _)
     | Algorithm::BiOptSat(opts, _, _, _)
     | Algorithm::LowerBounding(opts, _)
     | Algorithm::ParetoIhs(_, opts, _, _)
-    | Algorithm::LeximaxSatUnsat(opts, _) = alg
+    | Algorithm::LeximaxSatUnsat(opts, _)
+    | Algorithm::LeximaxMsu3(opts, _) = alg
     {
         kernel_opts(opts, styles);
     }
@@ -239,7 +241,8 @@ fn config(alg: &Algorithm, styles: &Styles) {
     if let Algorithm::PMinimal(_, cb)
     | Algorithm::BiOptSat(_, _, _, cb)
     | Algorithm::LowerBounding(_, cb)
-    | Algorithm::LeximaxSatUnsat(_, cb) = alg
+    | Algorithm::LeximaxSatUnsat(_, cb)
+    | Algorithm::LeximaxMsu3(_, cb) = alg
     {
         core_boosting(cb, styles);
     }

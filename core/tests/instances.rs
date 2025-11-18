@@ -597,6 +597,21 @@ fn main() {
         .leximax(true)
         .collect_tests(),
     );
+    tests.extend(
+        TestSetup::new(
+            "leximax-msu3",
+            "",
+            run_test::<
+                scuttle_core::LeximaxIst<
+                    rustsat_cadical::CaDiCaL<'static, 'static>,
+                    scuttle_core::algs::leximax::Msu3,
+                >,
+            >,
+            KernelOptions::default(),
+        )
+        .leximax(true)
+        .collect_tests(),
+    );
 
     let vars = [
         ("cb", CoreBoostingOptions::default()),
@@ -618,6 +633,21 @@ fn main() {
                     scuttle_core::LeximaxIst<
                         rustsat_cadical::CaDiCaL<'static, 'static>,
                         scuttle_core::algs::leximax::SatUnsat,
+                    >,
+                >,
+                opts.clone(),
+            )
+            .leximax(true)
+            .collect_tests(),
+        );
+        tests.extend(
+            TestSetup::new(
+                "leximax-msu3",
+                id,
+                run_cb_test::<
+                    scuttle_core::LeximaxIst<
+                        rustsat_cadical::CaDiCaL<'static, 'static>,
+                        scuttle_core::algs::leximax::Msu3,
                     >,
                 >,
                 opts.clone(),

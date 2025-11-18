@@ -216,6 +216,7 @@ impl From<&Objective> for OllReformulation {
     }
 }
 
+#[derive(Debug)]
 struct CoreData {
     idx: usize,
     len: usize,

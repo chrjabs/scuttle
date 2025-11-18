@@ -10,7 +10,7 @@ use rustsat_cadical::CaDiCaL;
 use scuttle_core::{
     self, BiOptSat, CoreBoost, Init, InitCertDefaultBlock, InitDefaultBlock, KernelFunctions,
     LeximaxIst, LowerBounding, MaybeTerminatedError, PMinimal, ParetoIhs, Solve,
-    algs::leximax::SatUnsat,
+    algs::leximax::{Msu3, SatUnsat},
     prepro,
     types::{Instance, Reindexer},
 };
@@ -42,6 +42,8 @@ type Lb<OInit = CaDiCaLDefaultInit> = LowerBounding<
 type Ihs<Hss, OInit = CaDiCaLDefaultInit> = ParetoIhs<Oracle, Hss, OInit>;
 type LmSu<OInit = CaDiCaLDefaultInit> =
     LeximaxIst<Oracle, SatUnsat<pb::GeneralizedTotalizer, card::Totalizer>, OInit>;
+type LmMsu3<OInit = CaDiCaLDefaultInit> =
+    LeximaxIst<Oracle, Msu3<pb::GeneralizedTotalizer, card::Totalizer>, OInit>;
 
 macro_rules! run {
     // with proof
@@ -269,6 +271,9 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
         },
         Algorithm::LeximaxSatUnsat(opts, ref cb_opts) => {
             dispatch_options!(no-proof: LmSu, inst, prepro, reindexer, opts, cb_opts, cli)
+        }
+        Algorithm::LeximaxMsu3(opts, ref cb_opts) => {
+            dispatch_options!(no-proof: LmMsu3, inst, prepro, reindexer, opts, cb_opts, cli)
         }
     }
     Ok(())

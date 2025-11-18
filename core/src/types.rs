@@ -550,7 +550,13 @@ where
     /// Gets the next higher objective value
     pub fn next_higher(&self, val: usize) -> usize {
         match self {
-            ObjEncoding::Weighted(enc, offset) => enc.next_higher(val - offset) + offset,
+            ObjEncoding::Weighted(enc, offset) => {
+                if val < *offset {
+                    *offset
+                } else {
+                    enc.next_higher(val - offset) + offset
+                }
+            }
             ObjEncoding::Unweighted(..) => val + 1,
             ObjEncoding::Constant(_) => val,
         }
@@ -700,6 +706,39 @@ impl ObjEncoding<pb::GeneralizedTotalizer, card::Totalizer> {
             ObjEncoding::Weighted(enc, _) => enc.n_output_lits(),
             ObjEncoding::Unweighted(enc, _) => enc.n_output_lits(),
             ObjEncoding::Constant(_) => 0,
+        }
+    }
+
+    pub fn db_ref(&self) -> &totdb::Db {
+        match self {
+            ObjEncoding::Weighted(enc, _) => enc.db_ref(),
+            ObjEncoding::Unweighted(enc, _) => enc.db_ref(),
+            ObjEncoding::Constant(_) => panic!("can't get a db reference on constant encoding"),
+        }
+    }
+
+    pub fn db_mut(&mut self) -> &mut totdb::Db {
+        match self {
+            ObjEncoding::Weighted(enc, _) => enc.db_mut(),
+            ObjEncoding::Unweighted(enc, _) => enc.db_mut(),
+            ObjEncoding::Constant(_) => panic!("can't get a db reference on constant encoding"),
+        }
+    }
+}
+
+impl<PBE, CE> Extend<(Lit, usize)> for ObjEncoding<PBE, CE>
+where
+    PBE: Extend<(Lit, usize)>,
+    CE: Extend<Lit>,
+{
+    fn extend<T: IntoIterator<Item = (Lit, usize)>>(&mut self, iter: T) {
+        match self {
+            ObjEncoding::Weighted(enc, _) => enc.extend(iter),
+            ObjEncoding::Unweighted(enc, _) => enc.extend(iter.into_iter().map(|(l, w)| {
+                debug_assert_eq!(w, 1);
+                l
+            })),
+            ObjEncoding::Constant(_) => panic!("can't extend a constant encoding"),
         }
     }
 }

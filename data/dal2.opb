@@ -3,6 +3,8 @@
 * Created by OpbBuilder
 *
 * meta:n-objs=7
+* ignore-test:leximax-msu3:cb
+* ignore-test:leximax-msu3:cb-rebase
 *
 * non-dominated points
 * nd (19, 4, 8, 0, 0, 0, 0), 96

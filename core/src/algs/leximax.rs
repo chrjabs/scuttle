@@ -28,6 +28,9 @@ use super::{Kernel, Objective};
 mod satunsat;
 pub use satunsat::SatUnsat;
 
+mod msu3;
+pub use msu3::Msu3;
+
 /// The leximaxIST algorithm type
 ///
 /// # Generics
