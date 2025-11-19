@@ -271,7 +271,7 @@ impl ConstraintMapper {
 
     pub fn add_clause_checked(&mut self, id: AbsConstraintId, clause_id: ClauseId) {
         self.map.push(id);
-        assert_eq!(u64::try_from(self.map.len()).unwrap(), clause_id.0);
+        assert_eq!(i64::try_from(self.map.len()).unwrap(), clause_id.0);
     }
 
     pub fn map(&self, id: ClauseId) -> AbsConstraintId {
