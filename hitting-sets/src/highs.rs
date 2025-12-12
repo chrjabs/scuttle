@@ -551,7 +551,7 @@ impl Solver {
         if solved.status() == HighsModelStatus::ObjectiveTarget {
             debug_assert!(!optimal);
             let solution = solved.get_solution();
-            let cost = solved.get_objective_value();
+            let cost = solved.objective_value();
             let mut model = Model::from(solved);
             model.set_option("objective_target", -f64::INFINITY);
             self.state = State::Main(model);
@@ -561,7 +561,7 @@ impl Solver {
         }
         assert_eq!(solved.status(), HighsModelStatus::Optimal);
         let solution = solved.get_solution();
-        let cost = solved.get_objective_value();
+        let cost = solved.objective_value();
         let mut model = Model::from(solved);
         if !optimal {
             model.set_option("objective_target", -f64::INFINITY);

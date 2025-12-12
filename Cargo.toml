@@ -21,7 +21,7 @@ cpu-time = "1.0.0"
 fastrand = "2.3.0"
 git-version = "0.3.9"
 grb = "3.0.1"
-highs = "1.9.0"
+highs = "2.0.0"
 hitting-sets = { path = "./hitting-sets" }
 itertools = "0.14.0"
 libtest-mimic = "0.8.1"
@@ -87,8 +87,7 @@ debug = 1
 
 [patch.crates-io]
 grb = { git = "https://github.com/chrjabs/rust-grb.git", branch = "scuttle" }
-highs = { git = "https://github.com/chrjabs/highs.git", branch = "integer-vars" }
-highs-sys = { git = "https://github.com/chrjabs/highs-sys.git", branch = "bindgen-0.71" }
+highs = { git = "https://github.com/chrjabs/highs.git", branch = "scuttle" }
 rustsat = { git = "https://github.com/chrjabs/rustsat.git", branch = "scuttle" }
 rustsat-cadical = { git = "https://github.com/chrjabs/rustsat.git", branch = "scuttle" }
 pigeons = { git = "https://github.com/chrjabs/rustsat.git", branch = "scuttle" }

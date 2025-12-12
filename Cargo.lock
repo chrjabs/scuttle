@@ -527,8 +527,8 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "highs"
-version = "1.9.0"
-source = "git+https://github.com/chrjabs/highs.git?branch=integer-vars#5c8b79e142f34b404deb10dc2ce601b8680abb93"
+version = "2.0.0"
+source = "git+https://github.com/chrjabs/highs.git?branch=scuttle#4b0f44a7802c01490e971e578880201f5dbb9d98"
 dependencies = [
  "highs-sys",
  "log",
@@ -536,8 +536,9 @@ dependencies = [
 
 [[package]]
 name = "highs-sys"
-version = "1.10.0-latest"
-source = "git+https://github.com/chrjabs/highs-sys.git?branch=bindgen-0.71#ea1b166dc074754aea85d3af0be8246d20051f9a"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c51d1e4e682c01dd882d2d0cd89b6725cd5805dd307d290aac0a37be6fe0c58"
 dependencies = [
  "bindgen 0.71.1",
  "cmake",
