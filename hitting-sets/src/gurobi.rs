@@ -397,7 +397,7 @@ impl HittingSetSolver for Solver {
     where
         I: IntoIterator<Item = Lit>,
     {
-        for lit in to_fix.into_iter() {
+        for lit in to_fix {
             let var = self.map[lit.var()];
             let unit = self
                 .units

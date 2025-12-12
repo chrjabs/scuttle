@@ -427,8 +427,9 @@ where
                 let ReducedCostsResult::ReducedCosts { obj_val, rcs } =
                     hss.reduced_costs_callback(self)?
                 else {
+                    let res = self.candidates.pop().expect("checked in outer if");
                     hss.unfix_all();
-                    return Done(None);
+                    return Done(Some(res));
                 };
 
                 span.exit();
