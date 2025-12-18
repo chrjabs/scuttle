@@ -712,6 +712,7 @@ mod setup {
         path::Path,
     };
 
+    use facet_diff::{FacetDiff, format_diff_default};
     use libtest_mimic::{Failed, Trial};
     use pigeons::Proof;
     use scuttle_core::types::{Instance, ParetoFront};
@@ -946,13 +947,22 @@ mod setup {
         Skip,
     }
 
+    #[derive(facet::Facet, PartialEq)]
+    struct SimpleParetoFront(Vec<ParetoPoint>);
+
+    #[derive(facet::Facet, PartialOrd, PartialEq, Ord, Eq)]
+    struct ParetoPoint {
+        costs: Vec<isize>,
+        num_solutions: usize,
+    }
+
     fn check_pf_shape(path: &Path, pf: ParetoFront, sol_enum: bool) -> Result<(), Failed> {
         let prefix = match path.extension() {
             Some(ext) if ext == OsStr::new("mcnf") => 'c',
             Some(ext) if ext == OsStr::new("opb") => '*',
             _ => panic!("unknown file extension"),
         };
-        let mut truth = rustsat::types::RsHashSet::<(Vec<isize>, usize)>::default();
+        let mut truth = SimpleParetoFront(vec![]);
 
         for line in BufReader::new(File::open(path).expect("failed to open instance file")).lines()
         {
@@ -975,27 +985,33 @@ mod setup {
             } else {
                 1
             };
-            truth.insert((costs, count));
+            truth.0.push(ParetoPoint {
+                costs,
+                num_solutions: count,
+            });
         }
-        let pf: rustsat::types::RsHashSet<(Vec<isize>, usize)> = pf
-            .into_iter()
-            .map(|pp| (pp.costs().to_vec(), if sol_enum { pp.n_sols() } else { 1 }))
-            .collect();
-        if pf.len() != truth.len() {
-            println!("claimed: {pf:?}");
-            println!("truth: {truth:?}");
+        truth.0.sort_unstable();
+        let mut pf = SimpleParetoFront(
+            pf.into_iter()
+                .map(|pp| ParetoPoint {
+                    costs: pp.costs().to_vec(),
+                    num_solutions: if sol_enum { pp.n_sols() } else { 1 },
+                })
+                .collect(),
+        );
+        pf.0.sort_unstable();
+        if pf.0.len() != truth.0.len() {
+            println!("{}", format_diff_default(&truth.diff(&pf)));
             return Err(format!(
                 "pareto front length mismatch: was {}, should be {}",
-                pf.len(),
-                truth.len()
+                pf.0.len(),
+                truth.0.len()
             )
             .into());
         }
         if pf != truth {
-            return Err(format!(
-                "pareto front shape mismatch:\n  was       {pf:?},\n  should be {truth:?}",
-            )
-            .into());
+            println!("{}", format_diff_default(&truth.diff(&pf)));
+            return Err("pareto front shape mismatch".into());
         }
         Ok(())
     }

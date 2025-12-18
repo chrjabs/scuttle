@@ -23,6 +23,8 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+facet.workspace = true
+facet-diff.workspace = true
 libtest-mimic.workspace = true
 tempfile.workspace = true
 
