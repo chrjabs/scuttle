@@ -247,6 +247,7 @@ where
             ..Default::default()
         };
         let mut oracle = OInit::init();
+        info!(target: "solver initialization", signature = oracle.signature());
         oracle.reserve(var_manager.max_var().unwrap())?;
         let orig_cnf = if opts.store_cnf {
             let cnf: Cnf = clauses.into_iter().collect();
@@ -708,13 +709,12 @@ where
             self.check_termination()?;
 
             // Block last solution
-            match self.opts.enumeration {
-                EnumOptions::Solutions(_) => {
-                    self.oracle.add_clause((self.block_clause_gen)(solution))?
-                }
-                EnumOptions::PMCSs(_) => self.oracle.add_clause(self.block_pareto_mcs(solution))?,
-                EnumOptions::NoEnum => panic!("Should never reach this"),
-            }
+            let blocking_clause = match self.opts.enumeration {
+                EnumOptions::Solutions(_) => (self.block_clause_gen)(solution),
+                EnumOptions::PMCSs(_) => self.block_pareto_mcs(solution),
+                EnumOptions::NoEnum => unreachable!(),
+            };
+            self.oracle.add_clause(blocking_clause)?;
 
             // Find next solution
             let res = self.solve_assumps(assumps)?;
@@ -970,6 +970,7 @@ where
             "cannot reset oracle without having stored the CNF"
         );
         self.oracle = OInit::init();
+        info!(target: "solver initialization", signature = self.oracle.signature());
         if include_var_manager {
             self.oracle.reserve(self.var_manager.max_enc_var())?;
         } else {

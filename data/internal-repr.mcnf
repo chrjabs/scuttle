@@ -1,0 +1,32 @@
+c Illustration of internal instance representation for CakePB
+c
+c meta:n-objs=2
+c
+c non-dominated points:
+c nd (0, 12), 2
+c nd (1, 11), 2
+c nd (2, 9), 2
+c nd (3, 8), 1
+c nd (5, 6), 2
+c nd (6, 5), 1
+c nd (7, 4), 2
+c nd (8, 3), 1
+c nd (10, 1), 2
+c nd (11, 0), 1
+c
+h 1 6 0
+o1 1 -1 0
+o1 2 -2 0
+o1 3 -3 -2 0
+h 2 7 0
+o1 4 -4 0
+o1 5 -5 0
+o1 20 -11 -1 -2 0
+o2 1 -6 0
+o2 2 -7 0
+h 3 8 0
+o2 3 -8 0
+o2 4 -9 -7 0
+h 4 9 0
+o2 5 -10 0
+h 5 10 0

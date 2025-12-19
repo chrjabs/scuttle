@@ -10,6 +10,7 @@ use std::{
 #[cfg(feature = "interrupt-oracle")]
 use std::sync::Mutex;
 
+use anyhow::ensure;
 use cadical_veripb_tracer::{CadicalCertCollector, CadicalTracer};
 use pigeons::{
     AbsConstraintId, Axiom, ConstraintId, ConstraintLike, Derivation, OperationLike,
@@ -23,9 +24,11 @@ use rustsat::{
     types::{Assignment, Clause, Lit, RsHashMap, TernaryVal, Var},
 };
 use rustsat_cadical::CaDiCaL;
+use tracing::info;
 
 use crate::{
     KernelOptions, Limits, Stats,
+    options::EnumOptions,
     types::{Instance, ObjEncoding, Objective, VarManager},
 };
 
@@ -867,6 +870,11 @@ where
     {
         use rustsat::{encodings::cert::CollectClauses, solvers::Solve};
 
+        ensure!(
+            opts.enumeration == EnumOptions::NoEnum,
+            "proofs for solution of PMCS enumeration are currently not implemented"
+        );
+
         let mut stats = Stats {
             n_objs: 0,
             n_real_objs: 0,
@@ -874,6 +882,7 @@ where
             ..Default::default()
         };
         let mut oracle = OInit::init();
+        info!(target: "solver initialization", signature = oracle.signature());
         let pt_handle = oracle.connect_proof_tracer(CadicalTracer::new(proof), true);
         oracle.reserve(var_manager.max_var().unwrap())?;
         let clauses: Vec<_> = clauses.into_iter().collect();
