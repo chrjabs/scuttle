@@ -27,6 +27,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "annotate-snippets"
+version = "0.12.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c86cd1c51b95d71dde52bca69ed225008f6ff4c8cc825b08042aa1ef823e1980"
+dependencies = [
+ "anstyle",
+ "memchr",
+ "unicode-width",
+]
+
+[[package]]
 name = "anstream"
 version = "0.6.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -78,9 +89,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.101"
+version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
+checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "approx"
@@ -621,9 +632,9 @@ dependencies = [
 
 [[package]]
 name = "git2"
-version = "0.20.3"
+version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2b37e2f62729cdada11f0e6b3b6fe383c69c29fc619e391223e12856af308c"
+checksum = "7b88256088d75a56f8ecfa070513a775dd9107f6530ef14919dac831af9cfe2b"
 dependencies = [
  "bitflags",
  "libc",
@@ -1242,8 +1253,7 @@ dependencies = [
 [[package]]
 name = "pigeons"
 version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68e3eeeecf5e7cca09d32f6ea26a23c5f07ef6ea397828921c3b22637e126e9a"
+source = "git+https://github.com/chrjabs/rustsat.git?branch=main#58a2a1d4dcb0b25611fe535a1729630a770ce7b6"
 dependencies = [
  "itertools 0.14.0",
  "rustc-hash",
@@ -1370,26 +1380,25 @@ dependencies = [
 [[package]]
 name = "rustsat"
 version = "0.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20ca3e44fb555707f07747514c1575a656c5913627f44e988e728f2e40b32977"
+source = "git+https://github.com/chrjabs/rustsat.git?branch=main#58a2a1d4dcb0b25611fe535a1729630a770ce7b6"
 dependencies = [
+ "annotate-snippets",
  "anyhow",
  "cpu-time",
  "itertools 0.14.0",
- "nom",
  "pigeons",
  "rustc-hash",
  "tempfile",
  "thiserror",
  "visibility",
  "web-time",
+ "winnow",
 ]
 
 [[package]]
 name = "rustsat-cadical"
 version = "0.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36c1940036a11c1ff492fdbdad940ba100220f50a0ecabea1f2de08c18aa3a90"
+source = "git+https://github.com/chrjabs/rustsat.git?branch=main#58a2a1d4dcb0b25611fe535a1729630a770ce7b6"
 dependencies = [
  "anyhow",
  "bindgen 0.72.1",
@@ -1973,6 +1982,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "winnow"
+version = "0.7.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

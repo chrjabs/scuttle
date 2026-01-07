@@ -582,18 +582,7 @@ fn merge_totalizers(
             }
         }
     }
-    if cons.is_empty() {
-        match reform.inactives {
-            Inactives::Weighted(_) => {
-                ObjEncoding::Weighted(GeneralizedTotalizer::default(), reform.offset)
-            }
-            Inactives::Unweighted { .. } => {
-                ObjEncoding::Unweighted(Totalizer::default(), reform.offset)
-            }
-            Inactives::Constant => unreachable!(),
-        }
-    } else {
-        let root = tot_db.merge_thorough(&mut cons);
+    if let Some(root) = tot_db.merge_thorough(&mut cons) {
         match reform.inactives {
             Inactives::Weighted(_) => ObjEncoding::Weighted(
                 GeneralizedTotalizer::from_raw(root, tot_db, max_leaf_weight),
@@ -603,6 +592,16 @@ fn merge_totalizers(
                 Totalizer::from_raw(root.id, root.offset(), tot_db),
                 reform.offset,
             ),
+            Inactives::Constant => unreachable!(),
+        }
+    } else {
+        match reform.inactives {
+            Inactives::Weighted(_) => {
+                ObjEncoding::Weighted(GeneralizedTotalizer::default(), reform.offset)
+            }
+            Inactives::Unweighted { .. } => {
+                ObjEncoding::Unweighted(Totalizer::default(), reform.offset)
+            }
             Inactives::Constant => unreachable!(),
         }
     }

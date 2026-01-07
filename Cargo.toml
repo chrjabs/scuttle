@@ -35,7 +35,7 @@ rustsat = { version = "0.7.5", features = [
   "proof-logging",
   "_internals",
 ] }
-rustsat-cadical = { version = "0.7.5", features = ["v2-1-3", "pigeons"] }
+rustsat-cadical = { version = "0.7.5", features = ["v2-1", "pigeons"] }
 signal-hook = "0.4.3"
 scuttle-core = { version = "0.5.0", path = "./core" }
 scuttle-proc = { version = "0.5.0", path = "./proc" }
@@ -90,3 +90,6 @@ debug = 1
 [patch.crates-io]
 grb = { git = "https://github.com/chrjabs/rust-grb.git", branch = "scuttle" }
 highs = { git = "https://github.com/chrjabs/highs.git", branch = "scuttle" }
+rustsat = { git = "https://github.com/chrjabs/rustsat.git", branch = "main" }
+rustsat-cadical = { git = "https://github.com/chrjabs/rustsat.git", branch = "main" }
+pigeons = { git = "https://github.com/chrjabs/rustsat.git", branch = "main" }
