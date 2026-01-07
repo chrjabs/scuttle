@@ -10,7 +10,7 @@ use rustsat::{
     solvers::SolverStats,
     types::{Assignment, Lit, TernaryVal},
 };
-use tracing::{debug, info, instrument, span, Level};
+use tracing::{Level, debug, info, instrument, span};
 
 use crate::{
     EncodingStats, Limits, MaybeTerminated,
@@ -95,7 +95,11 @@ where
         inst: Instance,
         opts: MipPdOptions,
     ) -> anyhow::Result<Self> {
-        let Instance { clauses, objs, .. } = inst;
+        let Instance {
+            clauses,
+            objectives: objs,
+            ..
+        } = inst;
         let mut builder = Hss::Builder::new(objs.iter().map(|obj| obj.iter()));
         builder.threads(opts.threads);
         let mut hitting_set_solver = builder.init();

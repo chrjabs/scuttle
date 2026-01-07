@@ -56,7 +56,7 @@ pub trait InitCert: super::Init {
     ) -> anyhow::Result<Self> {
         Self::new_cert(
             inst.clauses.into_iter().map(|(cl, id)| (cl, id.unwrap())),
-            inst.objs,
+            inst.objectives,
             inst.vm,
             opts,
             proof,
@@ -96,7 +96,7 @@ pub trait InitCertDefaultBlock: InitCert<BlockClauseGen = fn(Assignment) -> Clau
     ) -> anyhow::Result<Self> {
         Self::new_cert(
             inst.clauses.into_iter().map(|(cl, id)| (cl, id.unwrap())),
-            inst.objs,
+            inst.objectives,
             inst.vm,
             opts,
             proof,
@@ -1036,6 +1036,7 @@ mod tests {
                 idx: 0,
                 lower_bound: 0,
                 reform_id: None,
+                negated: false,
             },
             Objective::Weighted {
                 offset: 42,
@@ -1045,6 +1046,7 @@ mod tests {
                 idx: 1,
                 lower_bound: 0,
                 reform_id: None,
+                negated: false,
             },
             Objective::Constant {
                 offset: 11,
@@ -1096,6 +1098,7 @@ end"#;
                 idx: 0,
                 lower_bound: 0,
                 reform_id: None,
+                negated: false,
             },
             Objective::Weighted {
                 offset: 42,
@@ -1105,6 +1108,7 @@ end"#;
                 idx: 1,
                 lower_bound: 0,
                 reform_id: None,
+                negated: false,
             },
             Objective::Constant {
                 offset: 11,

@@ -1165,7 +1165,7 @@ mod setup {
     where
         F: Fn(Instance, O) -> Result<ParetoFront, Failed>,
     {
-        let (_, inst) = scuttle_core::prepro::to_clausal(
+        let (_, inst) = scuttle_core::prepro::normalize(
             scuttle_core::prepro::parse(
                 path,
                 scuttle_core::prepro::FileFormat::Infer,
@@ -1219,7 +1219,7 @@ mod setup {
     {
         let proof_path = new_temp_path();
         let input_path = new_temp_path();
-        let (proof, inst) = scuttle_core::prepro::to_clausal(
+        let (proof, inst) = scuttle_core::prepro::normalize(
             scuttle_core::prepro::parse(
                 path,
                 scuttle_core::prepro::FileFormat::Infer,

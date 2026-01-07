@@ -1,0 +1,16 @@
+* A Small OPB example with maximization objectives
+* 
+* meta:n-objs=2
+*
+* non-dominated points:
+* nd (0, 4), 1
+* nd (2, 2), 1
+* nd (4, 0), 1
+* 
++1 x1 +1 x2 >= 1;
++1 x2 +1 x3 >= 1;
++1 x3 +1 x4 >= 1;
+* min: +2 x2 +2 x4;
+max: -2 x2 -2 x4;
+* min: +2 x1 +2 x3;
+max: -2 x1 -2 x3;

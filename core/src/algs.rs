@@ -73,7 +73,7 @@ pub trait Init: Sized {
     ) -> anyhow::Result<Self> {
         Self::new(
             inst.clauses.into_iter().map(|(cl, _)| cl),
-            inst.objs,
+            inst.objectives,
             inst.vm,
             opts,
             block_clause_gen,
@@ -103,7 +103,7 @@ pub trait InitDefaultBlock: Init<BlockClauseGen = fn(Assignment) -> Clause> {
     ) -> anyhow::Result<Self> {
         Self::new(
             inst.clauses.into_iter().map(|(cl, _)| cl),
-            inst.objs,
+            inst.objectives,
             inst.vm,
             opts,
             default_blocking_clause,
@@ -351,19 +351,30 @@ where
             .iter()
             .enumerate()
             .map(|(idx, &cst)| match self.objs[idx] {
-                Objective::Weighted { offset, .. } => {
+                Objective::Weighted {
+                    offset, negated, ..
+                } => {
                     let signed_cst: isize = cst.try_into().expect("cost exceeds `isize`");
-                    signed_cst + offset
+                    if negated {
+                        -(signed_cst + offset)
+                    } else {
+                        signed_cst + offset
+                    }
                 }
                 Objective::Unweighted {
                     offset,
                     unit_weight,
+                    negated,
                     ..
                 } => {
                     let signed_mult_cost: isize = (cst * unit_weight)
                         .try_into()
                         .expect("multiplied cost exceeds `isize`");
-                    signed_mult_cost + offset
+                    if negated {
+                        -(signed_mult_cost + offset)
+                    } else {
+                        signed_mult_cost + offset
+                    }
                 }
                 Objective::Constant { offset, .. } => {
                     debug_assert_eq!(cst, 0);

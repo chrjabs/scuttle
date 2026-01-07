@@ -315,6 +315,7 @@ pub enum Objective {
         idx: usize,
         lower_bound: usize,
         reform_id: Option<pigeons::AbsConstraintId>,
+        negated: bool,
     },
     Unweighted {
         offset: isize,
@@ -323,6 +324,7 @@ pub enum Objective {
         idx: usize,
         lower_bound: usize,
         reform_id: Option<pigeons::AbsConstraintId>,
+        negated: bool,
     },
     Constant {
         offset: isize,
@@ -334,7 +336,7 @@ pub enum Objective {
 
 impl Objective {
     /// Initializes the objective from a soft lit iterator and an offset
-    pub fn new<Iter: WLitIter>(lits: Iter, offset: isize, idx: usize) -> Self {
+    pub fn new<Iter: WLitIter>(lits: Iter, offset: isize, idx: usize, negated: bool) -> Self {
         let lits: Vec<_> = lits.into_iter().collect();
         if lits.is_empty() {
             return Objective::Constant {
@@ -360,6 +362,7 @@ impl Objective {
                 idx,
                 lower_bound: 0,
                 reform_id: None,
+                negated,
             }
         } else {
             Objective::Unweighted {
@@ -369,6 +372,7 @@ impl Objective {
                 idx,
                 lower_bound: 0,
                 reform_id: None,
+                negated,
             }
         }
     }
@@ -379,6 +383,14 @@ impl Objective {
             Objective::Weighted { offset, .. } => *offset,
             Objective::Unweighted { offset, .. } => *offset,
             Objective::Constant { offset, .. } => *offset,
+        }
+    }
+
+    /// Gets whether the objective is negated to turn a maximization objective into minimization
+    pub fn negated(&self) -> bool {
+        match self {
+            Objective::Weighted { negated, .. } | Objective::Unweighted { negated, .. } => *negated,
+            Objective::Constant { .. } => false,
         }
     }
 
@@ -930,15 +942,36 @@ impl ManageVars for Reindexer {
 
 #[derive(Debug, Clone)]
 pub struct Parsed {
-    pub(crate) constraints: Vec<PbConstraint>,
-    pub(crate) objs: Vec<rustsat::instances::Objective>,
+    pub(crate) content: FileContent,
     pub(crate) vm: VarManager,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum FileContent {
+    Mcnf {
+        clauses: Vec<HardSoftClause>,
+        n_objectives: usize,
+    },
+    Mopb {
+        constraints: Vec<PbConstraint>,
+        objectives: Vec<(RsHashMap<Lit, usize>, isize, bool)>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum HardSoftClause {
+    Hard(Clause),
+    Soft {
+        obj_idx: usize,
+        weight: usize,
+        clause: Clause,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub struct Instance {
     pub(crate) clauses: Vec<(Clause, Option<pigeons::AbsConstraintId>)>,
-    pub(crate) objs: Vec<Objective>,
+    pub(crate) objectives: Vec<Objective>,
     pub(crate) vm: VarManager,
 }
 
@@ -948,7 +981,7 @@ impl Instance {
     }
 
     pub fn n_objs(&self) -> usize {
-        self.objs.len()
+        self.objectives.len()
     }
 
     pub fn iter_clauses(&self) -> impl Iterator<Item = &Clause> {

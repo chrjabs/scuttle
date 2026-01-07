@@ -160,11 +160,11 @@ fn sub_main(cli: &Cli) -> anyhow::Result<()> {
             prepro::max_pre(parsed, &cli.maxpre_techniques, cli.maxpre_reindexing)?;
         (Some(prepro), None, inst)
     } else {
-        let (proof, inst) = prepro::to_clausal(parsed, &cli.proof_paths)?;
+        let (proof, inst) = prepro::normalize(parsed, &cli.proof_paths)?;
         (None, proof, inst)
     };
     #[cfg(not(feature = "maxpre"))]
-    let (prepro, (proof, inst)) = ((), prepro::to_clausal(parsed, &cli.proof_paths)?);
+    let (prepro, (proof, inst)) = ((), prepro::normalize(parsed, &cli.proof_paths)?);
 
     // Reindexing
     let (inst, reindexer) = if cli.reindexing {
