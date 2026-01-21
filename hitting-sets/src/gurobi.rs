@@ -860,7 +860,7 @@ mod model {
                     panic!("unexpected type of constraint");
                 };
                 let rhs = *rhs;
-                let rhs =
+                let (rhs, big_m) =
                     match sense {
                         grb::ConstrSense::Equal => panic!("equality constraints not supported"),
                         grb::ConstrSense::Greater => {
@@ -868,22 +868,28 @@ mod model {
                                 if coeff < 0. { min + coeff } else { min }
                             });
                             let big_m = rhs - min_lhs;
-                            if ind_val {
-                                rhs - big_m + (big_m * ind)
-                            } else {
-                                rhs - (big_m * ind)
-                            }
+                            (
+                                if ind_val {
+                                    rhs - big_m + (big_m * ind)
+                                } else {
+                                    rhs - (big_m * ind)
+                                },
+                                big_m,
+                            )
                         }
                         grb::ConstrSense::Less => {
                             let max_lhs = lhs.iter_terms().fold(0., |max, (_, &coeff)| {
                                 if coeff > 0. { max + coeff } else { max }
                             });
                             let big_m = max_lhs - rhs;
-                            if ind_val {
-                                rhs + big_m - (big_m * ind)
-                            } else {
-                                rhs + (big_m * ind)
-                            }
+                            (
+                                if ind_val {
+                                    rhs + big_m - (big_m * ind)
+                                } else {
+                                    rhs + (big_m * ind)
+                                },
+                                big_m,
+                            )
                         }
                     };
                 let con = IneqExpr {
@@ -892,7 +898,7 @@ mod model {
                             .iter_terms()
                             .map(|(&var, &coeff)| (coeff, Var::from_raw(var.id(), relax.id())))
                             .collect();
-                        new_expr + lhs.get_offset()
+                        new_expr + big_m * Var::from_raw(ind.id(), relax.id()) + lhs.get_offset()
                     },
                     sense: *sense,
                     rhs,
