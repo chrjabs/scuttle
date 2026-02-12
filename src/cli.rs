@@ -38,7 +38,7 @@ const STYLES: styling::Styles = styling::Styles::styled()
 #[command(author, version, about, long_about = None, styles = STYLES)]
 struct CliArgs {
     #[command(subcommand)]
-    command: AlgorithmCommand,
+    algorithm: AlgorithmCommand,
     /// The random seed to use for random operations
     #[arg(long, default_value_t = KernelOptions::default().random_seed, global = true)]
     random_seed: u64,
@@ -56,8 +56,8 @@ struct CliArgs {
     oll_core_minimization: CoreMinimization,
     /// Whether to perform core exhaustion in OLL
     #[arg(long, default_value_t = Bool::from(KernelOptions::default().core_exhaustion), global = true)]
-    core_exhaustion: Bool,
-    /// Stratification in core-based algorithms
+    oll_core_exhaustion: Bool,
+    /// Stratification in OLL
     ///
     /// Possible values:
     /// - `none`
@@ -68,35 +68,34 @@ struct CliArgs {
     ///     - `multi-level`
     ///     - `dist`
     #[arg(long, alias = "strat", default_value_t = KernelOptions::default().stratification, global = true)]
-    stratification: Stratification,
+    oll_stratification: Stratification,
     /// The CaDiCaL profile to use
     #[arg(long, default_value_t = CadicalConfig::Default, global = true)]
     cadical_config: CadicalConfig,
-    #[command(flatten)]
-    enumeration: EnumArgs,
     #[command(flatten)]
     prepro: PreproArgs,
     #[command(flatten)]
     limits: LimitArgs,
     #[command(flatten)]
     log: LogArgs,
-    /// Whether to perform core boosting before running the algorithm
-    #[arg(long, default_value_t = Bool::True, global = true, help_heading = "Core-boosting options")]
-    core_boosting: Bool,
 }
 
 impl CliArgs {
-    fn kernel_opts(&self) -> KernelOptions {
+    fn kernel_opts(&self, enumeration: Option<EnumArgs>) -> KernelOptions {
         KernelOptions {
             random_seed: self.random_seed,
-            enumeration: match self.enumeration.enumeration {
-                EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
-                EnumOptionsArg::Solutions => {
-                    EnumOptions::Solutions(none_if_zero!(self.enumeration.enumeration_limit))
+            enumeration: if let Some(enumeration) = enumeration {
+                match enumeration.enumeration {
+                    EnumOptionsArg::NoEnum => EnumOptions::NoEnum,
+                    EnumOptionsArg::Solutions => {
+                        EnumOptions::Solutions(none_if_zero!(enumeration.enumeration_limit))
+                    }
+                    EnumOptionsArg::ParetoMCS => {
+                        EnumOptions::PMCSs(none_if_zero!(enumeration.enumeration_limit))
+                    }
                 }
-                EnumOptionsArg::ParetoMCS => {
-                    EnumOptions::PMCSs(none_if_zero!(self.enumeration.enumeration_limit))
-                }
+            } else {
+                EnumOptions::NoEnum
             },
             reserve_enc_vars: self.reserve_encoding_vars.into(),
             heuristic_improvements: HeurImprOptions {
@@ -104,9 +103,9 @@ impl CliArgs {
             },
             solution_guided_search: self.solution_guided_search.into(),
             core_minimization: self.oll_core_minimization,
-            core_exhaustion: self.core_exhaustion.into(),
+            core_exhaustion: self.oll_core_exhaustion.into(),
             store_cnf: false,
-            stratification: self.stratification,
+            stratification: self.oll_stratification,
         }
     }
 }
@@ -122,8 +121,10 @@ enum AlgorithmCommand {
         file: FileArgs,
         #[command(flatten)]
         proof: ProofArgs,
+        #[command(flatten)]
+        enumeration: EnumArgs,
     },
-    /// BiOptSat Linear Sat-Unsat - Jabs et al. SAT'22
+    /// BiOptSat Linear Sat-Unsat - Jabs et al. JAIR'24
     #[command(alias = "bos")]
     Bioptsat {
         #[command(flatten)]
@@ -134,9 +135,11 @@ enum AlgorithmCommand {
         file: FileArgs,
         #[command(flatten)]
         proof: ProofArgs,
+        #[command(flatten)]
+        enumeration: EnumArgs,
     },
     /// Lower-bounding search - Cortes et al. TACAS'23
-    #[command(alias = "lb")]
+    #[command(alias = "lb", alias = "lower-bound")]
     LowerBounding {
         #[command(flatten)]
         cb: CoreBoostingArgs,
@@ -144,8 +147,10 @@ enum AlgorithmCommand {
         file: FileArgs,
         #[command(flatten)]
         proof: ProofArgs,
+        #[command(flatten)]
+        enumeration: EnumArgs,
     },
-    /// Paretop-k IHS
+    /// Pareto-IHS - Jabs et al. CPAIOR'26
     #[command(alias = "ihs")]
     ParetoIhs {
         /// The hitting set solver to use
@@ -169,9 +174,9 @@ enum AlgorithmCommand {
         /// Use upper bound solutions as starting point for the hitting set solver
         #[arg(long, default_value_t = Bool::from(IhsOptions::default().starting_points), global = true)]
         use_starting_points: Bool,
-        /// Use randomized objective multipliers for evaluating robustness
-        #[arg(long, default_value_t = ObjectiveMultipliers::default(), global = true)]
-        multipliers: ObjectiveMultipliers,
+        /// Select how the scalarization constants for the linear objective combination are chosen
+        #[arg(long, alias = "multipliers", default_value_t = ObjectiveMultipliers::default(), global = true)]
+        scalarization_constants: ObjectiveMultipliers,
         /// Precompute a given number of lexicographic optima, which is possible without adding PD
         /// cuts
         ///
@@ -195,21 +200,21 @@ enum AlgorithmCommand {
         #[command(flatten)]
         file: FileArgs,
     },
-    /// MIP with PD cuts
+    /// MIP over objective linearization with PD cuts - Sylva and Crema EOR'04
     #[command(alias = "mip")]
     MipPd {
         /// The random seed to use for random operations
         #[arg(long, default_value_t = MipPdOptions::default().random_seed, global = true)]
         random_seed: u64,
-        /// The hitting set solver to use
-        #[arg(long, default_value_t = HittingSetSolver::default())]
+        /// The underlying ILP solver to use
+        #[arg(long, alias = "hitting-set-solver", alias = "hss", default_value_t = HittingSetSolver::default())]
         mip_solver: HittingSetSolver,
         /// The number of threads for the hitting set solver
         #[arg(long, default_value_t = hitting_sets::Threads::default())]
         threads: hitting_sets::Threads,
-        /// Use randomized objective multipliers for evaluating robustness
-        #[arg(long, default_value_t = ObjectiveMultipliers::default(), global = true)]
-        multipliers: ObjectiveMultipliers,
+        /// Select how the scalarization constants for the linear objective combination are chosen
+        #[arg(long, alias = "multipliers", default_value_t = ObjectiveMultipliers::default(), global = true)]
+        scalarization_constants: ObjectiveMultipliers,
         /// Precompute a given number of lexicographic optima, which is possible without adding PD
         /// cuts
         ///
@@ -229,7 +234,7 @@ enum AlgorithmCommand {
         #[command(flatten)]
         proof: ProofArgs,
     },
-    /// MSU3-style Leximax optimization - Cabral et al. SAT'22 (Sat-Unsat variant)
+    /// MSU3-style Leximax optimization - Cabral et al. SAT'22 (MSU3-style variant)
     #[command(alias = "lm-msu3")]
     LeximaxMsu3 {
         #[command(flatten)]
@@ -239,6 +244,20 @@ enum AlgorithmCommand {
         #[command(flatten)]
         proof: ProofArgs,
     },
+}
+
+impl AlgorithmCommand {
+    fn enumeration(&self) -> Option<EnumArgs> {
+        match self {
+            AlgorithmCommand::PMinimal { enumeration, .. }
+            | AlgorithmCommand::Bioptsat { enumeration, .. }
+            | AlgorithmCommand::LowerBounding { enumeration, .. } => Some(*enumeration),
+            AlgorithmCommand::ParetoIhs { .. }
+            | AlgorithmCommand::MipPd { .. }
+            | AlgorithmCommand::LeximaxSatUnsat { .. }
+            | AlgorithmCommand::LeximaxMsu3 { .. } => None,
+        }
+    }
 }
 
 #[derive(Args, Copy, Clone)]
@@ -254,6 +273,9 @@ struct ObjEncArgs {
 #[derive(Args, Copy, Clone)]
 #[command(next_help_heading = "Core-boosting options")]
 struct CoreBoostingArgs {
+    /// Whether to perform core boosting before running the algorithm
+    #[arg(long, default_value_t = Bool::True, global = true, help_heading = "Core-boosting options")]
+    core_boosting: Bool,
     /// If true, don't merge OLL totalizers into GTE but ignore the totalizer structure.
     #[arg(long, default_value_t = CoreBoostingOptions::default().rebase.into(), global = true)]
     rebase_encodings: Bool,
@@ -263,11 +285,11 @@ struct CoreBoostingArgs {
     /// Whether to perform inprocessing, i.e., preprocessing after core boosting
     #[arg(long, default_value_t = matches!(CoreBoostingOptions::default().after, AfterCbOptions::Inpro(_)).into())]
     #[cfg(feature = "maxpre")]
-    inprocessing: Bool,
+    maxpre_inprocessing: Bool,
     /// [Disabled at compile time] Whether to perform inprocessing, i.e., preprocessing after core boosting
     #[arg(long, default_value_t = Disabled::False, global = true)]
     #[cfg(not(feature = "maxpre"))]
-    inprocessing: Disabled,
+    maxpre_inprocessing: Disabled,
 }
 
 impl CoreBoostingArgs {
@@ -278,12 +300,12 @@ impl CoreBoostingArgs {
             AfterCbOptions::Nothing
         };
         #[cfg(feature = "maxpre")]
-        let after = if self.inprocessing.into() {
+        let after = if self.maxpre_inprocessing.into() {
             AfterCbOptions::Inpro(prepro_techs)
         } else {
             after
         };
-        let store_cnf = self.inprocessing.into() || self.reset_after_cb.into();
+        let store_cnf = self.maxpre_inprocessing.into() || self.reset_after_cb.into();
         (
             CoreBoostingOptions {
                 rebase: self.rebase_encodings.into(),
@@ -296,6 +318,9 @@ impl CoreBoostingArgs {
 
 #[derive(Args, Copy, Clone)]
 struct IhsCoreBoostingArgs {
+    /// Whether to perform core boosting before running the algorithm
+    #[arg(long, default_value_t = Bool::False, global = true, help_heading = "Core-boosting options")]
+    core_boosting: Bool,
     /// How core boosting should be treated in the IHS algorithm
     #[arg(long, default_value_t = IhsCbTreatment::default(), help_heading = "Core-boosting options")]
     ihs_cb_treatment: IhsCbTreatment,
@@ -338,7 +363,7 @@ impl fmt::Display for HittingSetSolver {
 #[command(next_help_heading = "Enumeration options")]
 struct EnumArgs {
     /// The type of enumeration to perform at each non-dominated point
-    #[arg(long, default_value_t = EnumOptionsArg::NoEnum, global = true)]
+    #[arg(long, alias = "enumerate", alias = "enum", default_value_t = EnumOptionsArg::NoEnum, global = true)]
     enumeration: EnumOptionsArg,
     /// The limit for enumeration at each non-dominated point (0 for no limit)
     #[arg(long, default_value_t = 0, global = true)]
@@ -354,11 +379,11 @@ struct PreproArgs {
     /// Preprocess the instance with MaxPre before solving
     #[arg(long, default_value_t = Bool::from(false), global = true)]
     #[cfg(feature = "maxpre")]
-    preprocessing: Bool,
+    maxpre_preprocessing: Bool,
     /// [Disabled at compile time] Preprocess the instance with MaxPre before solving
     #[arg(long, default_value_t = Disabled::False, global = true)]
     #[cfg(not(feature = "maxpre"))]
-    preprocessing: Disabled,
+    maxpre_preprocessing: Disabled,
     /// The preprocessing technique string to use
     #[arg(long, default_value_t = String::from("[[uvsrgc]VRTG]"), global = true)]
     maxpre_techniques: String,
@@ -373,25 +398,30 @@ struct PreproArgs {
 }
 
 #[derive(Args, Copy, Clone)]
-#[command(next_help_heading = "Solver limits")]
+#[command(
+    next_help_heading = "Solver limits. Note: setting any of these makes the solver incomplete!"
+)]
 struct LimitArgs {
-    /// Limit the number of non-dominated points to enumerate (0 is no limit)
+    /// Limit the number of non-dominated points to enumerate (0 is no limit), after which the
+    /// solver will terminate
     #[arg(
         long,
         alias = "pareto-point-limit",
         alias = "non-dom-limit",
-        alias = "non-dominated-point-limit",
+        alias = "pp-limit",
         default_value_t = 0,
         global = true
     )]
-    pp_limit: usize,
-    /// Limit the number of solutions to enumerate (0 is no limit)
-    #[arg(long, alias = "solution-limit", default_value_t = 0, global = true)]
-    sol_limit: usize,
-    /// Limit the number of candidates to consider (0 is not limit)
+    non_dominated_point_limit: usize,
+    /// Limit the number of solutions to enumerate (0 is no limit), after which the solver will
+    /// terminate
+    #[arg(long, alias = "sol-limit", default_value_t = 0, global = true)]
+    solution_limit: usize,
+    /// Limit the number of candidates (solutions encountered during search) to consider (0 is not
+    /// limit), after which the solver wil terminate
     #[arg(long, default_value_t = 0, global = true)]
     candidate_limit: usize,
-    /// Limit the number of SAT oracle calls (0 is not limit)
+    /// Limit the number of SAT oracle calls (0 is not limit), after which the solver terminate
     #[arg(long, default_value_t = 0, global = true)]
     oracle_call_limit: usize,
 }
@@ -399,8 +429,8 @@ struct LimitArgs {
 impl From<LimitArgs> for Limits {
     fn from(value: LimitArgs) -> Self {
         Limits {
-            pps: none_if_zero!(value.pp_limit),
-            sols: none_if_zero!(value.sol_limit),
+            pps: none_if_zero!(value.non_dominated_point_limit),
+            sols: none_if_zero!(value.solution_limit),
             candidates: none_if_zero!(value.candidate_limit),
             oracle_calls: none_if_zero!(value.oracle_call_limit),
         }
@@ -411,7 +441,7 @@ impl From<LimitArgs> for Limits {
 #[command(next_help_heading = "Input file")]
 struct FileArgs {
     /// The file format of the input file. With infer, the file format is
-    /// inferred from the file extension.
+    /// inferred from the file extension or the first character in the file
     #[arg(long, value_enum, default_value_t = FileFormat::Infer, global=true)]
     file_format: FileFormat,
     /// The index in the OPB file to treat as the lowest variable
@@ -441,7 +471,7 @@ impl fmt::Display for ColorOpt {
 }
 
 #[derive(Args, Copy, Clone)]
-#[command(next_help_heading = "Printing options")]
+#[command(next_help_heading = "Output options")]
 struct LogArgs {
     /// Print the solver configuration
     #[arg(long, global = true, alias = "config")]
@@ -449,19 +479,18 @@ struct LogArgs {
     /// Print solutions as binary assignments
     #[arg(long, global = true, alias = "solutions", alias = "sols")]
     print_solutions: bool,
-    /// Don't print statistics
+    /// Don't print statistics at the end of solving
     #[arg(
         long,
         global = true,
         alias = "no-stats",
         alias = "no-statistics",
-        alias = "no-print-statistics"
+        alias = "no-print-stats"
     )]
-    no_print_stats: bool,
+    no_print_statistics: bool,
     /// When to enable coloured output
     #[arg(long, global = true, default_value_t = ColorOpt::default())]
     color: ColorOpt,
-    /// Verbosity of the solver output
     #[command(flatten)]
     verbosity: clap_verbosity_flag::Verbosity<clap_verbosity_flag::WarnLevel>,
     /// Whether to print timestamps
@@ -474,7 +503,7 @@ struct LogArgs {
     #[arg(long, global = true)]
     log_solutions: bool,
     /// Log non-dominated points as they are discovered
-    #[arg(long, global = true, alias = "log_non_dom")]
+    #[arg(long, global = true, alias = "log-non-dom")]
     log_non_dominated: bool,
     /// Log SAT oracle calls
     #[arg(long, global = true)]
@@ -506,7 +535,7 @@ impl From<LogArgs> for tracing::WrapUpOptions {
         tracing::WrapUpOptions {
             color: value.color,
             print_solutions: value.print_solutions,
-            print_stats: !value.no_print_stats,
+            print_stats: !value.no_print_statistics,
         }
     }
 }
@@ -723,10 +752,15 @@ impl fmt::Display for Algorithm {
 impl Cli {
     pub fn init() -> Self {
         let args = CliArgs::parse();
-        let mut kernel_opts = args.kernel_opts();
-        match args.command {
-            AlgorithmCommand::PMinimal { cb, file, proof } => {
-                let cb = if args.core_boosting.into() {
+        let mut kernel_opts = args.kernel_opts(args.algorithm.enumeration());
+        match args.algorithm {
+            AlgorithmCommand::PMinimal {
+                cb,
+                file,
+                proof,
+                enumeration: _,
+            } => {
+                let cb = if cb.core_boosting.into() {
                     let (cbo, store) = cb.parse(
                         #[cfg(feature = "maxpre")]
                         args.prepro.maxpre_techniques.clone(),
@@ -748,7 +782,7 @@ impl Cli {
                     },
                     inst_path: file.inst_path.clone(),
                     #[cfg(feature = "maxpre")]
-                    preprocessing: args.prepro.preprocessing.into(),
+                    preprocessing: args.prepro.maxpre_preprocessing.into(),
                     #[cfg(feature = "maxpre")]
                     maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                     reindexing: args.prepro.reindexing.into(),
@@ -766,8 +800,9 @@ impl Cli {
                 file,
                 proof,
                 obj_encs,
+                enumeration: _,
             } => {
-                let cb = if args.core_boosting.into() {
+                let cb = if cb.core_boosting.into() {
                     let (cbo, store) = cb.parse(
                         #[cfg(feature = "maxpre")]
                         args.prepro.maxpre_techniques.clone(),
@@ -789,7 +824,7 @@ impl Cli {
                     },
                     inst_path: file.inst_path.clone(),
                     #[cfg(feature = "maxpre")]
-                    preprocessing: args.prepro.preprocessing.into(),
+                    preprocessing: args.prepro.maxpre_preprocessing.into(),
                     #[cfg(feature = "maxpre")]
                     maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                     reindexing: args.prepro.reindexing.into(),
@@ -807,8 +842,13 @@ impl Cli {
                     wrap_up_opts: args.log.into(),
                 }
             }
-            AlgorithmCommand::LowerBounding { cb, file, proof } => {
-                let cb = if args.core_boosting.into() {
+            AlgorithmCommand::LowerBounding {
+                cb,
+                file,
+                proof,
+                enumeration: _,
+            } => {
+                let cb = if cb.core_boosting.into() {
                     let (cbo, store) = cb.parse(
                         #[cfg(feature = "maxpre")]
                         args.prepro.maxpre_techniques.clone(),
@@ -830,7 +870,7 @@ impl Cli {
                     },
                     inst_path: file.inst_path.clone(),
                     #[cfg(feature = "maxpre")]
-                    preprocessing: args.prepro.preprocessing.into(),
+                    preprocessing: args.prepro.maxpre_preprocessing.into(),
                     #[cfg(feature = "maxpre")]
                     maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                     reindexing: args.prepro.reindexing.into(),
@@ -850,7 +890,7 @@ impl Cli {
                 candidate_seeding,
                 ihs_core_minimization,
                 use_starting_points,
-                multipliers,
+                scalarization_constants,
                 precompute_lexicographic,
                 max_failed_precompute_lex,
                 fully_seeded_precompute_lex: precompute_fully_seeded,
@@ -868,7 +908,7 @@ impl Cli {
                 },
                 inst_path: file.inst_path.clone(),
                 #[cfg(feature = "maxpre")]
-                preprocessing: args.prepro.preprocessing.into(),
+                preprocessing: args.prepro.maxpre_preprocessing.into(),
                 #[cfg(feature = "maxpre")]
                 maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                 reindexing: args.prepro.reindexing.into(),
@@ -885,14 +925,14 @@ impl Cli {
                         hss_threads,
                         core_minimization: ihs_core_minimization,
                         starting_points: use_starting_points.into(),
-                        multipliers,
+                        multipliers: scalarization_constants,
                         precompute_lexicographic,
                         max_failed_precompute_lex,
                         fully_seeded_precompute_lex: precompute_fully_seeded.into(),
                         reduced_cost_fixing: reduced_cost_fixing.into(),
                         upper_bounds: upper_bounds.into(),
                     },
-                    if args.core_boosting.into() {
+                    if cb.core_boosting.into() {
                         Some(cb.into())
                     } else {
                         None
@@ -905,7 +945,7 @@ impl Cli {
             AlgorithmCommand::MipPd {
                 random_seed,
                 mip_solver,
-                multipliers,
+                scalarization_constants,
                 precompute_lexicographic,
                 threads,
                 file,
@@ -918,7 +958,7 @@ impl Cli {
                 },
                 inst_path: file.inst_path.clone(),
                 #[cfg(feature = "maxpre")]
-                preprocessing: args.prepro.preprocessing.into(),
+                preprocessing: args.prepro.maxpre_preprocessing.into(),
                 #[cfg(feature = "maxpre")]
                 maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                 reindexing: args.prepro.reindexing.into(),
@@ -930,7 +970,7 @@ impl Cli {
                     MipPdOptions {
                         random_seed,
                         threads,
-                        multipliers,
+                        multipliers: scalarization_constants,
                         precompute_lexicographic,
                     },
                 ),
@@ -939,7 +979,7 @@ impl Cli {
                 wrap_up_opts: args.log.into(),
             },
             AlgorithmCommand::LeximaxSatUnsat { cb, file, proof } => {
-                let cb = if args.core_boosting.into() {
+                let cb = if cb.core_boosting.into() {
                     let (cbo, store) = cb.parse(
                         #[cfg(feature = "maxpre")]
                         args.prepro.maxpre_techniques.clone(),
@@ -961,7 +1001,7 @@ impl Cli {
                     },
                     inst_path: file.inst_path.clone(),
                     #[cfg(feature = "maxpre")]
-                    preprocessing: args.prepro.preprocessing.into(),
+                    preprocessing: args.prepro.maxpre_preprocessing.into(),
                     #[cfg(feature = "maxpre")]
                     maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                     reindexing: args.prepro.reindexing.into(),
@@ -975,7 +1015,7 @@ impl Cli {
                 }
             }
             AlgorithmCommand::LeximaxMsu3 { cb, file, proof } => {
-                let cb = if args.core_boosting.into() {
+                let cb = if cb.core_boosting.into() {
                     let (cbo, store) = cb.parse(
                         #[cfg(feature = "maxpre")]
                         args.prepro.maxpre_techniques.clone(),
@@ -997,7 +1037,7 @@ impl Cli {
                     },
                     inst_path: file.inst_path.clone(),
                     #[cfg(feature = "maxpre")]
-                    preprocessing: args.prepro.preprocessing.into(),
+                    preprocessing: args.prepro.maxpre_preprocessing.into(),
                     #[cfg(feature = "maxpre")]
                     maxpre_techniques: args.prepro.maxpre_techniques.clone(),
                     reindexing: args.prepro.reindexing.into(),
