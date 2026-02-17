@@ -408,7 +408,7 @@ where
                         proof_id,
                     } in unreform_cores.drain(..)
                     {
-                        let con = tot_db.merge(&core_cons[idx..idx + len]);
+                        let con = tot_db.merge(&mut core_cons[idx..idx + len]).unwrap();
                         debug_assert_eq!(con.offset(), 0);
                         debug_assert_eq!(con.multiplier(), 1);
                         let root = con.id;

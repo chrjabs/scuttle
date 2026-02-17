@@ -6,6 +6,11 @@ Set Optimization". Included are additional details about the empirical results
 (in `appendix.pdf`), numeric evaluation data (in `data/`) , and instructions on
 how to replicate experiments (in this file).
 
+**NOTE**: the experiments in the paper were run with the solver version at the
+`cpaior26` tag.
+From this tag to the `v0.5.0` release, some usability improvements and
+dependency updates were made to the solver.
+
 ## Benchmark Instances
 
 All benchmark instances used in our evaluation can be downloaded at

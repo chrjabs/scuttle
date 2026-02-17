@@ -1,8 +1,3 @@
-# CPAIOR'26 Submission Supplement
-
-This tag contains the code of the Scuttle MO-MaxSAT solver as used in our CPAIOR'26 submission.
-Additional data and information specific to the CPAIOR'26 submission can be found in the `cpaior26/` directory.
-
 # Scuttle - A Multi-Objective MaxSAT Solver in Rust
 
 Scuttle is a multi-objective MaxSAT solver written in Rust and based on the
@@ -20,31 +15,43 @@ For each publication, a tag (specified in brackets) marks the exact revision use
   Optimization" \[6\]. Additional material in `cpaior24/`.
 - TACAS'25 (`tacas25`): "Certifying Pareto-Optimality in Multi-Objective
   Maximum Satisfiability" \[7\]. Additional material in `tacas25/`.
+- JELIA'25 (`jelia25`): "Engineering and Evaluating Multi-objective
+  Pseudo-Boolean Optimizers" \[8\]
+- CPAIOR'26 (`cpaior26`): "Multi-objective Maximum Satisfiability by
+  Single-objective Implicit Hitting Set Optimization" \[9\]. Additional
+  material in `cpaior26/`.
 
 ## Algorithms
 
-| First argument   | Description                                                              |
-| ---------------- | ------------------------------------------------------------------------ |
-| `p-minimal`      | P-Minimal model enumeration as described in \[1\] and \[2\]              |
-| `lower-bounding` | Lower-bounding search as described in \[3\] (called "core-guided" there) |
-| `bioptsat`       | Sat-Unsat variant of the BiOptSat algorithm described in \[4\]           |
+| First argument   | Description                                                                 |
+| ---------------- | --------------------------------------------------------------------------- |
+| `p-minimal`      | P-Minimal model enumeration as described in \[1\] and \[2\]                 |
+| `lower-bounding` | Lower-bounding search as described in \[3\] (called "core-guided" there)    |
+| `bioptsat`       | Sat-Unsat variant of the BiOptSat algorithm described in \[4\]              |
+| `pareto-ihs`     | Multi-objective implicity hitting set optimization described in \[9\]       |
+| `mip-pd`         | MIP-based algorithm optimizing scalarization and introducing PD cuts \[10\] |
 
 ## Building
 
 **Note**: Scuttle requires nightly Rust, which can be installed via `rustup`.
 
-If you simply want a binary of the solver, you can install it from
-[crates.io](https://crates.io) by running `cargo +nightly install --locked scuttle`.
+If you simply want a binary of the solver, you can install it straight from
+[the repository](https://bitbucket.org/coreo-group/scuttle) by running `cargo
++nightly install --locked --git https://bitbucket.org/coreo-group/scuttle`.
 
-To build the project from source, make sure to initialize the git submodules
-with `git submodule update --init --recursive`. You can then build `scuttle` by
-running `cargo +nightly build`.
+To build the project from source, run `cargo +nightly build` in a clone of this
+repository.
+
+By default, only the HiGHS hitting set solver is included. To enable Gurobi add
+either `--features=gurobi12` or `gurobi9`.
 
 By default, MaxPre preprocessing is not included in the build anymore. To
 include preprocessing with MaxPre, add `--features=maxpre`.
 
 ### Features
 
+- `gurobi12`: enables support for Gurobi version 12 as the hitting set solver
+- `gurobi9`: enables support for Gurobi version 9 as the hitting set solver
 - `sol-tightening`: includes heuristic tightening of solutions after they are found in the build
 - `maxpre`: includes preprocessing with MaxPre in the build
 
@@ -75,3 +82,11 @@ _multi_-objective solver in _Rust_.
 - \[7\] Christoph Jabs and Jeremias Berg and Bart Boergarts and Matti
   Järvisalo: _Certifying Pareto-Optimality in
   Multi-Objective Maximum Satisfiability_, TACAS 2025.
+- \[8\] Christoph Jabs and Jeremias Berg and Matti Järvisalo: _Engineering and
+  Evaluating Multi-objective Pseudo-Boolean Optimizers_, JELIA 2025.
+- \[9\] Christoph Jabs and Jeremias Berg and Matti Järvisalo: _Multi-objective
+  Maximum Satisfiability by Single-objective Implicit Hitting Set
+  Optimization_, CPAIOR 2026.
+- \[10\] John Sylva and Alejandro Crema: _A method for finding the set of
+  non-dominated vectors for multiple objective integer linear programs_, EOR
+  2004.

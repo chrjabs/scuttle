@@ -54,7 +54,7 @@ impl MergeOllRef for (GeneralizedTotalizer, Totalizer) {
         offset: usize,
         max_leaf_weight: usize,
     ) -> ObjEncoding<Self::PBE, Self::CE> {
-        let root = tot_db.merge_thorough(&mut cons);
+        let root = tot_db.merge_thorough(&mut cons).unwrap();
         if root.multiplier() == 1 {
             match &tot_db[root.id] {
                 Node::Leaf(_) | Node::Unit(_) => ObjEncoding::Unweighted(
