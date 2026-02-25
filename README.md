@@ -8,6 +8,7 @@ Scuttle is a multi-objective MaxSAT solver written in Rust and based on the
 
 This solver was used in the following publications.
 For each publication, a tag (specified in brackets) marks the exact revision used:
+
 - CP'23 (`cp23`): "Preprocessing in SAT-Based Multi-Objective Combinatorial
   Optimization" \[5\]. Additional material
   [here](https://bitbucket.org/coreo-group/mo-prepro).
