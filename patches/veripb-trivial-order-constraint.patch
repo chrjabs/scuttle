@@ -1,0 +1,13 @@
+diff --git a/src/parser/parser.rs b/src/parser/parser.rs
+index 20ab388968..4bde08416f 100644
+--- a/src/parser/parser.rs
++++ b/src/parser/parser.rs
+@@ -2193,7 +2193,7 @@
+                 Token::Identifier(ref s) if s == "end" => {
+                     return self.order_end_environment(keyword)
+                 }
+-                Token::Integer64(_, _) | Token::Integer128(_, _) | Token::IntegerAny(_, _) => {}
++                Token::Integer64(_, _) | Token::Integer128(_, _) | Token::IntegerAny(_, _) | Token::GreaterEqual | Token::LessEqual => {}
+                 ref token if self.is_literal(token, is_spec)? => {}
+                 token => {
+                     return Err(ParseError::new(

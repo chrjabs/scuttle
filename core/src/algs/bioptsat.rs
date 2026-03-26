@@ -501,16 +501,13 @@ where
                             &(OperationSequence::from(inc_lb_id) + pmin_cut_id),
                         )?
                     };
-                    #[cfg(feature = "verbose-proofs")]
-                    {
-                        proof.equals(
-                            &rustsat::clause![],
-                            Some(pigeons::ConstraintId::from(cut_id)),
-                        )?;
-                    }
+                    proof.equals(
+                        &rustsat::clause![],
+                        Some(pigeons::ConstraintId::from(cut_id)),
+                    )?;
                     proof.update_default_conclusion::<Var>(
                         pigeons::OutputGuarantee::None,
-                        &pigeons::Conclusion::Unsat(Some(ConstraintId::from(cut_id))),
+                        &pigeons::Conclusion::None,
                     );
                 }
                 break;

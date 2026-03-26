@@ -169,19 +169,11 @@ where
             .expect("failed to write proof");
         if let Some(id) = id {
             debug_assert_eq!(status, SolverResult::Unsat);
-            self.proof
-                .as_mut()
-                .expect("expected proof")
-                .update_default_conclusion::<Var>(
-                    OutputGuarantee::None,
-                    &Conclusion::Unsat(Some(ConstraintId::from(id))),
-                );
-            #[cfg(feature = "verbose")]
-            self.proof
-                .as_mut()
-                .expect("expected proof")
+            let proof = self.proof.as_mut().expect("expected proof");
+            proof
                 .equals(&rustsat::clause![], Some(ConstraintId::from(id)))
                 .expect("failed to write proof");
+            proof.update_default_conclusion::<Var>(OutputGuarantee::None, &Conclusion::None);
         }
     }
 

@@ -63,10 +63,16 @@
                     '';
                   };
                 };
+                patch-veripb = _: super: {
+                  veripb = super.veripb.overrideAttrs {
+                    patches = [ ./patches/veripb-trivial-order-constraint.patch ];
+                  };
+                };
               in
               [
                 toolchain-overlay
                 inputs.nur-packages.overlays.default
+                patch-veripb
               ];
           };
 

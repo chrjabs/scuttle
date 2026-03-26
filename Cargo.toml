@@ -90,6 +90,6 @@ debug = 1
 [patch.crates-io]
 grb = { git = "https://github.com/chrjabs/rust-grb.git", branch = "scuttle" }
 highs = { git = "https://github.com/chrjabs/highs.git", branch = "scuttle" }
-rustsat = { git = "https://github.com/chrjabs/rustsat.git", branch = "main" }
-rustsat-cadical = { git = "https://github.com/chrjabs/rustsat.git", branch = "main" }
-pigeons = { git = "https://github.com/chrjabs/rustsat.git", branch = "main" }
+rustsat = { git = "https://github.com/chrjabs/rustsat.git", branch = "veripb3" }
+rustsat-cadical = { git = "https://github.com/chrjabs/rustsat.git", branch = "veripb3" }
+pigeons = { git = "https://github.com/chrjabs/rustsat.git", branch = "veripb3" }
